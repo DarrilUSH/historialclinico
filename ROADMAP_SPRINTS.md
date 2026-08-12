@@ -311,7 +311,7 @@ Componente de carga con dos caminos: **sacar foto** (`capture="environment"`) y 
 
 ### [Opus] - Pipeline de subida a Storage privado con path determinístico
 
-Definir el esquema de paths (`{perfil_id}/{anio}/{uuid}.{ext}`), subir con el cliente server-side, guardar `storage_path` en `documents` y **nunca** una URL. Toda visualización posterior pasa por signed URL de vida corta generada en el servidor y auditada. Diseñar la Server Action y la ruta de ingesta de forma **reutilizable**: en el Sprint 11 el Web Share Target inyecta archivos compartidos desde otras apps por este mismo camino.
+Definir el esquema de paths (`{perfil_id}/{anio}/{uuid}.{ext}`), subir con el cliente server-side, guardar `storage_path` en `documents` y **nunca** una URL. Toda visualización posterior pasa por signed URL de vida corta generada en el servidor y auditada. Diseñar la Server Action y la ruta de ingesta de forma **reutilizable**: en el Sprint 11 el Web Share Target inyecta archivos compartidos desde otras apps por este mismo camino. El borrado de documentos/credenciales elimina también los objetos de Storage por doble vía: borrado explícito en la Server Action + tabla de purga (`storage_purge_queue`, creada en Sprint 1) que drena el job del Sprint 6 — requisito del derecho de supresión de la Ley 25.326.
 
 - **Artefactos:** `app/(app)/documentos/actions.ts` (`subirDocumento`), `lib/storage.ts` extendido, migración de índices en `supabase/migrations/0005_documentos.sql`.
 - **Criterio de aceptación:** el archivo aparece en el bucket con el path esperado; la fila de `documents` tiene `storage_path` y no contiene `http`; un familiar sin `can_view` recibe error al pedir la signed URL y queda registrado el intento.
