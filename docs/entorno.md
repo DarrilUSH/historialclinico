@@ -91,8 +91,9 @@ npx skills list -g
 | Software | Descripción | Requisito para... | Plan de instalación | Bloquea desarrollo |
 |---|---|---|---|---|
 | **gh CLI** | GitHub CLI para operaciones de PR/issues desde línea de comandos | Flujos de CI/CD avanzados (opcional, no es MVP) | Opcional. Si se necesita: `npm install -g gh` o descarga desde https://github.com/cli/cli | No |
-| **Supabase CLI** | CLI para operaciones locales de Supabase (`supabase start`, migraciones) | Desarrollo local con BD viva (actualmente no en uso; cuando se active) | Se instalará como dependencia npm en la tarea de Supabase; revisar `package.json` | No (de momento) |
-| **Docker Desktop** | Contenedor local para `supabase start` | Supabase en modo local (actualmente no en uso) | Instalación manual desde https://docs.docker.com/desktop/setup/install/windows-install/ — usuario ejecuta el instalador descargado. Verificar con `docker --version` después de instalar | No (de momento) |
+| **Docker Desktop** | Contenedor local para `supabase start` | Supabase en modo local (actualmente no en uso) | Instalación manual desde https://docs.docker.com/desktop/setup/install/windows-install/ — usuario ejecuta el instalador descargado. Verificar con `docker --version` después de instalar | Sí, solo para `supabase start` local (ver sección **Supabase** abajo) |
+
+**Supabase CLI:** instalado como dev-dependency el 2026-08-12 (ver sección **Supabase** abajo). Ya no figura como "no instalado".
 
 **Nota sobre Docker:** requerido solo si el proyecto entra en fase de desarrollo intensivo de Supabase con migraciones/rollbacks locales. No impide deploy a producción (Supabase vive en la nube). Ver sección **"Por qué se necesita Docker"** abajo.
 
@@ -110,6 +111,39 @@ Herramientas documentadas en TOOLING.md §8.8 que se instalarán en fases poster
 - **Claude-Mem** — redundante con `MEMORY.md` nativa
 - **Open Design** — riesgo de seguridad en datos médicos + repo joven sin verificación
 - **Figma MCP** — pendiente de investigación; no instalar hasta verificar
+
+## Supabase
+
+**Estado (2026-08-12):** CLI instalado y proyecto inicializado. `supabase start` está bloqueado hasta instalar Docker Desktop (no disponible en esta máquina).
+
+| Ítem | Estado | Detalle |
+|---|---|---|
+| **Supabase CLI** | ✓ Instalado | Como dev-dependency del proyecto (`npm i -D supabase`), versión `2.114.0` (`package.json` → `devDependencies.supabase: "^2.114.0"`) |
+| **`supabase init`** | ✓ Hecho | Generó `supabase/config.toml` (project_id local: `historialclinico`) y `supabase/.gitignore` |
+| **`supabase start`** | ✗ Bloqueado | Requiere Docker Desktop, no instalado en esta máquina. Ver tabla de "NO instalados" arriba |
+| **`supabase link --project-ref nbypcqhojmixlxvkflrp`** | ⏳ Pendiente | Requiere access token personal del Supabase Dashboard (Account → Access Tokens); no ejecutado en esta tarea por no disponer del token |
+| **Variables de entorno** | ✓ Listas | `.env.example` (versionado, sin secretos) y `.env.local` (no versionado, placeholders) creados en la raíz del proyecto |
+
+### Proyecto remoto de referencia
+
+- **Project ID:** `nbypcqhojmixlxvkflrp`
+- **URL:** `https://nbypcqhojmixlxvkflrp.supabase.co`
+- Las claves reales (`anon key`, `service_role key`) se obtienen en Supabase Dashboard → Settings → API y se pegan manualmente en `.env.local` (nunca en `.env.example`).
+
+### Variables de entorno
+
+- **`.env.example`** (raíz del proyecto, SÍ versionado): plantilla con todas las claves necesarias, comentadas en español, sin valores secretos. Incluye `NEXT_PUBLIC_SUPABASE_URL` (con el valor público del proyecto remoto), `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`, `GEMINI_MODEL_ID`, y las claves VAPID (`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`) previstas para el Sprint 6.
+- **`.env.local`** (raíz del proyecto, NO versionado): copia de `.env.example` con placeholders vacíos. El usuario debe completar los valores reales copiándolos del Supabase Dashboard y de Google AI Studio.
+- **`.gitignore`**: la regla `.env*` ignora todos los archivos de entorno; se agregó la excepción `!.env.example` para que la plantilla SÍ quede versionada. Verificar con `git check-ignore .env.local` (debe listar el archivo, confirmando que está ignorado) y `git status --porcelain .env.example` (debe listarlo como `??`, es decir, trackeable).
+
+### Cuando Docker Desktop esté instalado
+
+1. Verificar instalación: `docker --version`
+2. Levantar la BD local: `npx supabase start` (descarga imágenes la primera vez; expone Postgres, Auth, Storage, Realtime, Studio)
+3. Ver estado y credenciales locales: `npx supabase status` — la URL local es `http://127.0.0.1:54321`, y de ahí se copian las keys locales a `.env.local` si se quiere trabajar 100% local en vez de contra el proyecto remoto
+4. Aplicar migraciones y resetear la BD local: `npx supabase db reset`
+5. Vincular con el proyecto remoto (requiere access token del Dashboard): `npx supabase link --project-ref nbypcqhojmixlxvkflrp`
+6. Actualizar este documento moviendo Docker Desktop y `supabase link` de "pendiente" a "hecho"
 
 ## Configuración de charset y localización
 
@@ -208,7 +242,7 @@ En Windows 11, acceder via `%APPDATA%\` o `Set-Location $PROFILE` en PowerShell.
 
 ## Cambios futuros esperados
 
-- **Sprint 0 (actual):** Taste Skill + Context7 (instaladas). Versiones registradas.
+- **Sprint 0 (actual):** Taste Skill + Context7 (instaladas). Versiones registradas. Supabase CLI instalado como dev-dependency, `supabase init` hecho, variables de entorno (`.env.example` / `.env.local`) listas. `supabase start` y `supabase link` quedan pendientes de Docker Desktop y access token respectivamente (ver sección **Supabase**).
 - **Sprint 1:** Primeras pantallas de UI con shadcn/ui. Revisión de charset UTF-8 en BD de desarrollo (Supabase).
-- **Sprint 2:** Supabase CLI (via npm) + eventualmente Docker Desktop (manual del usuario). Actualizar tabla de "No instalados" → "Instalados".
+- **Sprint 2:** Instalación de Docker Desktop (manual del usuario) para habilitar `supabase start` y `supabase link`. Actualizar sección **Supabase** con el resultado.
 - **Sprint 3+:** Impeccable, UI UX Pro Max (decisión comparativa con Taste Skill), Vercel Agent Skills, Emil Kowalski Skills. Agregar nuevo apartado "§Sprint 3 — Herramientas de auditoria y pulido".
