@@ -311,7 +311,7 @@ Componente de carga con dos caminos: **sacar foto** (`capture="environment"`) y 
 
 ### [Opus] - Pipeline de subida a Storage privado con path determinístico
 
-Definir el esquema de paths (`{perfil_id}/{anio}/{uuid}.{ext}`), subir con el cliente server-side, guardar `storage_path` en `documents` y **nunca** una URL. Toda visualización posterior pasa por signed URL de vida corta generada en el servidor y auditada.
+Definir el esquema de paths (`{perfil_id}/{anio}/{uuid}.{ext}`), subir con el cliente server-side, guardar `storage_path` en `documents` y **nunca** una URL. Toda visualización posterior pasa por signed URL de vida corta generada en el servidor y auditada. Diseñar la Server Action y la ruta de ingesta de forma **reutilizable**: en el Sprint 11 el Web Share Target inyecta archivos compartidos desde otras apps por este mismo camino.
 
 - **Artefactos:** `app/(app)/documentos/actions.ts` (`subirDocumento`), `lib/storage.ts` extendido, migración de índices en `supabase/migrations/0005_documentos.sql`.
 - **Criterio de aceptación:** el archivo aparece en el bucket con el path esperado; la fila de `documents` tiene `storage_path` y no contiene `http`; un familiar sin `can_view` recibe error al pedir la signed URL y queda registrado el intento.
@@ -673,6 +673,14 @@ Completar `manifest.webmanifest` (nombre, nombre corto, `start_url`, `display: s
 - **Artefactos:** `app/manifest.ts` o `public/manifest.webmanifest`, `public/icons/*`, `components/pwa/boton-instalar.tsx`, metadatos en `app/layout.tsx`.
 - **Criterio de aceptación:** la skill `pwa-audit` pasa sin errores; en Android real aparece "Instalar aplicación" y, una vez instalada, abre sin barra de navegador con el ícono correcto; los shortcuts abren SOS y Turnos.
 - **Dependencias:** Sprint 10 completo.
+
+### [Sonnet] - Web Share Target: recibir archivos desde el menú Compartir del sistema
+
+Registrar la PWA como destino de compartir a nivel sistema: `share_target` en el manifest (`method: POST`, `enctype: multipart/form-data`, `files` aceptando PDF/JPG/PNG/WebP) con handler que recibe el archivo y lo encola en el flujo de ingesta del Sprint 4. Flujo decidido: compartir desde cualquier app → se abre la pantalla de recepción de MiHistorialMédico → el usuario elige el **perfil de destino** (crítico en app multiperfil) → extracción automática con Gemini → formulario de revisión → **visto bueno del usuario** → guardado. La IA nunca guarda sin confirmación. Limitación documentada: requiere PWA instalada en Android (Chrome/Edge); iOS no soporta share target — la alternativa es subir desde la app.
+
+- **Artefactos:** `manifest` con bloque `share_target`, `app/api/compartir/route.ts` (receptor POST multipart), `app/(app)/compartir/page.tsx` (pantalla de recepción con selector de perfil), `docs/share-target.md`.
+- **Criterio de aceptación:** en un Android real con la PWA instalada, "Compartir" un PDF desde el gestor de archivos muestra "MiHistorialMédico" entre los destinos; elegirla abre la recepción con el archivo adjunto, se selecciona perfil, corre la extracción y el documento queda guardado recién tras confirmar; compartir una foto JPG desde la galería funciona igual; compartir con la app NO instalada no rompe nada (la opción simplemente no aparece).
+- **Dependencias:** manifest e instalabilidad; pipeline de ingesta del Sprint 4.
 
 ### [Opus] - Consolidación del service worker y estrategia offline global
 

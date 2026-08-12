@@ -116,6 +116,7 @@ Debes implementar los siguientes módulos con código de nivel de producción:
    - Upload de PDFs y fotos desde la cámara.
    - API Route en Next.js que envía el archivo a Gemini API y extrae automáticamente metadatos en JSON: *Fecha, Especialidad, Laboratorio/Institución, Médico y Resumen del estudio*.
    - Fallback de edición manual si la imagen es ilegible.
+   - **Web Share Target (requisito clave):** con la PWA instalada, "MiHistorialMédico" aparece en el menú nativo **Compartir** de Android junto a WhatsApp, email, Telegram, etc. Al compartir un PDF o una foto desde cualquier app, se abre la pantalla de recepción: el usuario elige a qué perfil familiar pertenece, la IA extrae los metadatos automáticamente y el usuario da el **visto bueno** antes de guardar (mismo flujo de revisión que la carga manual). Limitación conocida: iOS no soporta share target a nivel sistema; ahí la alternativa es abrir la app y subir desde adentro.
 
 3. **Módulo de Estudios y Tendencias de Laboratorio:**
    - Galería ordenada cronológicamente con filtros por especialidad y lugar.
