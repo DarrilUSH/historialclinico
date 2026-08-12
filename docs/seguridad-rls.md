@@ -1,12 +1,12 @@
 # Seguridad: Row Level Security — MiHistorialMédico
 
 > **Qué es este documento:** el mapa de lo que quedó **implementado en la base**. Traduce la matriz normativa de [`modelo-permisos.md`](./modelo-permisos.md) a nombres concretos de políticas, funciones y triggers, para que una auditoría pueda ir celda por celda hasta el objeto de Postgres que la hace cumplir.
-> **Fuente de verdad:** `supabase/migrations/20260812220000_rls.sql` (políticas) y `supabase/migrations/20260812210000_ajustes_modelo.sql` (columnas y triggers de los que dependen). Si este documento y el SQL se contradicen, gana el SQL y este archivo se corrige.
+> **Fuente de verdad:** `supabase/migrations/20260812220000_rls.sql` (políticas de tabla), `supabase/migrations/20260812230000_storage.sql` (buckets y políticas de Storage) y `supabase/migrations/20260812210000_ajustes_modelo.sql` (columnas y triggers de los que dependen). Si este documento y el SQL se contradicen, gana el SQL y este archivo se corrige.
 > **El contrato sigue siendo [`modelo-permisos.md`](./modelo-permisos.md).** Acá no se decide nada: se muestra dónde quedó cada decisión.
 
 - **Motor verificado:** PostgreSQL 17.6 (Supabase local, contenedor `supabase_db_historialclinico`).
-- **Cobertura:** 13 tablas con RLS habilitada, 49 políticas, 9 funciones auxiliares, 5 funciones de trigger (14 triggers) que cubren lo que RLS no puede expresar.
-- **Estado de la prueba:** `scripts/test-rls.sql` — **54 casos, 54 PASS, 0 FAIL**.
+- **Cobertura:** 13 tablas con RLS habilitada, 49 políticas de tabla, 3 buckets privados con 5 políticas de `storage.objects`, 10 funciones auxiliares, 5 funciones de trigger (14 triggers) que cubren lo que RLS no puede expresar.
+- **Estado de las pruebas:** `scripts/test-rls.sql` — **54 casos, 54 PASS, 0 FAIL**; `scripts/test-storage-rls.sh` — **20 casos, 20 PASS, 0 FAIL**.
 
 ---
 
@@ -287,8 +287,11 @@ export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 # 1. Aplicar las tres migraciones desde cero
 npx supabase db reset
 
-# 2. Correr la suite de aislamiento
+# 2. Correr la suite de aislamiento de las TABLAS (54 casos)
 docker exec -i supabase_db_historialclinico psql -U postgres -d postgres < scripts/test-rls.sql
+
+# 3. Correr la suite de aislamiento de STORAGE (20 casos, por HTTP)
+bash scripts/test-storage-rls.sh
 ```
 
 `scripts/test-rls.sql` es **idempotente y autolimpiante**: borra los restos de una corrida anterior al empezar y borra todo lo que creó al terminar, después de imprimir el resumen. Se puede correr N veces seguidas sin resetear la base.
@@ -359,10 +362,88 @@ $PSQL -c "select tablename, cmd, policyname from pg_policies
 
 ---
 
-## 7. Lo que estas políticas NO protegen
+## 7. Storage: buckets privados y políticas de objetos
+
+Migración: `supabase/migrations/20260812230000_storage.sql`.
+
+**Por qué esta sección no es un apéndice.** La fila de `documents` la filtra RLS, pero el PDF del análisis vive en un bucket. Si Storage quedara más permisivo que las tablas, el modelo entero es decorativo, porque **el archivo *es* el dato de salud**. Por eso no hay una segunda implementación del modelo de permisos: las políticas de `storage.objects` invocan **las mismas funciones auxiliares** de la §2. Una sola definición, invocada desde dos lugares, que no pueden divergir.
+
+### 7.1 Los tres buckets
+
+| Bucket | Público | Límite por archivo | MIME permitidos | Convención de path |
+|---|:--:|---|---|---|
+| `documentos-medicos` | **No** | 25 MiB | `application/pdf`, `image/jpeg`, `image/png`, `image/webp` | `{profile_id}/{anio}/{uuid}.{ext}` |
+| `credenciales-cobertura` | **No** | 5 MiB | `image/jpeg`, `image/png`, `image/webp` | `{profile_id}/{card_id}/{side}.jpg` |
+| `avatares` | **No** | 2 MiB | `image/jpeg`, `image/png`, `image/webp` | `{profile_id}/{uuid}.{ext}` |
+
+Los tres literales son exactamente los que emite `public.encolar_purga_storage()` al encolar en `storage_purge_queue`: si alguno cambiara, hay que actualizar esa función. La prueba lo verifica cruzando la cola contra `storage.buckets`.
+
+Sin PDF en credenciales ni avatares a propósito: la credencial se muestra a pantalla completa para que la lea un lector de códigos, y un PDF no sirve para eso.
+
+### 7.2 El puente: el primer segmento del path es el `profile_id`
+
+```
+  documentos-medicos/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/a1.pdf
+                     └──────────── profile_id ──────────┘
+                                    │
+                                    ▼
+             public.perfil_de_objeto_storage(name) -> uuid | NULL
+                                    │
+                                    ▼
+        puede_ver_perfil() · puede_cargar_en_perfil() · puede_administrar_perfil()
+```
+
+`public.perfil_de_objeto_storage(text)` (IMMUTABLE, `search_path = ''`) toma el primer elemento de `storage.foldername(name)` y lo devuelve como `uuid` **sólo si valida contra la expresión regular de uuid**; si no, devuelve `NULL`.
+
+**Por qué el cast tiene que ser tolerante.** Escribir el cast directo parece equivalente y no lo es: un solo objeto cuyo primer segmento no sea un uuid —subido a mano, migrado, o puesto ahí a propósito— hace que el cast levante `22P02 invalid input syntax for type uuid` y **la consulta entera falle**. Dentro de una política eso no es un rechazo prolijo: es un error 500 que rompe el listado de estudios de todos los usuarios del bucket. Devolver `NULL` es además seguro, porque `puede_ver_perfil(NULL)` es `FALSE`: un objeto suelto en la raíz del bucket, o con otra convención de path, queda inaccesible para todo el mundo. Negación por defecto, igual que en las tablas.
+
+### 7.3 Las cinco políticas de `storage.objects`
+
+| Op. | Política | Buckets | Predicado |
+|---|---|---|---|
+| SELECT | `objetos_select_puede_ver_perfil` | los 3 | `puede_ver_perfil(perfil_de_objeto_storage(name))` |
+| INSERT | `objetos_insert_puede_cargar_en_perfil` | documentos, credenciales | `puede_cargar_en_perfil(...)` |
+| INSERT | `objetos_insert_avatar_administrador` | avatares | `puede_administrar_perfil(...)` |
+| UPDATE | `objetos_update_administrador` | los 3 | `USING` y `WITH CHECK`: `puede_administrar_perfil(...)` |
+| DELETE | `objetos_delete_administrador` | los 3 | `puede_administrar_perfil(...)` |
+
+Todas declaran `to authenticated` **explícitamente**, y eso importa más acá que en el esquema `public`: en Storage, `anon` y `authenticated` tienen `GRANT` de SELECT/INSERT/UPDATE/DELETE sobre `storage.objects` a nivel de tabla, así que **RLS es la única capa de protección** y una política sin cláusula `TO` habilitaría también al visitante sin sesión.
+
+**La asimetría del avatar es deliberada.** Subir un avatar exige `can_manage`, no `can_upload`, porque el avatar no es contenido del historial sino un campo de `profiles` (`avatar_storage_path`), y editar `profiles` es administración (nota ②). Aceptar `can_upload` acá dejaría Storage más laxo que la tabla que lo referencia.
+
+**El `WITH CHECK` del UPDATE** impide mover un archivo al prefijo de otro perfil: es la versión Storage de "mover una fila a un `profile_id` ajeno".
+
+### 7.4 Lo que no se tocó, y una consecuencia para el Sprint 6
+
+- **Sin políticas sobre `storage.buckets`.** Tiene RLS y cero políticas, así que ni `anon` ni `authenticated` enumeran los buckets ni leen sus límites. El servicio de Storage resuelve esa metadata con su propia conexión administrativa, de modo que subir y descargar funciona igual: verificado con usuarios reales.
+- **Los triggers `protect_objects_delete` / `protect_buckets_delete` quedan como vienen.** Rechazan el `DELETE` por SQL directo. Son un anti-footgun, no una frontera de seguridad (se destraban con el GUC `storage.allow_delete_query`), pero tienen una consecuencia práctica: **el job que drene `storage_purge_queue` tiene que borrar por la Storage API**, no con un `DELETE` contra `storage.objects`, porque el borrado por SQL deja el archivo físico huérfano en el backend. `borrarObjeto()` de `lib/storage-admin.ts` ya usa la API por ese motivo.
+
+### 7.5 `lib/storage-admin.ts`
+
+Helper server-side con `SUPABASE_SERVICE_ROLE_KEY`. Exporta `crearSignedUrl(bucket, path, segundos)` y `borrarObjeto(bucket, path)`.
+
+- **Se llama `storage-admin` y no `storage` a propósito:** que el nombre del import grite lo que es. Aborta al cargarse si detecta `window`, para que un import accidental desde un Client Component falle fuerte en vez de filtrar la clave al bundle.
+- **No autoriza nada.** Usa `service_role`, que tiene `BYPASSRLS`: firma cualquier path que se le pase. El orden correcto es (1) leer la fila con el cliente **del usuario**, que sí pasa por RLS —si la fila aparece, el permiso está verificado—, (2) recién entonces pedir la signed URL, (3) auditar con `descargar_archivo`.
+- **TTL acotado a 300 s** (default 60). No es un número arbitrario: es la única ventana real de exposición después de una revocación, porque una signed URL ya emitida sigue sirviendo el archivo sin volver a consultar la base ([§8.1 del contrato](./modelo-permisos.md#81-revocación)).
+
+### 7.6 Evidencia
+
+Verificado contra el stack local con `curl` y JWT de usuario firmados con el secreto local:
+
+| Comprobación | Resultado |
+|---|---|
+| `GET` anónimo a la URL pública del objeto | `HTTP 400` — `NoSuchBucket` (el bucket privado ni siquiera se revela) |
+| `GET` con la anon key al endpoint autenticado | `HTTP 400` — `NoSuchKey` (RLS filtra: indistinguible de inexistente) |
+| Signed URL de 60 s | `HTTP 200`, contenido byte-a-byte idéntico al subido |
+| La misma signed URL con `expiresIn: 1`, pasados ~4 s | `HTTP 400` — `InvalidJWT`, `"exp" claim timestamp check failed` |
+| `scripts/test-storage-rls.sh` (20 casos con usuarios reales) | **20 PASS / 0 FAIL** |
+
+---
+
+## 8. Lo que estas políticas NO protegen
 
 RLS filtra filas de Postgres. Tres cosas quedan afuera **por construcción** y necesitan su propia capa:
 
-1. **Los archivos.** La fila de `documents` la filtra RLS; el **contenido** vive en el bucket privado y lo protege `storage.objects`. La política de Storage tiene que **replicar esta misma matriz**, no una versión relajada, derivando el perfil del primer segmento del path (`{profile_id}/...`) y llamando a `puede_ver_perfil` / `puede_cargar_en_perfil` / `puede_administrar_perfil`. **Si Storage queda más laxo que la base, el modelo entero es decorativo: el archivo *es* el dato de salud.** Es la tarea siguiente del Sprint 1.
+1. ~~**Los archivos.**~~ **Ya cubierto:** ver [§7, Storage](#7-storage-buckets-privados-y-políticas-de-objetos). Los tres buckets son privados y `storage.objects` invoca las mismas funciones auxiliares que las tablas.
 2. **La ventana post-revocación.** Borrar la fila de `family_permissions` corta el acceso **de inmediato** para toda consulta nueva, pero las signed URLs ya emitidas siguen sirviendo el archivo hasta que expiren, y el cache del service worker sigue en el dispositivo. De ahí el TTL corto (60–300 s) y la purga de cache al perder el permiso ([§8.1](./modelo-permisos.md#81-revocación)).
 3. **`service_role`.** Tiene `BYPASSRLS`: para él estas políticas no existen. Toda la protección es que la `SERVICE_ROLE_KEY` no salga del servidor. Se audita en el Sprint 11.
