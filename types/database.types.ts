@@ -1,8 +1,3 @@
-/**
- * Tipos TypeScript generados automáticamente desde el esquema Supabase.
- * No editar a mano — regenerar con: npm run types:gen
- */
-
 export type Json =
   | string
   | number
