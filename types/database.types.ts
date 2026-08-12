@@ -1,8 +1,7 @@
-// Tipos generados automáticamente desde la base local:
-//   npx supabase gen types typescript --local > types/database.types.ts
-// Este archivo es un stub inicial para no bloquear los clientes de @supabase/ssr.
-// La tarea de tipos del Sprint 1 lo regenera y formaliza (alias de dominio, etc.).
-// No editar a mano: cualquier cambio manual se pierde en la próxima regeneración.
+/**
+ * Tipos TypeScript generados automáticamente desde el esquema Supabase.
+ * No editar a mano — regenerar con: npm run types:gen
+ */
 
 export type Json =
   | string

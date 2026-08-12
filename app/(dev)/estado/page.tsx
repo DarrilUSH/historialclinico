@@ -25,6 +25,7 @@
 
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import type { Perfil } from "@/types/dominio";
 
 export default async function PaginaEstado() {
   if (process.env.NODE_ENV === "production") {
@@ -40,7 +41,8 @@ export default async function PaginaEstado() {
   // body y el error viene completo.
   const { count, error } = await supabase
     .from("profiles")
-    .select("id", { count: "exact" });
+    .select("id", { count: "exact" })
+    .returns<Perfil[]>();
 
   // Ver el comentario del encabezado: con anon, 42501 es el resultado
   // esperado (sin privilegios de tabla), no una falla de conexión.
