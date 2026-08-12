@@ -5,7 +5,7 @@
 
 - **Motor:** PostgreSQL 15+ (Supabase), esquema `public`, encoding UTF-8.
 - **Alcance de la migración inicial:** 8 enums, 2 funciones de trigger, 12 tablas, 30 índices, 10 triggers.
-- **Fuera de alcance (a propósito):** RLS y políticas, buckets de Storage, vistas de cálculo y jobs de `pg_cron`. Ver [Qué queda para migraciones futuras](#qué-queda-para-migraciones-futuras).
+- **Fuera de alcance de la migración inicial (a propósito):** RLS y políticas, buckets de Storage, vistas de cálculo y jobs de `pg_cron`. Ver [Qué queda para migraciones futuras](#qué-queda-para-migraciones-futuras). **RLS ya no está pendiente:** se aplicó en `20260812220000_rls.sql` y está documentada en [`seguridad-rls.md`](./seguridad-rls.md).
 
 ---
 
@@ -277,9 +277,10 @@ Los índices de FK (`family_permissions`, `doctors`, `medication_intakes.medicat
 
 | Migración | Contenido | Sprint |
 |---|---|---|
-| `0002_rls.sql` | `ENABLE ROW LEVEL SECURITY` en las 12 tablas + políticas derivadas de `family_permissions` + función `SECURITY DEFINER` auxiliar (`public.puede_ver_perfil(uuid)`) para evitar recursión | 1 |
+| ~~`0002_rls.sql`~~ → **`20260812210000_ajustes_modelo.sql`** | **APLICADA.** Deudas D1, D2, D4, D5 y D8 de `modelo-permisos.md`: `created_by_profile_id` en `profiles`, `created_by_profile_id` en las 8 tablas de contenido, trigger de no orfandad, tabla `storage_purge_queue` con sus triggers, y `push_subscriptions.profile_id` a `ON DELETE SET NULL` | 1 |
+| ~~`0002_rls.sql`~~ → **`20260812220000_rls.sql`** | **APLICADA.** `ENABLE ROW LEVEL SECURITY` en las 13 tablas + 49 políticas derivadas de `family_permissions` + 9 funciones `SECURITY DEFINER` auxiliares para evitar la recursión 42P17. Incluye la política append-only de `access_logs`, que estaba prevista para `0004_auditoria.sql`. Ver [`seguridad-rls.md`](./seguridad-rls.md) | 1 |
 | `0003_storage.sql` | Buckets privados `documentos-medicos` y `credenciales-cobertura` + políticas de Storage | 1 |
-| `0004_auditoria.sql` | Política append-only de `access_logs`: `INSERT` y `SELECT` propios, sin `UPDATE` ni `DELETE` para usuarios finales | 2 |
+| ~~`0004_auditoria.sql`~~ | **Adelantada** a `20260812220000_rls.sql`: la matriz de permisos ya define `access_logs` como append-only y separarlo en otra migración habría dejado la tabla escribible durante todo el Sprint 1 | 2 |
 | `0007_push.sql` | Ajustes de push si el flujo real lo requiere (la tabla ya está creada acá) | 6 |
 | `0008_cron_recordatorios.sql` | Control de ventanas de recordatorio (7 días / 48 h / 24 h / 3 h) para no duplicar envíos + `pg_cron` | 6 |
 | `0009_medicacion.sql` | Vista `v_medicacion_estado` con `dias_restantes` (las tablas y el enum de frecuencia ya están acá) | 7 |
@@ -311,7 +312,7 @@ npx supabase db psql -c "select col_description('public.profiles'::regclass, ord
   from information_schema.columns \
   where table_name='profiles' and column_name='user_id';"
 
-# Ninguna tabla debe quedar sin RLS DESPUÉS de aplicar 0002_rls.sql
+# Ninguna tabla debe quedar sin RLS (se cumple desde 20260812220000_rls.sql)
 npx supabase db psql -c "select tablename from pg_tables \
   where schemaname='public' and rowsecurity=false;"
 ```

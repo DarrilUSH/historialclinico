@@ -1,11 +1,13 @@
 # Modelo de permisos familiares — MiHistorialMédico
 
 > **Qué es este documento:** el contrato del modelo de acceso. Define quién puede hacer qué sobre los datos de salud de quién.
-> **Quién lo consume:** la migración `supabase/migrations/0002_rls.sql` (políticas RLS), `0003_storage.sql` (políticas de Storage), `lib/auth/guardas.ts` (`requerirPermiso`) del Sprint 2 y toda Server Action que escriba datos.
+> **Quién lo consume:** la migración `supabase/migrations/20260812220000_rls.sql` (políticas RLS, **ya aplicada** — ver [`seguridad-rls.md`](./seguridad-rls.md)), la migración de Storage (pendiente), `lib/auth/guardas.ts` (`requerirPermiso`) del Sprint 2 y toda Server Action que escriba datos.
 > **Relación con el resto:** el esquema y el *por qué* de cada tabla están en [`modelo-datos.md`](./modelo-datos.md); la fuente de verdad estructural es `supabase/migrations/20260812200000_schema_inicial.sql`. Si este documento y el SQL se contradicen, gana el SQL y este archivo se corrige.
 > **La matriz de la sección 6 se implementa literalmente**: cada celda es una política o una guarda. Si una política no puede expresar una celda, se documenta la aproximación y su complemento, no se afloja la celda.
 
 **Estado del esquema al escribir este documento:** `profiles` (con `user_id` nullable y su `COMMENT ON COLUMN`) y `family_permissions` (`owner_profile_id`, `granted_profile_id`, `can_view`, `can_upload`, `can_manage`, `UNIQUE` del par, `CHECK` de no autorreferencia) **ya existen y están aplicados**. Este documento no crea ni modifica objetos de base: las necesidades de esquema que detectó el análisis están en la [sección 10, Deuda](#10-deuda-cambios-de-esquema-propuestos-y-no-aplicados).
+
+> **Actualización (Sprint 1, tarea de RLS).** La matriz de la sección 6 **ya está implementada** en `supabase/migrations/20260812220000_rls.sql`, y las deudas **D1, D2, D4, D5 y D8** de la sección 10 se aplicaron en `supabase/migrations/20260812210000_ajustes_modelo.sql`. El mapa celda → política, las funciones auxiliares y las pruebas están en [`seguridad-rls.md`](./seguridad-rls.md). La implementación necesitó **una extensión al contrato** que este documento no previó —la política de arranque de un perfil gestionado, sin la cual el caso B es inimplementable desde la aplicación— explicada en la §2.6 de ese archivo.
 
 ---
 
@@ -210,7 +212,7 @@ Habilita **`INSERT`** sobre las tablas de contenido del perfil dueño: `document
 **`can_upload` NO habilita `UPDATE` ni `DELETE`.** Es la traducción literal de la regla del roadmap: *"el familiar autorizado ve según `can_view` y sube según `can_upload`"*. Consecuencias buscadas:
 
 - Ana sube el análisis, pero si la extracción de IA quedó mal, **no** puede corregir el documento ya persistido: eso es una edición. La corrección la hace María (`can_manage`).
-- Por eso el pipeline del Sprint 4 debe **revisar antes de persistir**: la pantalla de revisión edita el JSON extraído y recién entonces se hace el `INSERT`. Si el producto llegara a necesitar "quien subió puede corregir su propia carga durante N horas", hace falta una columna `created_by` que hoy no existe → [Deuda D2](#d2-created_by-en-las-tablas-de-contenido).
+- Por eso el pipeline del Sprint 4 debe **revisar antes de persistir**: la pantalla de revisión edita el JSON extraído y recién entonces se hace el `INSERT`. Si el producto llegara a necesitar "quien subió puede corregir su propia carga durante N horas", hace falta una columna `created_by_profile_id`, que **ya existe** desde `20260812210000_ajustes_modelo.sql` → [Deuda D2](#d2-created_by_profile_id-en-las-tablas-de-contenido). La matriz sigue como está hasta que un caso real de producto pida la corrección propia.
 - El **reprocesamiento** de un documento ya guardado (`ON CONFLICT DO UPDATE` sobre `lab_metrics`) es una edición, no una carga: requiere `can_manage`.
 
 **Dos excepciones acotadas y justificadas:**
@@ -304,7 +306,7 @@ Es `can_upload` **más**:
 
 ## 6. Matriz rol × recurso × operación
 
-**Este es el contrato.** Cada celda se implementa literalmente en `0002_rls.sql`.
+**Este es el contrato.** Cada celda se implementa literalmente en `supabase/migrations/20260812220000_rls.sql`. El mapa celda por celda hasta el nombre de cada política está en [`seguridad-rls.md`](./seguridad-rls.md).
 
 **Cómo leerla.** Las columnas son la posición del **actor** respecto del **perfil objetivo O**:
 
@@ -448,7 +450,7 @@ El **envío** de notificaciones sí cruza las dos cosas, pero ocurre del lado de
 
 ---
 
-## 7. Cómo se traduce a RLS (insumo para `0002_rls.sql`)
+## 7. Cómo se traduce a RLS (insumo para `20260812220000_rls.sql`)
 
 Esta sección **no es la migración** y no incorpora SQL al proyecto: describe la forma que deben tener las políticas para que la matriz de la sección 6 quede implementada sin agujeros ni recursión.
 
@@ -653,16 +655,30 @@ Todo el caso B descansa en que quien crea el perfil de Roberto **tiene su consen
 
 ## 10. Deuda: cambios de esquema propuestos y **no aplicados**
 
-Detectados al escribir este documento. **Ninguno fue aplicado**: no se tocó la migración existente ni se agregó SQL. Cada uno se describe con la propuesta concreta para que el orquestador decida si entra en `0002_rls.sql`, en una migración propia, o si se descarta.
+Detectados al escribir este documento. **Estado al cierre de la tarea de RLS del Sprint 1:**
 
-### D1. `created_by_profile_id` en `profiles`
+| Deuda | Estado | Dónde |
+|---|---|---|
+| D1 `created_by_profile_id` en `profiles` | **APLICADA** | `20260812210000_ajustes_modelo.sql` |
+| D2 `created_by_profile_id` en las tablas de contenido | **APLICADA** — mismo nombre que en `profiles` (D1): un concepto, un nombre | `20260812210000_ajustes_modelo.sql` |
+| D3 `CHECK` de monotonía de los flags | Abierta | mitigada: las políticas de lectura son monótonas |
+| D4 invariante de no orfandad | **APLICADA** | trigger `family_permissions_evitar_huerfano` |
+| D5 limpieza de Storage al borrar | **APLICADA** — opción 2 (tabla + triggers); el job que la drena es del Sprint 6 | tabla `storage_purge_queue` |
+| D6 registro del consentimiento | Abierta | requisito de salida del Sprint 12 |
+| D7 el autorizado debe tener cuenta | Abierta | debe validarlo la Server Action del ABM (Sprint 2) |
+| D8 `push_subscriptions.profile_id` → `SET NULL` | **APLICADA** | `20260812210000_ajustes_modelo.sql` |
+| D9 turnos: `can_upload` cambia `status` | Abierta | decisión del Sprint 6 |
+
+La descripción original de cada una se conserva abajo como registro del análisis que la detectó.
+
+### D1. `created_by_profile_id` en `profiles` — **APLICADA**
 
 - **Qué falta:** saber **quién creó** un perfil gestionado. Hoy la única huella es la fila de arranque de `family_permissions`, que puede ser borrada o transferida.
 - **Por qué importa:** para reconstruir la administración si el árbol de permisos se pierde ([8.2](#82-perfil-huérfano-un-gestionado-sin-administrador), tercer camino), para mostrar "perfil creado por María el 12/08", y para auditar la creación de perfiles gestionados.
 - **Propuesta:** columna `created_by_profile_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL`, nullable (los perfiles propios se autocrean), completada por la Server Action de alta.
 - **Impacto:** ninguno sobre las políticas de la matriz; es informativa. Bajo riesgo.
 
-### D2. `created_by` en las tablas de contenido
+### D2. `created_by_profile_id` en las tablas de contenido — **APLICADA**
 
 - **Qué falta:** saber quién cargó cada documento, medición o turno.
 - **Por qué importa:** (a) habilitaría "quien subió puede corregir su propia carga", que hoy se resuelve haciendo que toda corrección requiera `can_manage`; (b) la interfaz no puede mostrar "cargado por Ana", que es información útil en un grupo familiar; (c) sin esto, la auditoría de **escrituras** solo existe a nivel de `access_logs`, que hoy no registra escrituras.
@@ -676,13 +692,13 @@ Detectados al escribir este documento. **Ninguno fue aplicado**: no se tocó la 
 - **Mientras tanto:** las políticas de lectura se escriben monótonas (`can_view OR can_upload OR can_manage`), de modo que una fila incoherente degrada a "puede ver" en lugar de a "escribe a ciegas".
 - **Riesgo:** bajo. Requiere verificar que ninguna fila existente lo viole (hoy no hay datos).
 
-### D4. Invariante de no orfandad
+### D4. Invariante de no orfandad — **APLICADA**
 
 - **Qué falta:** la garantía de que un perfil gestionado nunca se queda sin `can_manage`, incluso cuando la orfandad llega por el `CASCADE` de una baja de cuenta, que la aplicación no puede interceptar.
 - **Propuesta:** trigger `BEFORE DELETE OR UPDATE ON public.family_permissions` que, cuando la operación deja en cero los `can_manage` de un `owner_profile_id` con `user_id IS NULL`, levante una excepción con mensaje accionable (*"Transferí la administración o eliminá el perfil antes de quitar este acceso"*). Complementariamente, un chequeo de salud que liste gestionados sin administrador.
 - **Atención:** el trigger tiene que dejar pasar el caso legítimo de `DELETE FROM profiles` (el `CASCADE` del propio perfil dueño), o borrar un perfil gestionado se vuelve imposible. Se distingue comparando contra la existencia de la fila de `profiles`.
 
-### D5. Limpieza de Storage al borrar un perfil
+### D5. Limpieza de Storage al borrar un perfil — **APLICADA** (opción 2)
 
 - **Qué falta:** el `CASCADE` borra las filas de `documents` e `insurance_cards`, pero **los objetos siguen en los buckets**. Un perfil "suprimido" deja sus PDF y las fotos de la credencial en `documentos-medicos` y `credenciales-cobertura`.
 - **Por qué importa:** es la diferencia entre cumplir el derecho de supresión y aparentar cumplirlo.
@@ -703,7 +719,7 @@ Detectados al escribir este documento. **Ninguno fue aplicado**: no se tocó la 
 - **Por qué no alcanza un `CHECK`:** la condición depende de otra fila (`profiles.user_id`), y un `CHECK` no puede consultar otra tabla.
 - **Propuesta:** trigger `BEFORE INSERT OR UPDATE ON public.family_permissions` que rechace el caso, **más** validación en la Server Action del ABM para dar un mensaje humano en lugar de un error de base. Nota: el trigger no cubre el escenario inverso (que el perfil autorizado **pierda** su `user_id` después), que hoy es imposible porque nadie puede modificar `user_id`.
 
-### D8. `push_subscriptions.profile_id` debería ser `SET NULL`
+### D8. `push_subscriptions.profile_id` debería ser `SET NULL` — **APLICADA**
 
 - **Qué pasa hoy:** la columna es `ON DELETE CASCADE`, pero su propio `COMMENT` la define como *"perfil activo al momento de suscribirse"*, es decir **contexto**, no propiedad. La suscripción pertenece al `user_id`, que ya tiene su propio `CASCADE` contra `auth.users`.
 - **Consecuencia:** borrar un perfil elimina suscripciones push de **otras personas** ([8.5](#85-borrado-de-un-perfil-el-cascade-y-lo-que-el-cascade-no-alcanza), punto 7). El síntoma en producción sería "dejé de recibir avisos y no toqué nada", difícil de diagnosticar.
@@ -738,7 +754,7 @@ npx supabase db psql -c '\d+ public.family_permissions'
 
 Esperado: `owner_profile_id`, `granted_profile_id`, los tres flags `boolean NOT NULL` con defaults `true` / `false` / `false`, `UNIQUE (owner_profile_id, granted_profile_id)` y `CHECK (owner_profile_id <> granted_profile_id)`.
 
-**Verificaciones que se hacen cuando exista `0002_rls.sql` y el seed** (Sprint 1, tareas siguientes):
+**Verificaciones de la migración de RLS** (ya aplicada; las cuatro consultas están automatizadas en `scripts/test-rls.sql`, casos 47 a 54):
 
 ```sql
 -- 1. Ninguna tabla sin RLS
