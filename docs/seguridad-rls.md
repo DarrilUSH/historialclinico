@@ -1,4 +1,4 @@
-# Seguridad: Row Level Security — MiHistorialMédico
+# Seguridad: Row Level Security — Historial Médico
 
 > **Qué es este documento:** el mapa de lo que quedó **implementado en la base**. Traduce la matriz normativa de [`modelo-permisos.md`](./modelo-permisos.md) a nombres concretos de políticas, funciones y triggers, para que una auditoría pueda ir celda por celda hasta el objeto de Postgres que la hace cumplir.
 > **Fuente de verdad:** `supabase/migrations/20260812220000_rls.sql` (políticas de tabla), `supabase/migrations/20260812230000_storage.sql` (buckets y políticas de Storage) y `supabase/migrations/20260812210000_ajustes_modelo.sql` (columnas y triggers de los que dependen). Si este documento y el SQL se contradicen, gana el SQL y este archivo se corrige.
