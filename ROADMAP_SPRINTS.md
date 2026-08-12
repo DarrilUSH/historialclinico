@@ -166,10 +166,10 @@ Generar los tipos de la base con el CLI de Supabase y exponer alias legibles del
 
 ### [Sonnet] - lib/gemini con @google/genai y modelo parametrizable
 
-Implementar el wrapper de Gemini con el SDK vigente `@google/genai` (pinneado a `<3.0.0` si el runtime no es Node 22+), leyendo el model id desde `process.env.GEMINI_MODEL_ID` con default `gemini-2.5-flash`. Dejar preparado `generateContent` con `responseMimeType: "application/json"` + `responseSchema`. **Nada de `@google/generative-ai` ni `gemini-1.5-flash`** (ambos retirados).
+Implementar el wrapper de Gemini con el SDK vigente `@google/genai` (pinneado a `<3.0.0` si el runtime no es Node 22+), leyendo el model id desde `process.env.GEMINI_MODEL_ID` con default `gemini-3.5-flash-lite`. Dejar preparado `generateContent` con `responseMimeType: "application/json"` + `responseSchema`. **Nada de `@google/generative-ai` ni `gemini-1.5-flash`** (ambos retirados).
 
-- **Artefactos:** `lib/gemini/client.ts`, `lib/gemini/schemas.ts`, `.env.example` con `GEMINI_MODEL_ID=gemini-2.5-flash`.
-- **Criterio de aceptación:** un script de prueba manda un texto simple y devuelve JSON válido contra el schema; cambiar `GEMINI_MODEL_ID` a `gemini-2.5-flash-lite` cambia el modelo **sin tocar código**; `grep -rn "generative-ai\|gemini-1.5" .` devuelve 0.
+- **Artefactos:** `lib/gemini/client.ts`, `lib/gemini/schemas.ts`, `.env.example` con `GEMINI_MODEL_ID=gemini-3.5-flash-lite`.
+- **Criterio de aceptación:** un script de prueba manda un texto simple y devuelve JSON válido contra el schema; cambiar `GEMINI_MODEL_ID` a `gemini-3.5-flash-lite` cambia el modelo **sin tocar código**; `grep -rn "generative-ai\|gemini-1.5" .` devuelve 0.
 - **Dependencias:** clientes Supabase (para el patrón de env vars) y scaffold.
 
 ### [Haiku] - Seed de datos de prueba
@@ -883,7 +883,7 @@ Demo: sitio productivo funcionando con dominio, legales y notificaciones reales,
 - Next.js **16.3** (App Router, Server Actions, Turbopack) + React **19** + TypeScript.
 - Tailwind CSS **v4.3** con configuración CSS-first (`@import "tailwindcss"` + `@theme`), shadcn/ui compatible con v4, Lucide React.
 - Supabase con **`@supabase/ssr` + `@supabase/supabase-js`**. `@supabase/auth-helpers-nextjs` está deprecado y **no se usa ni se mezcla**.
-- Gemini con **`@google/genai`** (pinneado a `<3.0.0` si el runtime no es Node 22+) y modelo **`gemini-2.5-flash`** por defecto, `gemini-2.5-flash-lite` como variante barata, siempre leído desde `GEMINI_MODEL_ID`. **`@google/generative-ai` y `gemini-1.5-flash` están retirados: no aparecen en el código.**
+- Gemini con **`@google/genai`** (pinneado a `<3.0.0` si el runtime no es Node 22+) y modelo **`gemini-3.5-flash-lite`** por defecto, `gemini-3.5-flash-lite` como variante barata, siempre leído desde `GEMINI_MODEL_ID`. **`@google/generative-ai` y `gemini-1.5-flash` están retirados: no aparecen en el código.**
 - Structured output vía `generateContent` con `responseMimeType: "application/json"` + `responseSchema`, validado además con Zod del lado del servidor.
 
 ### Ley 25.326 (Protección de Datos Personales, Argentina)

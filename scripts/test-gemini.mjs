@@ -14,7 +14,7 @@
  *
  * Uso:
  *   node scripts/test-gemini.mjs
- *   GEMINI_MODEL_ID=gemini-2.5-flash-lite node scripts/test-gemini.mjs
+ *   GEMINI_MODEL_ID=gemini-3.5-flash-lite node scripts/test-gemini.mjs
  *
  * El modelo usado se imprime siempre (no es secreto). La API key nunca se
  * imprime, ni completa ni parcial.
@@ -80,7 +80,7 @@ function cargarEnvLocal() {
   const variables = parsearEnv(contenido);
 
   // No pisar variables ya presentes en el entorno del proceso: así
-  // `GEMINI_MODEL_ID=gemini-2.5-flash-lite node scripts/test-gemini.mjs`
+  // `GEMINI_MODEL_ID=gemini-3.5-flash-lite node scripts/test-gemini.mjs`
   // gana por encima de lo que diga .env.local, sin tocar código.
   for (const [clave, valor] of Object.entries(variables)) {
     if (process.env[clave] === undefined) {

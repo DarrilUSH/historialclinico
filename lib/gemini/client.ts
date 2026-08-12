@@ -31,7 +31,7 @@ if (typeof window !== 'undefined') {
 }
 
 /** Modelo por defecto si `GEMINI_MODEL_ID` no está seteada. */
-export const MODELO_GEMINI_DEFAULT = 'gemini-2.5-flash';
+export const MODELO_GEMINI_DEFAULT = 'gemini-3.5-flash-lite';
 
 /**
  * Timeout por llamada a Gemini, en milisegundos. 30s es razonable para un

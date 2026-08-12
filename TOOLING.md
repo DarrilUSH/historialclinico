@@ -265,6 +265,9 @@ Estos dos puntos no formaban parte del pedido explícito, pero surgieron de la m
 - El endpoint `generateContent` con `responseSchema` (structured output a JSON) sigue totalmente soportado y es suficiente para este caso de uso; no hace falta migrar a la nueva "Interactions API" de Google para un pipeline de extracción de campos.
 - **A verificar (confianza baja):** la fecha exacta de disponibilidad general de la "Interactions API" no se pudo fijar con precisión de día — no afecta la recomendación práctica de arriba.
 
+
+> **Actualización 2026-08-12 (noche):** al probar contra la API con una key nueva, `gemini-2.5-flash` y `gemini-2.5-flash-lite` devuelven HTTP 404 "no longer available to new users" — Google los retiró para claves nuevas después de esta investigación. El default del proyecto pasó a **`gemini-3.5-flash-lite`** (verificado con PASS end-to-end de extracción estructurada; `gemini-3.6-flash` disponible vía `GEMINI_MODEL_ID` si se necesita más fidelidad). Ejemplo perfecto de por qué el catálogo exige re-verificar antes de usar.
+
 ### 7.2 Stack Next.js/Supabase/Tailwind: vigencia de versiones (agosto 2026)
 
 - **Next.js 16.3** + **React 19** son la combinación recomendada actual (`create-next-app@latest` ya las trae por defecto).
