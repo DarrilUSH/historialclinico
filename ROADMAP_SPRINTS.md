@@ -731,6 +731,8 @@ Demo en local: app instalada en un celular real, funcionando offline en lo crít
 ## Sprint 12: Deploy a producción
 
 > **Este sprint no se ejecuta por iniciativa propia.** Todo el desarrollo es local-first. Este sprint arranca **únicamente** cuando el usuario lo pide con palabras explícitas del tipo "subilo a producción", "deployá a Vercel", "publicá el sitio". Frases como "listo", "terminé", "funciona" o "está confirmado" **no** autorizan el deploy: ante la duda, se pregunta.
+>
+> **Autorización registrada (2026-08-12):** el usuario autorizó explícitamente el deploy a producción **condicionado a que los Sprints 2-11 estén completamente terminados y auditados**. Verificado ese día que el proyecto Vercel NO tiene auto-deploy desde GitHub (404 en vercel.app y en el dominio) — el deploy será un acto deliberado del Sprint 12. Pasos que probablemente requieran presencia del usuario o su navegador autenticado: `supabase link`/`db push` al proyecto cloud (access token), carga de variables de entorno en Vercel, y conexión del repo. Si el navegador del usuario (extensión de Chrome) está disponible, se intentará; lo que no se pueda queda en la lista de pendientes de su regreso.
 
 **Objetivo:** publicar la aplicación en `historialmedico.com.ar` cumpliendo la Ley 25.326.
 **Entregable demostrable:** sitio en producción con dominio propio, HTTPS, páginas legales y consentimiento operativo.
@@ -885,6 +887,12 @@ Demo: sitio productivo funcionando con dominio, legales y notificaciones reales,
 - Supabase con **`@supabase/ssr` + `@supabase/supabase-js`**. `@supabase/auth-helpers-nextjs` está deprecado y **no se usa ni se mezcla**.
 - Gemini con **`@google/genai`** (pinneado a `<3.0.0` si el runtime no es Node 22+) y modelo **`gemini-3.5-flash-lite`** por defecto, `gemini-3.5-flash-lite` como variante barata, siempre leído desde `GEMINI_MODEL_ID`. **`@google/generative-ai` y `gemini-1.5-flash` están retirados: no aparecen en el código.**
 - Structured output vía `generateContent` con `responseMimeType: "application/json"` + `responseSchema`, validado además con Zod del lado del servidor.
+
+### Costo cero (regla dura del usuario, 2026-08-12)
+
+- **El proyecto no debe generar ningún gasto** más allá del dominio ya pagado, al menos mientras sea de uso personal/familiar. Todo corre en capa gratuita: Vercel Hobby, Supabase Free (500 MB base / 1 GB storage / Edge Functions incluidas), Gemini API free tier (la key es de AI Studio sin billing; si aparece un 429 de cuota se informa al usuario, no se paga), Web Push vía FCM (gratis), deep links de Maps/Uber/DiDi/Cabify (son URLs, no APIs pagas).
+- **Prohibido incorporar APIs o servicios pagos** sin pedido explícito del usuario: nada de Google Maps API (geocoding/places), SMS, email transaccional pago, etc. Para geocodificar direcciones de turnos (Sprint 6): entrada manual asistida o Nominatim/OpenStreetMap respetando su política de uso — decisión registrada.
+- **Cuidados de capa gratuita**: Supabase Free pausa proyectos tras ~1 semana sin actividad (documentar cómo despertarlo); mantener las imágenes comprimidas (el compresor client-side del Sprint 4 también protege el límite de 1 GB); si el uso se masifica, el usuario decidirá qué plan pagar.
 
 ### Ley 25.326 (Protección de Datos Personales, Argentina)
 
