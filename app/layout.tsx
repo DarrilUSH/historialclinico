@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MiHistorialMédico",
+  title: "Historial Médico",
   description: "Tu historial médico, siempre a mano.",
 };
 

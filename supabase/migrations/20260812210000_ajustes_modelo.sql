@@ -1,5 +1,5 @@
 -- =============================================================================
--- MiHistorialMédico — Migración 20260812210000: ajustes de modelo previos a RLS
+-- Historial Médico — Migración 20260812210000: ajustes de modelo previos a RLS
 -- -----------------------------------------------------------------------------
 -- Aplica cinco de las nueve deudas detectadas al escribir `docs/modelo-permisos.md`
 -- (sección 10). El orquestador decidió cuáles entran ahora y cuáles quedan

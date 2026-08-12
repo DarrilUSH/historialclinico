@@ -1,5 +1,5 @@
 -- =============================================================================
--- MiHistorialMédico — Migración 20260812220000: Row Level Security
+-- Historial Médico — Migración 20260812220000: Row Level Security
 -- -----------------------------------------------------------------------------
 -- Implementa LITERALMENTE la matriz rol × recurso × operación de la sección 6 de
 -- `docs/modelo-permisos.md`, más los complementos de la sección 7.3 que RLS por

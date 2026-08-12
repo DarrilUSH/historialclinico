@@ -1,4 +1,4 @@
-# Modelo de permisos familiares — MiHistorialMédico
+# Modelo de permisos familiares — Historial Médico
 
 > **Qué es este documento:** el contrato del modelo de acceso. Define quién puede hacer qué sobre los datos de salud de quién.
 > **Quién lo consume:** la migración `supabase/migrations/20260812220000_rls.sql` (políticas RLS, **ya aplicada** — ver [`seguridad-rls.md`](./seguridad-rls.md)), la migración de Storage (pendiente), `lib/auth/guardas.ts` (`requerirPermiso`) del Sprint 2 y toda Server Action que escriba datos.

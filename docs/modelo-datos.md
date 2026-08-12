@@ -1,4 +1,4 @@
-# Modelo de datos — MiHistorialMédico
+# Modelo de datos — Historial Médico
 
 > Fuente de verdad: `supabase/migrations/20260812200000_schema_inicial.sql`.
 > Este documento explica **qué relaciona con qué** y **por qué se modeló así**. Si el SQL y este documento se contradicen, gana el SQL y este archivo se corrige.

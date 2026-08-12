@@ -1,7 +1,7 @@
-# Auditoría de Charset UTF-8 — Repositorio MiHistorialMédico
+# Auditoría de Charset UTF-8 — Repositorio Historial Médico
 
 **Fecha:** 2026-08-12  
-**Proyecto:** MiHistorialMédico (Next.js 16)  
+**Proyecto:** Historial Médico (Next.js 16)  
 **Rama:** main  
 **Estado:** ✅ CONFORME
 

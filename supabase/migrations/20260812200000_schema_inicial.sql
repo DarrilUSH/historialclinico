@@ -1,5 +1,5 @@
 -- =============================================================================
--- MiHistorialMédico — Migración 20260812200000: esquema inicial del dominio
+-- Historial Médico — Migración 20260812200000: esquema inicial del dominio
 -- -----------------------------------------------------------------------------
 -- Contenido: extensiones, enums, funciones de trigger, 12 tablas de dominio,
 --            comentarios de documentación e índices de acceso.

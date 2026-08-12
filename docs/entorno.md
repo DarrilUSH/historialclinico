@@ -1,4 +1,4 @@
-# Entorno de desarrollo — MiHistorialMédico
+# Entorno de desarrollo — Historial Médico
 
 **Fecha de verificación:** 2026-08-12  
 **Máquina:** Windows 11 Pro, versión 10.0.26200  

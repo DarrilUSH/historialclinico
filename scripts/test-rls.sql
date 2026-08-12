@@ -1,5 +1,5 @@
 -- =============================================================================
--- MiHistorialMédico — Prueba reproducible de aislamiento por RLS
+-- Historial Médico — Prueba reproducible de aislamiento por RLS
 -- -----------------------------------------------------------------------------
 -- Qué demuestra: que la matriz de docs/modelo-permisos.md está efectivamente
 -- implementada en la base, no solo escrita. Simula sesiones reales de dos

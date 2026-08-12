@@ -1,8 +1,8 @@
-# TOOLING.md — Análisis de herramientas para MiHistorialMédico
+# TOOLING.md — Análisis de herramientas para Historial Médico
 
 ## 1. Propósito
 
-Este documento consolida el análisis de los recursos que el usuario pidió evaluar como candidatos para el toolkit de desarrollo de **MiHistorialMédico** (PWA de historial clínico personal, enfocada en Senior UX, construida con Next.js + Supabase + Gemini, desarrollada en Windows 11 con Claude Code): cinco videos de TikTok, el plugin oficial `claude-code-setup` de Anthropic, y las skills **Frontend Design** (Anthropic), **UI UX Pro Max**, **Vercel Agent Skills** y **Emil Kowalski Skills**. Para cada uno se documenta qué es, por qué aporta (o no) valor concreto a este proyecto, los comandos de instalación verificados para Windows/PowerShell + Claude Code, la configuración posterior necesaria, y las fuentes usadas. Los datos con verificación parcial o inferida se marcan explícitamente como "a verificar" — no se completó ningún dato inventado.
+Este documento consolida el análisis de los recursos que el usuario pidió evaluar como candidatos para el toolkit de desarrollo de **Historial Médico** (PWA de historial clínico personal, enfocada en Senior UX, construida con Next.js + Supabase + Gemini, desarrollada en Windows 11 con Claude Code): cinco videos de TikTok, el plugin oficial `claude-code-setup` de Anthropic, y las skills **Frontend Design** (Anthropic), **UI UX Pro Max**, **Vercel Agent Skills** y **Emil Kowalski Skills**. Para cada uno se documenta qué es, por qué aporta (o no) valor concreto a este proyecto, los comandos de instalación verificados para Windows/PowerShell + Claude Code, la configuración posterior necesaria, y las fuentes usadas. Los datos con verificación parcial o inferida se marcan explícitamente como "a verificar" — no se completó ningún dato inventado.
 
 ## 2. Tabla resumen
 
@@ -40,7 +40,7 @@ Esto es lo único verificable de cada uno:
 
 **Qué es.** Plugin oficial del repo `anthropics/claude-plugins-official` que consiste en una única skill, `claude-automation-recommender`. Es de **solo lectura**: escanea la estructura del proyecto actual (dependencias, frameworks, archivos) y devuelve un reporte con 1-2 recomendaciones concretas por categoría de automatización de Claude Code (MCP servers, skills, hooks, subagentes, plugins), con instrucciones de setup para cada una. No modifica nada por sí mismo. Se activa por lenguaje natural ("recommend automations for this project", "help me set up Claude Code", "what hooks should I use?"), no trae comandos slash propios.
 
-**Por qué sirve para este proyecto.** MiHistorialMédico combina Next.js + Supabase + Gemini con requisitos particulares (PWA, Senior UX, datos médicos sensibles). Correrlo una vez, antes de decidir qué más instalar, da un diagnóstico específico del repo real (por ejemplo, podría sugerir un MCP server de Supabase, hooks de validación de charset/UTF-8 coherentes con las reglas globales del usuario, o subagentes para revisión de accesibilidad) en vez de instalar herramientas genéricas "a ciegas".
+**Por qué sirve para este proyecto.** Historial Médico combina Next.js + Supabase + Gemini con requisitos particulares (PWA, Senior UX, datos médicos sensibles). Correrlo una vez, antes de decidir qué más instalar, da un diagnóstico específico del repo real (por ejemplo, podría sugerir un MCP server de Supabase, hooks de validación de charset/UTF-8 coherentes con las reglas globales del usuario, o subagentes para revisión de accesibilidad) en vez de instalar herramientas genéricas "a ciegas".
 
 **Instalación (Windows/PowerShell + Claude Code).**
 
@@ -136,7 +136,7 @@ npx skills add nextlevelbuilder/ui-ux-pro-max-skill
 
 **Qué es.** Vercel mantiene el CLI open-source `npx skills` (repo `vercel-labs/skills`, no exclusivo de Vercel, compatible con 75+ agentes incluido Claude Code) y una colección propia de skills en `vercel-labs/agent-skills`. Carpetas reales confirmadas vía API de GitHub: `composition-patterns`, `deploy-to-vercel`, `react-best-practices`, `react-native-skills`, `react-view-transitions`, `vercel-cli-with-tokens`, `vercel-optimize`, `web-design-guidelines`, `writing-guidelines`.
 
-**Por qué sirve para este proyecto.** Para el stack de MiHistorialMédico (Next.js + Tailwind + shadcn/ui) las tres más relevantes son:
+**Por qué sirve para este proyecto.** Para el stack de Historial Médico (Next.js + Tailwind + shadcn/ui) las tres más relevantes son:
 - **`web-design-guidelines`**: accesibilidad, UX y performance del UI — directamente aplicable a componentes shadcn y crítico para Senior UX (contraste, tamaños de touch target, legibilidad).
 - **`react-best-practices`**: 70 reglas de performance React/Next.js — importante porque usuarios senior suelen tener dispositivos/conexiones más limitados.
 - **`composition-patterns`**: patrones de composición de componentes React, evita prop-drilling — encaja con el patrón típico de shadcn/ui.
@@ -229,7 +229,7 @@ No instalar de nuevo `claude-code-setup`, ni buscar plugins equivalentes a estos
 
 ## 6. Orden de instalación recomendado
 
-1. **`claude-code-setup`** primero. Es de solo lectura, cero riesgo, y da un diagnóstico específico del repo real de MiHistorialMédico antes de decidir con qué prioridad instalar el resto (por ejemplo, puede confirmar o descartar la necesidad de un MCP server de Supabase).
+1. **`claude-code-setup`** primero. Es de solo lectura, cero riesgo, y da un diagnóstico específico del repo real de Historial Médico antes de decidir con qué prioridad instalar el resto (por ejemplo, puede confirmar o descartar la necesidad de un MCP server de Supabase).
 2. **UI UX Pro Max** segundo. Define paleta, tipografía y patrones base del sistema de diseño — conviene tenerlo antes de escribir componentes, para no rehacer estilos después.
 3. **Vercel Agent Skills** (`web-design-guidelines`, `react-best-practices`, `composition-patterns`) tercero. Se aplican mientras se construyen los componentes reales sobre shadcn/ui, una vez que ya hay un sistema de diseño de base.
 4. **Emil Kowalski Skills** (`emil-design-eng`, `review-animations`, `pick-ui-library`) cuarto. Es una capa de pulido (animaciones/microinteracciones) que tiene más sentido aplicar sobre componentes que ya existen, no antes.
@@ -259,7 +259,7 @@ Estos dos puntos no formaban parte del pedido explícito, pero surgieron de la m
 
 ### 7.1 Gemini: acción urgente, no solo a futuro
 
-- **`gemini-1.5-flash` está retirado desde el 24/09/2025** (confirmado en el foro oficial de Google AI Developers, coherente con `ai.google.dev/gemini-api/docs/deprecations`). Si el código de MiHistorialMédico todavía llama a este modelo para OCR/extracción de documentos médicos, las llamadas ya están fallando en producción — no es un "aviso a futuro".
+- **`gemini-1.5-flash` está retirado desde el 24/09/2025** (confirmado en el foro oficial de Google AI Developers, coherente con `ai.google.dev/gemini-api/docs/deprecations`). Si el código de Historial Médico todavía llama a este modelo para OCR/extracción de documentos médicos, las llamadas ya están fallando en producción — no es un "aviso a futuro".
 - **`@google/generative-ai` está deprecado y archivado** (fin de soporte 30/11/2025, repo archivado 16/12/2025). El SDK vigente es **`@google/genai`** (`npm i @google/genai`).
 - **Recomendación de modelo:** `gemini-2.5-flash` como principal para OCR + extracción JSON de documentos médicos (sin fecha de apagado anunciada a la fecha de esta investigación), con `gemini-2.5-flash-lite` como variante más barata para documentos simples. Evitar `gemini-2.0-flash` para código nuevo: tiene shutdown confirmado para el 01/06/2026.
 - El endpoint `generateContent` con `responseSchema` (structured output a JSON) sigue totalmente soportado y es suficiente para este caso de uso; no hace falta migrar a la nueva "Interactions API" de Google para un pipeline de extracción de campos.
@@ -486,7 +486,7 @@ npx -y @upstash/context7-mcp --api-key TU_API_KEY
 
 **Qué es.** Plugin para Claude Code (`thedotmack/claude-mem`) que captura y comprime el contexto de sesiones pasadas usando IA, inyectando memoria persistente en sesiones futuras. Ofrece búsqueda semántica híbrida, archivado sin límite de tamaño, y progressive token disclosure. Complementa (no reemplaza) la memoria nativa `MEMORY.md` de Claude Code, disponible desde v2.1.59 (feb-2026) pero limitada a 200 líneas sin búsqueda.
 
-**Por qué sirve para este proyecto.** Poco aporte directo: es herramienta pura de tooling de desarrollador (persistencia entre sesiones), sin aplicación en el frontend médico en sí. Solo justificaría instalarse si el desarrollo de MiHistorialMédico acumula cientos de sesiones de Claude Code o necesita memoria cross-project — no es el caso típico de desarrollo estándar de un proyecto único.
+**Por qué sirve para este proyecto.** Poco aporte directo: es herramienta pura de tooling de desarrollador (persistencia entre sesiones), sin aplicación en el frontend médico en sí. Solo justificaría instalarse si el desarrollo de Historial Médico acumula cientos de sesiones de Claude Code o necesita memoria cross-project — no es el caso típico de desarrollo estándar de un proyecto único.
 
 **Instalación (Windows/PowerShell + Claude Code).**
 
@@ -504,7 +504,7 @@ npx claude-mem install
 
 ---
 
-### 8.8 Veredicto para MiHistorialMédico
+### 8.8 Veredicto para Historial Médico
 
 Punto de partida: **ya están instaladas** `frontend-design`, `superpowers`, Playwright MCP y todas las skills de Anthropic listadas en el entorno. El criterio para lo nuevo es el mismo que ya rige el proyecto — Senior UX médico necesita diseño sobrio, accesible y consistente, no acumular fuentes de "gusto" que se pisen entre sí. Instalar `UI UX Pro Max` (84 estilos) + Taste Skill + Impeccable + DESIGN.md al mismo tiempo, todas dando señales de diseño distintas al agente, es contraproducente: conviene un único source of truth de tokens y usar el resto como capas complementarias, no redundantes.
 
@@ -549,7 +549,7 @@ Este análisis se realizó el **2026-08-12**, a partir de los captions y frames 
 | **Claude-Mem** | Descartada | Redundante con `MEMORY.md` nativa (disponible desde Claude Code 2.1.59). No justifica instalación para el desarrollo estándar actual. Revisar solo si sesiones futuras superan cientos y necesitan búsqueda semántica cross-project. |
 | **Open Design** | Descartada | Repo joven (creado ~4 meses), crecimiento de estrellas atípico sin verificar como orgánico (85.307 estrellas en agosto 2026), issue de malware sin confirmar como falso positivo, arquitectura BYOK inaceptable para datos médicos bajo Ley 25.326/AAIP. Riesgo/beneficio negativo para este proyecto. Revisitar en futuro si el proyecto necesita prototipado visual intensivo con dummy data. |
 | **Figma MCP** | A verificar | Mencionado en video 3 (@revolutia.ai) pero no investigado en esta pasada. No datos de repo, instalación, confianza ni relevancia verificada. No instalar hasta completar investigación puntual. Incluir en auditoría si/cuando el proyecto adopta Figma para design system. |
-| **gh CLI** | No instalado | Opcional, no es prerrequisito de MiHistorialMédico. Verificación: `gh --version`. |
+| **gh CLI** | No instalado | Opcional, no es prerrequisito de Historial Médico. Verificación: `gh --version`. |
 | **Supabase CLI** | No instalado — pendiente como dependencia npm | Se instalará como dependencia del proyecto cuando la tarea de Supabase lo declare en `package.json`. Verificación futura: `npm list -g supabase` o `supabase --version`. |
 | **Docker Desktop** | No instalado — manual del usuario | Requerido para `supabase start` (modo local). Instalación manual desde https://docs.docker.com/desktop/setup/install/windows-install/ — no es automatizable. Verificación: `docker --version` una vez instalado. Bloqueante para desarrollo local de Supabase si se usa `supabase start`; no impide deploy. |
 | **Node.js** | v24.14.0 | Verificado con `node -v` el 2026-08-12. Requisito de Impeccable (≥22.12.0), Taste Skill (≥22.20.0), Context7 (v18+). Cumple con creces. |

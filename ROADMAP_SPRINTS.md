@@ -1,4 +1,4 @@
-# ROADMAP_SPRINTS.md — MiHistorialMédico
+# ROADMAP_SPRINTS.md — Historial Médico
 
 > PWA de historial médico familiar para adultos mayores, con gestión delegada por cuidadores y familiares.
 > Repo: `github.com/DarrilUSH/historialclinico` · Dominio final: `historialmedico.com.ar` (Vercel) · Desarrollo: **local-first**.
@@ -676,10 +676,10 @@ Completar `manifest.webmanifest` (nombre, nombre corto, `start_url`, `display: s
 
 ### [Sonnet] - Web Share Target: recibir archivos desde el menú Compartir del sistema
 
-Registrar la PWA como destino de compartir a nivel sistema: `share_target` en el manifest (`method: POST`, `enctype: multipart/form-data`, `files` aceptando PDF/JPG/PNG/WebP) con handler que recibe el archivo y lo encola en el flujo de ingesta del Sprint 4. Flujo decidido: compartir desde cualquier app → se abre la pantalla de recepción de MiHistorialMédico → el usuario elige el **perfil de destino** (crítico en app multiperfil) → extracción automática con Gemini → formulario de revisión → **visto bueno del usuario** → guardado. La IA nunca guarda sin confirmación. Limitación documentada: requiere PWA instalada en Android (Chrome/Edge); iOS no soporta share target — la alternativa es subir desde la app.
+Registrar la PWA como destino de compartir a nivel sistema: `share_target` en el manifest (`method: POST`, `enctype: multipart/form-data`, `files` aceptando PDF/JPG/PNG/WebP) con handler que recibe el archivo y lo encola en el flujo de ingesta del Sprint 4. Flujo decidido: compartir desde cualquier app → se abre la pantalla de recepción de Historial Médico → el usuario elige el **perfil de destino** (crítico en app multiperfil) → extracción automática con Gemini → formulario de revisión → **visto bueno del usuario** → guardado. La IA nunca guarda sin confirmación. Limitación documentada: requiere PWA instalada en Android (Chrome/Edge); iOS no soporta share target — la alternativa es subir desde la app.
 
 - **Artefactos:** `manifest` con bloque `share_target`, `app/api/compartir/route.ts` (receptor POST multipart), `app/(app)/compartir/page.tsx` (pantalla de recepción con selector de perfil), `docs/share-target.md`.
-- **Criterio de aceptación:** en un Android real con la PWA instalada, "Compartir" un PDF desde el gestor de archivos muestra "MiHistorialMédico" entre los destinos; elegirla abre la recepción con el archivo adjunto, se selecciona perfil, corre la extracción y el documento queda guardado recién tras confirmar; compartir una foto JPG desde la galería funciona igual; compartir con la app NO instalada no rompe nada (la opción simplemente no aparece).
+- **Criterio de aceptación:** en un Android real con la PWA instalada, "Compartir" un PDF desde el gestor de archivos muestra "Historial Médico" entre los destinos; elegirla abre la recepción con el archivo adjunto, se selecciona perfil, corre la extracción y el documento queda guardado recién tras confirmar; compartir una foto JPG desde la galería funciona igual; compartir con la app NO instalada no rompe nada (la opción simplemente no aparece).
 - **Dependencias:** manifest e instalabilidad; pipeline de ingesta del Sprint 4.
 
 ### [Opus] - Consolidación del service worker y estrategia offline global
