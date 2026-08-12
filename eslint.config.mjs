@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generado por el CLI de Supabase en cada `supabase start` (ya está en .gitignore).
+    "supabase/.temp/**",
   ]),
 ]);
 
