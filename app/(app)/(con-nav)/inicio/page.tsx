@@ -23,6 +23,7 @@
 import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 
+import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
 import { obtenerPerfilActivo, type PermisosPerfilActivo } from "@/lib/perfil-activo"
 
 export const metadata: Metadata = {
@@ -47,6 +48,19 @@ export default async function PaginaInicio() {
         </h1>
         <p className="text-base text-muted-foreground">{descripcionRelacion(permisos)}</p>
       </div>
+
+      {/*
+        El banner de recordatorios se renderiza SIEMPRE desde el servidor y
+        decide en el cliente si tiene algo que mostrar: el estado real
+        (permiso del navegador + suscripción viva en el Push Service) no
+        existe del lado del servidor. Ver el encabezado del componente.
+
+        No depende del perfil activo a propósito: la suscripción pertenece a
+        la CUENTA y al navegador, no al perfil que se está viendo (nota ⑰ de
+        la migración de RLS). Cambiar de perfil no tiene que ofrecer activar
+        de nuevo lo que ya está activo.
+      */}
+      <ActivarNotificaciones />
     </div>
   )
 }

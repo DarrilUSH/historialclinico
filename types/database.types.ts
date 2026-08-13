@@ -976,6 +976,16 @@ export type Database = {
       puede_cargar_en_perfil: { Args: { perfil: string }; Returns: boolean }
       puede_otorgar_permisos: { Args: { perfil: string }; Returns: boolean }
       puede_ver_perfil: { Args: { perfil: string }; Returns: boolean }
+      registrar_suscripcion_push: {
+        Args: {
+          p_auth: string
+          p_endpoint: string
+          p_p256dh: string
+          p_profile_id?: string
+          p_user_agent?: string
+        }
+        Returns: string
+      }
     }
     Enums: {
       access_action:

@@ -48,3 +48,19 @@ Login de María → perfil gestionado de Roberto → se subió un PDF real por l
 Después se tocó (TAP real, `adb shell input tap`, no un click simulado) el punto más antiguo del gráfico (28/6, el extremo izquierdo). `sprint5-tendencias-tap.png` confirma que el anillo de selección saltó a ese punto y el panel de detalle de abajo se actualizó con SU fecha ("28 de junio de 2026"), SU valor ("148 mg/dL"), SU rango ("70-100") y el aviso "Sin documento de origen asociado" -a diferencia de la medición del 1/8, que sí tiene `document_id` y muestra el botón "Ver el estudio"-: la interacción táctil responde con los datos reales del punto tocado, no con un estado fijo. También se verificó "Ver como tabla" en el dispositivo: despliega la tabla accesible con las 5 filas, valor, rango y el link "Ver el estudio" solo en la fila que corresponde.
 | sprint5-ultimo-valor.png | Tendencias completas: tarjetas de último valor con badges y variación, chips de métrica y gráfico con banda de referencia y rombo fuera-de-rango (capturada por el orquestador en el checkpoint) |
 | sprint6-maps.png | La URL de Cómo llegar abre Google Maps con el destino de Ushuaia cargado y ruta calculada (verificación del orquestador por intent; permiso de ubicación NO concedido) |
+| sprint6-push.png | **Notificación Web Push real en la bandeja del sistema** (tarea 6.3): "Prueba de recordatorios / Si ves esto en la pantalla del celular, las notificaciones funcionan", con el origen `localhost:3000`, el ícono grande de la app (cruz blanca sobre verde `--primary`) a la derecha y la silueta monocroma del `badge` a la izquierda. Salió de FCM: el circuito completo —clave VAPID, cifrado aes128gcm, Push Service de Google, service worker, bandeja de Android— funcionando de punta a punta |
+
+## Sprint 6 · Web Push (tarea 6.3) — verificación completa
+
+Flujo real, todo con toques por ADB sobre `http://localhost:3000` (`adb reverse`, que en Chrome Android **sí** es contexto seguro):
+
+1. Login de María y perfil propio activo. En `/inicio` aparece el banner "No te pierdas ningún turno".
+2. **"Activar recordatorios"** → Chrome muestra el prompt NATIVO del sistema ("http://localhost:3000 quiere enviarte notificaciones", Bloquear / Permitir) → se tocó **Permitir**.
+3. La tarjeta cambió a "Notificaciones activadas" con el botón discreto "Desactivar", y en la base apareció la fila: endpoint `https://fcm.googleapis.com/fcm/send/…`, `p256dh` de 87 caracteres, `auth` de 22, user agent de Android y `profile_id` del perfil activo.
+4. **"Enviar prueba (dev)"** → la notificación llegó al teléfono (`sprint6-push.png`).
+5. **Tocar la notificación** llevó la app —reutilizando la pestaña abierta, sin abrir una nueva— a `localhost:3000/turnos`, que es la `url` del payload y no la pantalla donde estaba.
+6. **Caso 410**: se dio de baja la suscripción desde el navegador sin avisarle al servidor y se volvió a activar (fila nueva). El siguiente envío devolvió 404/410 para la fila vieja y quedó con `revoked_at` seteado automáticamente (17:17:36), mientras la fila nueva recibió el push. La baja explícita desde el botón "Desactivar" se verificó aparte (17:21:19).
+
+Dos bugs reales que solo aparecieron en el dispositivo, y que están arreglados: `/sw.js` respondía `307 → /login` por la regla "privado por defecto" (el registro de un service worker no sigue redirecciones), y el `notificationclick` abría la app sin navegar porque la pestaña no estaba controlada por el worker. Detalle en `docs/push.md` §4.
+
+Ojo al depurar: Chrome puede reemplazar la notificación del sitio por una tarjeta propia de "Posible spam" con las opciones "Anular suscripción" / "Mostrar notificación". Es su protección antiabuso —se dispara fácil con un `http://localhost` desconocido que repite contenido— y **no** es un fallo de la aplicación.

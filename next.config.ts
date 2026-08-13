@@ -9,6 +9,13 @@ const nextConfig: NextConfig = {
   // en desarrollo: no tiene efecto en `next build`/producción.
   allowedDevOrigins: ["127.0.0.1"],
 
+  // `web-push` (Sprint 6, `lib/push/servidor.ts`) es CommonJS y resuelve
+  // `http_ece`/`asn1.js` con `require` dinámico. Bundlearlo rompe esa
+  // resolución en tiempo de ejecución, así que se deja como paquete externo:
+  // Next lo requiere desde `node_modules` en el servidor, que es donde -y
+  // solo donde- corre.
+  serverExternalPackages: ["web-push"],
+
   experimental: {
     serverActions: {
       // El límite por defecto de una Server Action es 1 MB, y el pipeline de

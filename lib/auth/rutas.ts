@@ -25,11 +25,39 @@ export const RUTA_LOGIN = "/login"
 export const RUTA_POST_LOGIN = "/perfiles"
 
 /**
+ * El service worker (`public/sw.js`), que **tiene que ser público** aunque no
+ * sea una pantalla.
+ *
+ * `navigator.serviceWorker.register()` descarga el script con una request que
+ * NO sigue redirecciones: si el proxy le contesta `307 → /login`, el registro
+ * falla con `The script resource is behind a redirect, which is disallowed` y
+ * las notificaciones no funcionan nunca. Y la regla "privado por defecto" de
+ * este archivo hace justamente eso, porque el `matcher` de `proxy.ts` solo
+ * excluye imágenes y los estáticos de `_next`, no un `.js` de `public/`.
+ *
+ * Que sea público no expone nada: `sw.js` es código que se descarga igual
+ * dentro de cualquier bundle del cliente y no contiene ni un dato de nadie.
+ * Además el navegador lo pide SIN cookies en el registro inicial, así que
+ * "protegerlo" con la sesión sería, además de inútil, imposible.
+ *
+ * Se descubrió probando en un teléfono real: en la máquina de desarrollo el
+ * archivo se sirve igual de mal (`307`) y nada lo delata hasta que se intenta
+ * registrar el worker.
+ */
+export const RUTA_SERVICE_WORKER = "/sw.js"
+
+/**
  * Rutas públicas: se sirven con o sin sesión. Cada entrada cubre la ruta
  * exacta y sus subrutas (`/recuperar` cubre `/recuperar/confirmar`), salvo
  * `/` que se compara exacta —si no, cubriría toda la aplicación—.
  */
-export const RUTAS_PUBLICAS = ["/", "/login", "/registro", "/recuperar"] as const
+export const RUTAS_PUBLICAS = [
+  "/",
+  "/login",
+  "/registro",
+  "/recuperar",
+  RUTA_SERVICE_WORKER,
+] as const
 
 /**
  * Rutas que solo tienen sentido sin sesión: si ya hay sesión activa, entrar
