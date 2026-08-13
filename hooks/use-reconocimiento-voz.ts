@@ -57,17 +57,11 @@ export interface UseReconocimientoVozResultado {
 }
 
 export function useReconocimientoVoz(): UseReconocimientoVozResultado {
-  const [soportado, setSoportado] = React.useState(false)
+  const [soportado] = React.useState(() => Boolean(obtenerConstructor()))
   const [estado, setEstado] = React.useState<EstadoReconocimientoVoz>("inactivo")
   const [transcripcion, setTranscripcion] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
   const reconocimientoRef = React.useRef<SpeechRecognition | null>(null)
-
-  // Solo verifica soporte -no crea ni arranca nada, así no hay pedido de
-  // permiso al montar el componente.
-  React.useEffect(() => {
-    setSoportado(Boolean(obtenerConstructor()))
-  }, [])
 
   const detener = React.useCallback(() => {
     reconocimientoRef.current?.stop()
@@ -76,7 +70,6 @@ export function useReconocimientoVoz(): UseReconocimientoVozResultado {
   const iniciar = React.useCallback(() => {
     const ConstructorReconocimiento = obtenerConstructor()
     if (!ConstructorReconocimiento) {
-      setSoportado(false)
       return
     }
 

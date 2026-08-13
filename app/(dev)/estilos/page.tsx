@@ -39,7 +39,7 @@ export default function PaginaEstilos() {
   const [dialogoAbierto, setDialogoAbierto] = React.useState(false)
   const [testigo, setTestigo] = React.useState("")
 
-  const accionDestructica = async (formData: FormData) => {
+  const accionDestructica = async () => {
     setTestigo("Acción confirmada en el diálogo")
     setDialogoAbierto(false)
   }
@@ -53,7 +53,7 @@ export default function PaginaEstilos() {
             <div>
               <h1 className="text-2xl font-bold text-primary">Estilos</h1>
               <p className="text-sm text-muted-foreground">
-                Kitchen sink del sistema "Salvia y Ámbar"
+                Kitchen sink del sistema &quot;Salvia y Ámbar&quot;
               </p>
             </div>
             <Link
@@ -425,7 +425,7 @@ export default function PaginaEstilos() {
         <section id="dialogo" className="mb-16 scroll-mt-32">
           <h2 className="mb-6 text-3xl font-bold">Diálogo de Confirmación</h2>
           <p className="mb-4 text-muted-foreground">
-            Para acciones destructivas. El botón "destructivo" no acepta onClick
+            Para acciones destructivas. El botón &quot;destructivo&quot; no acepta onClick
             — siempre va envuelto en DialogoConfirmacion.
           </p>
 

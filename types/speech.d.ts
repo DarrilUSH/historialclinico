@@ -85,7 +85,7 @@ interface SpeechRecognition extends EventTarget {
   ): void
 }
 
-declare var SpeechRecognition: {
+declare const SpeechRecognition: {
   prototype: SpeechRecognition
   new (): SpeechRecognition
 }
@@ -95,7 +95,7 @@ interface SpeechRecognitionEvent extends Event {
   readonly results: SpeechRecognitionResultList
 }
 
-declare var SpeechRecognitionEvent: {
+declare const SpeechRecognitionEvent: {
   prototype: SpeechRecognitionEvent
   new (
     type: string,
@@ -108,7 +108,7 @@ interface SpeechRecognitionErrorEvent extends Event {
   readonly message: string
 }
 
-declare var SpeechRecognitionErrorEvent: {
+declare const SpeechRecognitionErrorEvent: {
   prototype: SpeechRecognitionErrorEvent
   new (
     type: string,
