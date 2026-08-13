@@ -90,6 +90,7 @@ import { PROMPT_DOCUMENTO_MEDICO } from "@/lib/gemini/prompt-documento"
 import { SCHEMA_DOCUMENTO_MEDICO, type DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
 import { type ErrorGuarda, esErrorDeGuarda, requerirPermiso, requerirSesion } from "@/lib/auth/guardas"
 import { BUCKETS } from "@/lib/storage-admin"
+import { validarExtraccion } from "@/lib/validacion/documento.schema"
 
 export interface RespuestaExtraccionOk {
   extraccion: DocumentoMedicoExtraido
@@ -239,11 +240,23 @@ export async function POST(request: Request): Promise<Response> {
 
     let extraccion: DocumentoMedicoExtraido
     try {
-      extraccion = await extraerJson<DocumentoMedicoExtraido>({
+      const extraccionCruda = await extraerJson<DocumentoMedicoExtraido>({
         prompt: PROMPT_DOCUMENTO_MEDICO,
         media: { mimeType: documento.mime_type, data: base64 },
         schema: SCHEMA_DOCUMENTO_MEDICO,
       })
+
+      // Validar la respuesta de Gemini contra el schema Zod espejo antes de persistir
+      const validacion = validarExtraccion(extraccionCruda)
+      if (!validacion.ok) {
+        console.error(
+          `[extraccion] Validación Zod fallida para ${documentoId}:`,
+          validacion.errores.join(" | "),
+        )
+        return json({ error: MENSAJE_RESPUESTA_INVALIDA }, 502)
+      }
+
+      extraccion = validacion.datos
     } catch (error) {
       const { status, mensaje } = respuestaDeErrorGemini(error)
       return json({ error: mensaje }, status)
