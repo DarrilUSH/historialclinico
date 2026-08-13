@@ -11,7 +11,7 @@ import { useActionState, useEffect, useRef } from "react"
 import { useFormStatus } from "react-dom"
 import { CircleCheckIcon, Loader2Icon, SendIcon } from "lucide-react"
 
-import { invitarFamiliar, type EstadoFamilia } from "@/app/(app)/familia/actions"
+import { invitarFamiliar, type EstadoFamilia } from "@/app/(app)/(con-nav)/familia/actions"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"

@@ -1,0 +1,81 @@
+/**
+ * Shell de toda la sección autenticada CON perfil activo: header mínimo
+ * (`EncabezadoPerfil`) + contenido + bottom nav fija de 4 accesos
+ * (`BottomNav`). Envuelve `/inicio`, `/estudios`, `/turnos`, `/familia` (y
+ * sus subrutas, como `/familia/accesos`).
+ *
+ * ## Por qué NO es literalmente `app/(app)/layout.tsx`
+ *
+ * `/perfiles` (el selector "estilo Netflix", Sprint 2) vive bajo `app/(app)/`
+ * pero TODAVÍA no hay perfil activo elegido en ese punto -es la pantalla que
+ * lo elige-. Una bottom nav ahí sería, en el mejor caso, prematura (4 accesos
+ * a datos de un perfil que nadie fijó todavía) y en el peor, un salto directo
+ * de vuelta al layout que reclama uno.
+ *
+ * La solución de menor superficie es un route group hermano: este shell vive
+ * en `app/(app)/(con-nav)/` y el selector se movió a
+ * `app/(app)/(sin-nav)/perfiles/`. Los paréntesis no agregan segmento de URL
+ * (convención de Next.js), así que `/inicio`, `/estudios`, `/turnos`,
+ * `/familia` y `/perfiles` conservan exactamente las mismas rutas que antes
+ * del Sprint 3 -ver `tests/unit/rutas.test.ts`, que verifica la matriz de
+ * rutas por pathname y no le importa dónde vive el archivo-.
+ *
+ * ## Perfil inválido nunca ve el shell con datos (garantía de revalidación)
+ *
+ * `obtenerPerfilActivo()` (`lib/perfil-activo.ts`) revalida el permiso contra
+ * la base en cada llamada; acá se usa para decidir si este layout se
+ * construye o si se redirige a `/perfiles`. La duda obvia es si un layout de
+ * Next.js vuelve a ejecutar esa revalidación en CADA navegación client-side
+ * (por ejemplo, al tocar "Estudios" en la bottom nav sin recargar la
+ * página) o si un layout "compartido" queda cacheado y deja de revisar.
+ *
+ * Acá no hay ambigüedad porque `obtenerPerfilActivo` llama a `cookies()`
+ * (a través de `requerirPermiso` → `lib/auth/guardas.ts`): eso marca este
+ * segmento de ruta como **dinámico**, lo saca de cualquier optimización
+ * estática, y en Next.js 15+ (vigente en 16.3) el Client Router Cache usa
+ * `staleTimes.dynamic = 0` por defecto para segmentos dinámicos -es decir,
+ * CERO cache: cada navegación, incluida la que solo cambia de pestaña dentro
+ * de esta misma bottom nav, vuelve a pedir el RSC payload al servidor y
+ * vuelve a ejecutar este layout entero desde cero. Un perfil revocado entre
+ * medio se detecta en la navegación siguiente, no "eventualmente".
+ *
+ * Como estas páginas (`/inicio`, `/familia`, ahora `/estudios` y `/turnos`)
+ * TAMBIÉN llaman a `obtenerPerfilActivo()` por su cuenta -la necesitan para
+ * su propio contenido, y no hay forma de pasar props de un layout a su
+ * página en App Router-, la función está envuelta en `cache()` de React
+ * (ver el comentario en `lib/perfil-activo.ts`): layout y página comparten un
+ * único resultado memoizado por request, así que esto no duplica la consulta
+ * a la base ni corre el riesgo de que las dos vean perfiles distintos.
+ */
+
+import type { ReactNode } from "react"
+import { redirect } from "next/navigation"
+
+import { BottomNav } from "@/components/navegacion/bottom-nav"
+import { EncabezadoPerfil } from "@/components/navegacion/encabezado-perfil"
+import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+
+export default async function LayoutConNav({ children }: { children: ReactNode }) {
+  const activo = await obtenerPerfilActivo()
+
+  if (!activo) {
+    redirect("/perfiles")
+  }
+
+  const { perfil, permisos } = activo
+
+  return (
+    <div className="flex min-h-pantalla w-full flex-col bg-background">
+      <EncabezadoPerfil perfil={perfil} esPropio={permisos.esPropio} />
+
+      {/* `pb-[...]` reserva exactamente el alto de la bottom nav fija
+          (`--spacing-bottom-nav`, app/globals.css) más su safe-area: sin esto,
+          el último elemento de cada pantalla queda tapado por la nav. */}
+      <main className="flex flex-1 flex-col pb-[calc(var(--spacing-bottom-nav)+env(safe-area-inset-bottom))]">
+        {children}
+      </main>
+
+      <BottomNav />
+    </div>
+  )
+}

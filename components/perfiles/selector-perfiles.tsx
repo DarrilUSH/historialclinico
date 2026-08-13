@@ -18,7 +18,7 @@ import type { ReactNode } from "react"
 
 import { EyeIcon, ShieldCheckIcon, UploadIcon, UserRoundIcon } from "lucide-react"
 
-import { elegirPerfil } from "@/app/(app)/perfiles/actions"
+import { elegirPerfil } from "@/app/(app)/(sin-nav)/perfiles/actions"
 import { colorAvatarPara, inicialesDe } from "@/lib/perfiles/avatar"
 import { cn } from "@/lib/utils"
 import type { Perfil } from "@/types/dominio"

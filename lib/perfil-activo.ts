@@ -21,6 +21,8 @@ import "server-only"
  * relación correcto en `/inicio` y en el selector.
  */
 
+import { cache } from "react"
+
 import { cookies } from "next/headers"
 
 import { ACCION, registrarAcceso } from "@/lib/auditoria"
@@ -139,8 +141,22 @@ export async function limpiarPerfilActivo(): Promise<void> {
  *
  * Quien llama (típicamente una página bajo `app/(app)`) decide qué hacer con
  * `null`; el patrón esperado es `redirect("/perfiles")`.
+ *
+ * **Envuelta en `cache()` de React (Sprint 3, `app/(app)/(con-nav)/layout.tsx`).**
+ * Desde que existe el shell con bottom nav, esta función se llama dos veces
+ * por request: una vez en el layout (para armar el encabezado y decidir si
+ * redirige a `/perfiles`) y otra vez en la página (que necesita el mismo
+ * `perfil`/`permisos` para su propio contenido). `cache()` memoiza por
+ * request de render de React Server Components: la segunda llamada devuelve
+ * el mismo resultado sin repetir el viaje a la base, y las dos siempre ven
+ * exactamente el mismo perfil -no hay ventana donde layout y página lean
+ * datos de dos consultas distintas-. El scope de la memoización es el
+ * request en curso: en el siguiente request (o la siguiente navegación
+ * client-side, que en Next.js vuelve a ejecutar este segmento porque usa
+ * `cookies()` y por lo tanto es dinámico) se vuelve a ejecutar entero,
+ * revalidando el permiso contra la base como siempre.
  */
-export async function obtenerPerfilActivo(): Promise<PerfilActivo | null> {
+export const obtenerPerfilActivo = cache(async (): Promise<PerfilActivo | null> => {
   const cookieStore = await cookies()
   const perfilId = cookieStore.get(COOKIE_PERFIL_ACTIVO)?.value
 
@@ -214,7 +230,7 @@ export async function obtenerPerfilActivo(): Promise<PerfilActivo | null> {
     perfil,
     permisos: { esPropio: false, canView: true, canUpload, canManage },
   }
-}
+})
 
 // Re-exportado para que quien maneja el resultado de `fijarPerfilActivo` en
 // una Server Action pueda distinguir "permiso denegado" sin importar directo

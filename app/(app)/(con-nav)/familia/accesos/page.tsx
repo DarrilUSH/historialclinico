@@ -135,12 +135,12 @@ export default async function PaginaAccesos() {
 
   if (errorAccesos) {
     return (
-      <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-4 px-4 py-12 text-center">
         <h1 className="text-2xl font-semibold">No pudimos cargar los accesos</h1>
         <p className="max-w-md text-base text-muted-foreground">
           Probá recargar la página en unos segundos. Si el problema sigue, escribinos.
         </p>
-      </main>
+      </div>
     )
   }
 
@@ -167,7 +167,7 @@ export default async function PaginaAccesos() {
   }))
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-8 px-4 py-10 sm:py-14">
+    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-10 sm:py-14">
       <div className="flex flex-col gap-4">
         <Link
           href="/familia"
@@ -222,13 +222,13 @@ export default async function PaginaAccesos() {
         Este registro no se puede editar ni borrar, tampoco por vos: queda como constancia de
         quién accedió a estos datos de salud.
       </p>
-    </main>
+    </div>
   )
 }
 
 function AccesoDenegado({ nombrePerfil }: { nombrePerfil: string }) {
   return (
-    <main className="flex min-h-dvh w-full flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+    <div className="flex w-full flex-1 flex-col items-center justify-center gap-4 px-4 py-12 text-center">
       <h1 className="text-2xl font-semibold">No podés ver estos accesos</h1>
       <p className="max-w-md text-base text-muted-foreground">
         La lista de quién entró al historial de <strong>{nombrePerfil}</strong> es solo para
@@ -241,6 +241,6 @@ function AccesoDenegado({ nombrePerfil }: { nombrePerfil: string }) {
         <ArrowLeftIcon className="size-4" aria-hidden="true" />
         Volver a inicio
       </Link>
-    </main>
+    </div>
   )
 }

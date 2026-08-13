@@ -56,7 +56,7 @@ import "server-only"
  * | `descargar_archivo`  | Emisión de signed URL del bucket `documentos-medicos` | Sprint 4 |
  * | `ver_credencial`     | Apertura de la foto de una credencial de cobertura | Sprint 8 |
  * | `exportar_ficha`     | Generación de la ficha SOS imprimible | Sprint 6 |
- * | `otorgar_permiso` / `revocar_permiso` | `app/(app)/familia/actions.ts` | pendiente (fuera del alcance de esta tarea) |
+ * | `otorgar_permiso` / `revocar_permiso` | `app/(app)/(con-nav)/familia/actions.ts` | pendiente (fuera del alcance de esta tarea) |
  *
  * `ver_perfil` se registra en `fijarPerfilActivo` y NO en `obtenerPerfilActivo`
  * a propósito: `obtenerPerfilActivo` corre en cada request de cada página bajo

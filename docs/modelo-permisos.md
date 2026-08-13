@@ -636,7 +636,7 @@ Los datos de salud son **datos sensibles** (art. 2 y 7): su tratamiento requiere
 
 - `access_logs` es **append-only**: `UPDATE` y `DELETE` denegados para todos los roles de usuario, sin excepción (matriz, sección 6). La tabla no tiene siquiera `updated_at`.
 - El `INSERT` exige `actor_user_id = auth.uid()`: no se falsifica el actor.
-- **El titular consulta sus accesos** (`app/(app)/familia/accesos`, Sprint 2), en lenguaje natural: *"María vio los estudios de Roberto — 12/08 14:30"*. Para un perfil gestionado, la consulta la hace su administrador ⚑, que es la vía por la que el titular ejerce el derecho.
+- **El titular consulta sus accesos** (`app/(app)/(con-nav)/familia/accesos`, Sprint 2; movida a ese route group en el Sprint 3 al agregar la bottom nav), en lenguaje natural: *"María vio los estudios de Roberto — 12/08 14:30"*. Para un perfil gestionado, la consulta la hace su administrador ⚑, que es la vía por la que el titular ejerce el derecho.
 - **Otorgar y revocar se auditan** con literales propios del enum, de modo que la historia de "quién tuvo acceso y en qué período" es reconstruible aunque la fila de permiso ya no exista.
 
 ### 9.3 Derechos del titular (arts. 14 a 16)

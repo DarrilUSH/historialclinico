@@ -69,12 +69,12 @@ export default async function PaginaFamilia() {
 
   if (errorPermisos) {
     return (
-      <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-4 px-4 py-12 text-center">
         <h1 className="text-2xl font-semibold">No pudimos cargar los accesos</h1>
         <p className="max-w-md text-base text-muted-foreground">
           Probá recargar la página en unos segundos. Si el problema sigue, escribinos.
         </p>
-      </main>
+      </div>
     )
   }
 
@@ -91,7 +91,7 @@ export default async function PaginaFamilia() {
   }))
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col gap-8 px-4 py-10 sm:py-14">
+    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-10 sm:py-14">
       <div className="flex flex-col gap-4">
         <Link
           href="/inicio"
@@ -117,7 +117,7 @@ export default async function PaginaFamilia() {
       </div>
 
       {/*
-        Entrada a la lista de accesos (app/(app)/familia/accesos). Vive acá y
+        Entrada a la lista de accesos (app/(app)/(con-nav)/familia/accesos). Vive acá y
         no en el inicio porque la autoridad para verla es exactamente la misma
         que la de esta pantalla (docs/modelo-permisos.md §4.1: un can_view no
         ve la lista de accesos), así que quien puede ver este enlace es
@@ -165,13 +165,13 @@ export default async function PaginaFamilia() {
         <h2 className="text-lg font-semibold text-foreground">Invitar a alguien</h2>
         <FormularioInvitar perfilId={perfil.id} />
       </section>
-    </main>
+    </div>
   )
 }
 
 function AccesoDenegado({ nombrePerfil }: { nombrePerfil: string }) {
   return (
-    <main className="flex min-h-dvh w-full flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+    <div className="flex w-full flex-1 flex-col items-center justify-center gap-4 px-4 py-12 text-center">
       <h1 className="text-2xl font-semibold">No podés administrar estos accesos</h1>
       <p className="max-w-md text-base text-muted-foreground">
         Solo quien es dueño de <strong>{nombrePerfil}</strong>, o quien lo administra cuando es un
@@ -184,6 +184,6 @@ function AccesoDenegado({ nombrePerfil }: { nombrePerfil: string }) {
         <ArrowLeftIcon className="size-4" aria-hidden="true" />
         Volver a inicio
       </Link>
-    </main>
+    </div>
   )
 }

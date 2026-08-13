@@ -2,7 +2,7 @@
 
 /**
  * Server Actions del ABM de permisos familiares (Sprint 2,
- * `app/(app)/familia/`). Tres operaciones sobre `family_permissions`:
+ * `app/(app)/(con-nav)/familia/`). Tres operaciones sobre `family_permissions`:
  * invitar (INSERT), editar flags (UPDATE) y revocar (DELETE).
  *
  * Los tres `insert`/`update`/`delete` van con el cliente del USUARIO -nunca

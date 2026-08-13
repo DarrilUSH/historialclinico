@@ -29,7 +29,7 @@ import {
   UploadIcon,
 } from "lucide-react"
 
-import { actualizarPermiso, revocarPermiso, type EstadoFamilia } from "@/app/(app)/familia/actions"
+import { actualizarPermiso, revocarPermiso, type EstadoFamilia } from "@/app/(app)/(con-nav)/familia/actions"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import {

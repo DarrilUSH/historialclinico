@@ -317,6 +317,12 @@
   --spacing-tactil: max(48px, 2.75rem); /* 49.5px por defecto */
   --spacing-tactil-amplio: max(56px, 3.25rem); /* 58.5px por defecto */
 
+  /* Alto de la bottom nav fija (components/navegacion/bottom-nav.tsx). El
+     shell de app/(app)/(con-nav)/layout.tsx reserva este mismo alto como
+     padding-bottom del contenido para que la nav nunca lo tape. Un solo
+     token para las dos puntas: si la nav crece, el padding crece con ella. */
+  --spacing-bottom-nav: 4.75rem; /* 85.5px por defecto */
+
   /* Sombras: dos niveles, teñidas al verde del fondo. Sin glassmorphism,
      sin negro puro. */
   --shadow-suave:
@@ -336,6 +342,18 @@
 @utility objetivo-tactil {
   min-block-size: var(--spacing-tactil);
   min-inline-size: var(--spacing-tactil);
+}
+
+/* Alto de viewport con fallback real: `100dvh` es la unidad correcta en
+   móvil (descuenta la barra del navegador que aparece/desaparece), pero un
+   navegador que no la entienda tiene que quedarse con `100vh` en vez de con
+   `auto`. Dos declaraciones de la misma propiedad en la misma regla: el
+   navegador ignora la que no entiende y conserva la anterior -no sirve
+   repartirlas en dos clases de Tailwind, el orden de las reglas generadas
+   no está garantizado-. Usada por el shell de app/(app)/(con-nav)/layout.tsx. */
+@utility min-h-pantalla {
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Datos clínicos: cifras de ancho fijo para que columnas de valores,
