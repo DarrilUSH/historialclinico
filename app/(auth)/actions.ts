@@ -27,6 +27,7 @@ import { redirect } from "next/navigation"
 import type { AuthError } from "@supabase/supabase-js"
 
 import { createClient } from "@/lib/supabase/server"
+import { ACCION, registrarAcceso } from "@/lib/auditoria"
 import {
   PARAM_DESDE,
   RUTA_LOGIN,
@@ -201,6 +202,14 @@ export async function iniciarSesion(
   if (error) {
     return { error: mapearErrorAuth(error) }
   }
+
+  // Auditoría (lib/auditoria.ts): SIN `perfilId`, porque iniciar sesión no es
+  // un acceso a los datos de un tercero. La fila queda a nombre del perfil
+  // propio -o sin perfil, si la cuenta todavía no creó el suyo-. Va después
+  // del `signInWithPassword` exitoso: un login FALLIDO no genera fila (no hay
+  // sesión, y la política de INSERT lo rechazaría igual). `registrarAcceso`
+  // no lanza, así que esto no puede dejar a nadie afuera de su historial.
+  await registrarAcceso({ accion: ACCION.login })
 
   redirect(destino ?? RUTA_POST_LOGIN)
 }

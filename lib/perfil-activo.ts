@@ -23,6 +23,7 @@ import "server-only"
 
 import { cookies } from "next/headers"
 
+import { ACCION, registrarAcceso } from "@/lib/auditoria"
 import {
   type PermisoConcedido,
   ErrorPerfilInvalido,
@@ -64,6 +65,15 @@ export interface PerfilActivo {
  * cookie: nunca se persiste, ni transitoriamente, un perfil que la sesión no
  * puede ver. Si la validación falla, lanza `ErrorGuarda` (sesión ausente o
  * permiso denegado) y no toca la cookie.
+ *
+ * **Es el único punto que audita `ver_perfil`** (lib/auditoria.ts), porque es
+ * el único que corresponde a la acción "entró al perfil de X": se ejecuta al
+ * ELEGIR o CAMBIAR de perfil, no en cada request. Auditarlo en
+ * `obtenerPerfilActivo` -que corre en cada render de cada pantalla de
+ * `app/(app)`- produciría una fila por request y volvería ilegible la lista
+ * que el titular usa para controlar quién entra a sus datos. El registro
+ * ocurre DESPUÉS de que el permiso fue concedido: nunca se audita como acceso
+ * un intento rechazado.
  */
 export async function fijarPerfilActivo(perfilId: string): Promise<void> {
   await requerirPermiso(perfilId, "view", { siNoHaySesion: "lanzar" })
@@ -76,6 +86,8 @@ export async function fijarPerfilActivo(perfilId: string): Promise<void> {
     path: "/",
     maxAge: MAX_AGE_COOKIE_SEGUNDOS,
   })
+
+  await registrarAcceso({ perfilId, accion: ACCION.ver_perfil })
 }
 
 /**

@@ -23,7 +23,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { ArrowLeftIcon, UsersIcon } from "lucide-react"
+import { ArrowLeftIcon, ScrollTextIcon, UsersIcon } from "lucide-react"
 
 import { FormularioInvitar } from "@/components/familia/formulario-invitar"
 import { TarjetaPermiso, type FilaPermiso } from "@/components/familia/tarjeta-permiso"
@@ -115,6 +115,28 @@ export default async function PaginaFamilia() {
           </div>
         </div>
       </div>
+
+      {/*
+        Entrada a la lista de accesos (app/(app)/familia/accesos). Vive acá y
+        no en el inicio porque la autoridad para verla es exactamente la misma
+        que la de esta pantalla (docs/modelo-permisos.md §4.1: un can_view no
+        ve la lista de accesos), así que quien puede ver este enlace es
+        siempre quien puede abrirlo.
+      */}
+      <Link
+        href="/familia/accesos"
+        className="flex items-center gap-3 rounded-xl border border-border p-4 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      >
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <ScrollTextIcon className="size-5" aria-hidden="true" />
+        </span>
+        <span className="flex flex-col">
+          <span className="text-base font-medium text-foreground">Ver accesos al historial</span>
+          <span className="text-sm text-muted-foreground">
+            Quién entró a los datos de {perfil.full_name} y cuándo.
+          </span>
+        </span>
+      </Link>
 
       <section className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold text-foreground">Accesos otorgados</h2>
