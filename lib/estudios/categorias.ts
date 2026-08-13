@@ -40,6 +40,21 @@ export interface InfoCategoria {
   claseFondo: string
 }
 
+/**
+ * Orden estable de las 5 categorías para selects y filtros (Sprint 5, tarea
+ * 5.2, `components/estudios/filtros-estudios.tsx`): mismo orden de
+ * declaración que `INFO_CATEGORIA`, expuesto ya recorrible en vez de que
+ * cada consumidor repita `Object.keys(...) as CategoriaDocumento[]` con su
+ * propio cast.
+ */
+export const CATEGORIAS_EN_ORDEN: readonly CategoriaDocumento[] = [
+  "laboratory",
+  "imaging",
+  "prescription",
+  "consultation",
+  "other",
+]
+
 export const INFO_CATEGORIA: Record<CategoriaDocumento, InfoCategoria> = {
   laboratory: {
     etiqueta: "Laboratorio",

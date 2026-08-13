@@ -1,40 +1,60 @@
 /**
- * Cuerpo de `/estudios` (Sprint 5, tarea 5.1): la consulta paginada, la
- * agrupación por período y el estado vacío. Vive separado de `page.tsx`
- * para poder envolverlo en `<Suspense>` -mientras la consulta resuelve, la
- * persona ve `EsqueletoListaEstudios` en vez de una pantalla en blanco-,
- * mismo motivo de separación que `PantallaProcesando` documenta para
+ * Cuerpo de `/estudios` (Sprint 5, tarea 5.1; filtros en la tarea 5.2): la
+ * consulta paginada y filtrada, la agrupación por período y los estados
+ * vacíos. Vive separado de `page.tsx` para poder envolverlo en
+ * `<Suspense>` -mientras la consulta resuelve, la persona ve
+ * `EsqueletoListaEstudios` en vez de una pantalla en blanco-, mismo motivo
+ * de separación que `PantallaProcesando` documenta para
  * `/estudios/nuevo/procesando`.
  *
  * ## Paginación: "Ver más", nunca scroll infinito
  *
  * `hasta` es un límite ACUMULATIVO ("mostrar hasta N documentos"), no un
  * número de página: arranca en `POR_PAGINA` (15) y el botón "Ver más" navega
- * a `?hasta={hasta + POR_PAGINA}` con un `<Link>` real -Server Component de
+ * a `?hasta={hasta + POR_PAGINA}` (arrastrando los filtros activos, ver
+ * `serializarFiltrosEstudios`) con un `<Link>` real -Server Component de
  * punta a punta, sin JavaScript de cliente ni "cargar más" que dispare solo
  * al hacer scroll (ROADMAP_SPRINTS.md, Sprint 5: "nunca scroll infinito sin
- * control")-. `count: "exact"` en la misma consulta trae el total real sin
- * una segunda ida a la base, así el botón puede mostrar cuántos quedan.
+ * control")-. `count: "exact"` en la misma consulta trae el total real
+ * (YA filtrado) sin una segunda ida a la base, así el botón puede mostrar
+ * cuántos quedan.
  *
  * ## Por qué la consulta va acá y no en `page.tsx`
  *
  * El cliente de Supabase sale de `requerirSesion`, la MISMA guarda que usan
  * las Server Actions de este módulo: revalida sesión y deja que RLS
  * (`documents_select_puede_ver`, filtrando por `puede_ver_perfil(profile_id)`)
- * sea la barrera real. El `.eq("profile_id", perfilId)` de abajo es
- * acotación de la consulta, no la barrera de seguridad -mismo comentario que
- * traía la versión mínima de Sprint 4-.
+ * sea la barrera real. El `.eq("profile_id", perfilId)` de
+ * `construirConsultaEstudios` es acotación de la consulta, no la barrera de
+ * seguridad -mismo comentario que traía la versión mínima de Sprint 4-.
+ *
+ * ## Dos estados vacíos distintos
+ *
+ * `total === 0` con filtros activos (`hayFiltrosActivos(filtros)`) es "no
+ * hay estudios que coincidan con ESTOS filtros" -la persona tiene
+ * documentos, solo que ninguno matchea-, con la acción "Limpiar filtros".
+ * `total === 0` sin filtros es el vacío REAL del perfil -nunca cargó
+ * nada-, con la acción "Subir mi primer estudio" (criterio de aceptación de
+ * la tarea 5.1). Confundir los dos mandaría a alguien con documentos
+ * cargados a "subir tu primer estudio" solo porque el filtro no encontró
+ * nada, lo cual es directamente incorrecto.
  */
 
 import Link from "next/link"
 
-import { FlaskConicalIcon, UploadIcon } from "lucide-react"
+import { FlaskConicalIcon, SearchXIcon, UploadIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
 import { TarjetaEstudio, type DocumentoDeGaleria } from "@/components/estudios/tarjeta-estudio"
 import { Skeleton } from "@/components/ui/skeleton"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { agruparPorPeriodo } from "@/lib/estudios/agrupacion"
+import { construirConsultaEstudios } from "@/lib/estudios/consultas"
+import {
+  hayFiltrosActivos,
+  serializarFiltrosEstudios,
+  type FiltrosEstudios,
+} from "@/lib/estudios/filtros"
 
 export const POR_PAGINA = 15
 
@@ -43,15 +63,18 @@ export interface ListaEstudiosProps {
   /** Cuántos documentos mostrar como máximo en esta carga (paginación acumulativa). */
   hasta: number
   puedeSubir: boolean
+  /** Filtros ya validados (`parsearFiltrosEstudios`), aplicados a la consulta. */
+  filtros: FiltrosEstudios
 }
 
-export async function ListaEstudios({ perfilId, hasta, puedeSubir }: ListaEstudiosProps) {
+export async function ListaEstudios({ perfilId, hasta, puedeSubir, filtros }: ListaEstudiosProps) {
   const { supabase } = await requerirSesion({ desde: "/estudios" })
 
-  const { data: documentos, count, error } = await supabase
-    .from("documents")
-    .select("id, title, category, document_date, institution, ai_summary", { count: "exact" })
-    .eq("profile_id", perfilId)
+  const { data: documentos, count, error } = await construirConsultaEstudios(
+    supabase,
+    perfilId,
+    filtros,
+  )
     .order("document_date", { ascending: false })
     .order("created_at", { ascending: false })
     .range(0, hasta - 1)
@@ -70,7 +93,7 @@ export async function ListaEstudios({ perfilId, hasta, puedeSubir }: ListaEstudi
   const total = count ?? 0
 
   if (total === 0) {
-    return <EstadoVacio puedeSubir={puedeSubir} />
+    return hayFiltrosActivos(filtros) ? <EstadoVacioFiltrado /> : <EstadoVacio puedeSubir={puedeSubir} />
   }
 
   const filas = documentos ?? []
@@ -110,7 +133,11 @@ export async function ListaEstudios({ perfilId, hasta, puedeSubir }: ListaEstudi
 
       {restantes > 0 && (
         <Boton
-          render={<Link href={`/estudios?hasta=${hasta + POR_PAGINA}`} />}
+          render={
+            <Link
+              href={`/estudios?${serializarFiltrosEstudios(filtros, { hasta: String(hasta + POR_PAGINA) })}`}
+            />
+          }
           nativeButton={false}
           variant="outline"
           size="lg"
@@ -149,6 +176,37 @@ function EstadoVacio({ puedeSubir }: { puedeSubir: boolean }) {
           Subir mi primer estudio
         </Boton>
       )}
+    </div>
+  )
+}
+
+/**
+ * Vacío por filtro (tarea 5.2): distinto del vacío real de arriba -acá SÍ
+ * hay estudios cargados, ninguno matchea el filtro actual-. "Limpiar
+ * filtros" navega a la ruta pelada, sin ningún search param -ni de filtro
+ * ni de paginación-: `limpiarUrlFiltros` sobre un query string vacío
+ * siempre da `""`, así que el link es directamente `/estudios` (mismo
+ * resultado final, sin el `?` colgado de un query string vacío).
+ */
+function EstadoVacioFiltrado() {
+  return (
+    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center">
+      <span
+        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        aria-hidden="true"
+      >
+        <SearchXIcon className="size-8" />
+      </span>
+      <h2 className="text-xl font-semibold text-balance text-foreground">
+        No hay estudios que coincidan con estos filtros
+      </h2>
+      <p className="max-w-sm text-base text-muted-foreground">
+        Probá con otra categoría, institución o rango de fechas, o limpiá los filtros para ver todos
+        los estudios de nuevo.
+      </p>
+      <Boton render={<Link href="/estudios" />} nativeButton={false} variant="outline" size="lg" className="mt-2">
+        Limpiar filtros
+      </Boton>
     </div>
   )
 }
