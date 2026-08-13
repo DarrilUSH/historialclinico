@@ -14,19 +14,37 @@
  * Las dos variantes aceptan `variante="destacada"` para el acento ámbar
  * (`--accent`), reservado a superficies de realce -nunca un botón, ver
  * docs/design-system.md §1-.
+ *
+ * `CLASE_TARJETA_BASE` y `CLASE_TARJETA_INTERACTIVA` se exportan además como
+ * strings para el caso -Sprint 5, `components/estudios/tarjeta-estudio.tsx`-
+ * en el que la tarjeta interactiva tiene que ser una navegación real
+ * (`<Link>`, para que abrir en pestaña nueva, el menú contextual "Copiar
+ * enlace" y los lectores de pantalla la anuncien como enlace) y no un
+ * `<button>` que dispara `router.push`. `TarjetaInteractiva` sigue siendo
+ * el default para acciones que NO navegan -sigue el mismo consejo del
+ * comentario de arriba: "para navegar, envolverla en `<Link>` o manejar la
+ * navegación en `onClick`"-, pero envolver un `<button>` dentro de un
+ * `<Link>` (que renderiza `<a>`) anida contenido interactivo, inválido en
+ * HTML y con comportamiento inconsistente entre lectores de pantalla. Componer
+ * las mismas clases directo sobre el `<Link>` da la identidad visual idéntica
+ * sin ese anidado.
  */
 
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-const BASE =
+export const CLASE_TARJETA_BASE =
   "flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card py-(--card-spacing) text-base text-card-foreground shadow-suave ring-1 ring-border [--card-spacing:--spacing(5)]"
+
+const BASE = CLASE_TARJETA_BASE
 
 const DESTACADA = "ring-accent bg-accent/50 dark:bg-accent/20"
 
-const INTERACTIVA =
+export const CLASE_TARJETA_INTERACTIVA =
   "w-full text-left transition-[transform,box-shadow] duration-[var(--duracion-media)] ease-salida hover:-translate-y-0.5 hover:shadow-elevada hover:ring-primary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:translate-y-0 active:scale-[0.995] disabled:pointer-events-none disabled:opacity-50"
+
+const INTERACTIVA = CLASE_TARJETA_INTERACTIVA
 
 type TarjetaVariante = "default" | "destacada"
 
