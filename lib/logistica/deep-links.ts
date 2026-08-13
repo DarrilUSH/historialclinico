@@ -122,7 +122,7 @@ export function linkGoogleCalendar(args: {
   const dates = `${inicio}/${fin}`
 
   // Detalles: notas de preparación + dirección
-  let details = []
+  const details = []
   if (notas) {
     details.push(`Preparación: ${notas}`)
   }
