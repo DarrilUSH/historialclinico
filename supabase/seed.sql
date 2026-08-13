@@ -32,9 +32,19 @@
 -- =============================================================================
 
 -- María Gómez (administrador, puede gestionar perfiles)
+--
+-- OJO: confirmation_token, recovery_token y email_change_token_new no tienen
+-- default en el esquema de auth.users (default NULL, a diferencia de
+-- phone_change_token / email_change_token_current / reauthentication_token,
+-- que sí default a '' ). GoTrue los escanea como string no-nullable: un
+-- login por password contra un usuario insertado sin estos tres campos en
+-- '' falla con 500 "sql: Scan error ... converting NULL to string is
+-- unsupported". Un signUp real vía API nunca lo sufre porque GoTrue inserta
+-- '' él mismo; acá, insertando directo por SQL, hay que hacerlo a mano.
 insert into auth.users (
     id, instance_id, aud, role, email, encrypted_password,
     email_confirmed_at, created_at, updated_at,
+    confirmation_token, recovery_token, email_change_token_new, email_change,
     raw_app_meta_data, raw_user_meta_data
 ) values (
     '550e8400-e29b-41d4-a716-446655440001'::uuid,
@@ -46,6 +56,7 @@ insert into auth.users (
     now(),
     now(),
     now(),
+    '', '', '', '',
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{}'::jsonb
 ) on conflict (id) do nothing;
@@ -54,6 +65,7 @@ insert into auth.users (
 insert into auth.users (
     id, instance_id, aud, role, email, encrypted_password,
     email_confirmed_at, created_at, updated_at,
+    confirmation_token, recovery_token, email_change_token_new, email_change,
     raw_app_meta_data, raw_user_meta_data
 ) values (
     '550e8400-e29b-41d4-a716-446655440002'::uuid,
@@ -65,6 +77,7 @@ insert into auth.users (
     now(),
     now(),
     now(),
+    '', '', '', '',
     '{"provider":"email","providers":["email"]}'::jsonb,
     '{}'::jsonb
 ) on conflict (id) do nothing;
