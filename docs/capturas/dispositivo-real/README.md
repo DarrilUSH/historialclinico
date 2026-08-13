@@ -19,6 +19,16 @@ Samsung Galaxy A71 (SM-A715F), Android 13, Chrome — 2026-08-13, vía ADB (`adb
 
 Flujo verificado con toques e ingreso de texto reales por ADB: login de María → selección del perfil gestionado de Roberto → inicio. El camino de error (submit vacío) también se verificó en pantalla física.
 
+## Receta de login por ADB (Chrome + password manager de Google)
+
+El obstáculo es la hoja "¿Quieres usar la contraseña guardada?" del administrador de contraseñas de Google, que intercepta el foco y se traga el `input text`. Receta que funciona (verificada 2026-08-13, cierre del Sprint 7):
+
+1. `adb shell am force-stop com.android.chrome` y abrir `http://localhost:3000/login` con `am start -a android.intent.action.VIEW` — arrancar de estado limpio.
+2. Tocar el campo **Contraseña**. Si aparece la hoja del password manager: **keyevent 4 (BACK) y tocar el campo de nuevo** — tras un dismiss, Chrome no vuelve a mostrarla en esa sesión de página; queda el teclado con las sugerencias como chips inofensivos arriba (ignorarlos, jamás tocar credenciales guardadas del dueño).
+3. `input text "password123"` → `input keycombination 59 61` (SHIFT+TAB, salta al campo email) → `input text "maria@ejemplo.com.ar"`.
+4. Tocar "Iniciar sesión" (con el teclado abierto el botón queda a media pantalla — screencap antes de tocar para confirmar coordenadas).
+5. Al prompt "¿Quieres guardar la contraseña?" responder con BACK (nunca "Guardar": es una credencial de prueba del seed y no debe entrar al administrador real del dueño del equipo).
+
 ## Sprint 4 — pantalla de revisión (tarea 4.5)
 
 Flujo feliz completo en el dispositivo real: login de María → `/estudios/nuevo` → "Sacar foto" (la cámara nativa de Samsung se abre directo, sin selector intermedio) → compresión client-side confirmada en pantalla (6,2 MB → 145,1 KB) → subida → `/estudios/nuevo/procesando` → como la foto salió sin luz, Gemini no detectó nada legible y la pantalla cayó al fallback (`sprint4-revision-fallback.png`): la ruta **no murió**, el formulario quedó disponible para carga manual con el mismo diseño que el camino feliz. Se verificó además que el campo "Fecha del estudio" abre el selector de fecha **nativo** de Android (`sprint4-revision.png`), no una implementación HTML casera — clave para el criterio Senior UX del roadmap ("los date pickers nativos móviles son excelentes").
@@ -49,6 +59,7 @@ Después se tocó (TAP real, `adb shell input tap`, no un click simulado) el pun
 | sprint5-ultimo-valor.png | Tendencias completas: tarjetas de último valor con badges y variación, chips de métrica y gráfico con banda de referencia y rombo fuera-de-rango (capturada por el orquestador en el checkpoint) |
 | sprint6-maps.png | La URL de Cómo llegar abre Google Maps con el destino de Ushuaia cargado y ruta calculada (verificación del orquestador por intent; permiso de ubicación NO concedido) |
 | sprint6-push.png | **Notificación Web Push real en la bandeja del sistema** (tarea 6.3): "Prueba de recordatorios / Si ves esto en la pantalla del celular, las notificaciones funcionan", con el origen `localhost:3000`, el ícono grande de la app (cruz blanca sobre verde `--primary`) a la derecha y la silueta monocroma del `badge` a la izquierda. Salió de FCM: el circuito completo —clave VAPID, cifrado aes128gcm, Push Service de Google, service worker, bandeja de Android— funcionando de punta a punta |
+| sprint7-medicacion.png | `/medicacion` (tareas 7.2/7.3) en el perfil gestionado de Roberto: botón grande "Agregar medicación", tarjeta de Enalapril con presentación, dosis ("1 comprimido — Cada 24 horas"), panel de stock prominente ("90 días de stock · se acaba el 11 de noviembre") y acciones Editar/Suspender; Glucophage asomando debajo y bottom nav fija. Capturada por el orquestador en el cierre del 2026-08-13; sin tomas de hoy visibles porque la base estaba en estado seed (las tomas las materializa el cron o el alta) |
 | sprint6-recordatorio.png | **Recordatorio de turno PROGRAMADO** (tarea 6.4), expandido en la bandeja: "Turno de Cardiología en 3 horas / Hoy a las 17:54 · Dr. Carlos Rodríguez · Hospital Regional Ushuaia · Venir en ayunas de 8 horas". No lo disparó ningún botón de la app: lo generó `pg_cron` sobre un turno cargado a 2h55m y lo entregó el barrido de `/api/push/procesar-recordatorios`. Debajo se ven los otros dos recordatorios reales que salieron en el mismo barrido para los turnos del seed ("Turno de Cardiología pasado mañana", "Turno de Endocrinología en una semana") |
 
 ## Sprint 6 · Web Push (tarea 6.3) — verificación completa
