@@ -707,8 +707,15 @@ select pruebas_rls.registrar('7. estructura',
        'Tablas de public sin RLS  [CRITERIO DE ACEPTACIÓN]', '0', count(*)::text)
   from pg_tables where schemaname = 'public' and rowsecurity = false;
 
+-- Las dos tablas de INFRAESTRUCTURA del proyecto: RLS habilitada y cero
+-- políticas, a propósito (`20260812220000_rls.sql` §5.6 y
+-- `20260813050000_recordatorios_turnos.sql` §3). Ninguna sesión de la
+-- aplicación las toca: las escriben los triggers SECURITY DEFINER, pg_cron y
+-- los barridos con service_role. Que aparezca una TERCERA en esta lista es un
+-- olvido de políticas, no una tabla de infraestructura nueva.
 select pruebas_rls.registrar('7. estructura',
-       'Tablas de public sin ninguna política (salvo la cola)', 'storage_purge_queue',
+       'Tablas de public sin ninguna política (solo las dos de infraestructura)',
+       'appointment_reminders, storage_purge_queue',
        coalesce(string_agg(t.tablename, ', ' order by t.tablename), '(ninguna)'))
   from pg_tables t
  where t.schemaname = 'public'
@@ -1155,6 +1162,323 @@ select pruebas_rls.registrar('8c. institución/especialidad/médico',
 -- Los dos documentos de este bloque no se borran acá a propósito, mismo
 -- criterio que el cierre de BLOQUE 8/8b: la limpieza final del script los
 -- arrastra por CASCADE al borrar auth.users.
+
+
+-- =============================================================================
+-- BLOQUE 9 — recordatorios de turnos: infraestructura cerrada (tarea 6.4)
+-- -----------------------------------------------------------------------------
+-- `appointment_reminders` y sus funciones son INFRAESTRUCTURA: las escriben
+-- pg_cron (como postgres) y el barrido de `/api/push/procesar-recordatorios`
+-- (como service_role). Una sesión de la aplicación no tiene nada que hacer ahí,
+-- y dos de esas funciones serían fugas si estuvieran expuestas:
+--
+--   · `destinatarios_de_avisos()` devuelve `user_id` de OTRAS cuentas (las de
+--     los can_manage sobre un perfil). Es exactamente el tipo de dato que
+--     ninguna política del proyecto deja ver.
+--   · `configurar_cron_recordatorios()` ESCRIBE secretos en el Vault.
+--
+-- El bloque prueba las dos capas: privilegio de tabla (que es lo que frena un
+-- TRUNCATE, cosa que RLS no hace) y privilegio de ejecución de las funciones.
+-- =============================================================================
+\echo '### BLOQUE 9 — recordatorios de turnos (infraestructura)'
+
+-- Ni anon ni authenticated tienen NINGÚN privilegio sobre las dos tablas de
+-- infraestructura. Sin esto, el default de Supabase
+-- (`alter default privileges ... grant all on tables to anon, authenticated`)
+-- las deja con TRUNCATE, y RLS no protege de un TRUNCATE.
+select pruebas_rls.registrar('9. recordatorios',
+       'Privilegios de anon/authenticated sobre las tablas de infraestructura', '0', count(*)::text)
+  from information_schema.role_table_grants
+ where table_schema = 'public'
+   and table_name in ('appointment_reminders', 'storage_purge_queue')
+   and grantee in ('anon', 'authenticated');
+
+select pruebas_rls.registrar('9. recordatorios',
+       'Funciones del job ejecutables por anon o authenticated', '0', count(*)::text)
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public'
+   and p.proname in ('generar_recordatorios_pendientes', 'reclamar_recordatorios_turnos',
+                     'cerrar_recordatorio_turno', 'destinatarios_de_avisos',
+                     'configurar_cron_recordatorios', 'disparar_recordatorios_turnos')
+   and (has_function_privilege('anon', p.oid, 'execute')
+        or has_function_privilege('authenticated', p.oid, 'execute'));
+
+select pruebas_rls.registrar('9. recordatorios',
+       'appointment_reminders tiene RLS habilitada', 'true',
+       coalesce((select rowsecurity::text from pg_tables
+                  where schemaname = 'public' and tablename = 'appointment_reminders'),
+                '(la tabla no existe)'));
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.appointment_reminders;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('9. recordatorios',
+        'A lee appointment_reminders', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.generar_recordatorios_pendientes();
+        v := 'ejecutado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('9. recordatorios',
+        'A ejecuta generar_recordatorios_pendientes()', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.reclamar_recordatorios_turnos(5);
+        v := 'ejecutado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('9. recordatorios',
+        'A ejecuta reclamar_recordatorios_turnos() (podría mandar avisos ajenos)',
+        'denegado (42501)', v);
+end $$;
+
+-- El argumento es irrelevante: el privilegio de EXECUTE se verifica antes de
+-- evaluar la función, así que `null` alcanza y evita depender de qué perfiles
+-- existen en este punto del script. (psql no interpola `:variables` dentro de
+-- un bloque dollar-quoted, de ahí que no se use `:p_g`.)
+do $$
+declare v text; u uuid;
+begin
+    begin
+        select d into u from public.destinatarios_de_avisos(null) as d;
+        v := 'ejecutado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('9. recordatorios',
+        'A ejecuta destinatarios_de_avisos() (fuga de user_id ajenos)', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.configurar_cron_recordatorios('http://atacante.example', 'secreto');
+        v := 'ejecutado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('9. recordatorios',
+        'A ejecuta configurar_cron_recordatorios() (escribe secretos del Vault)',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.disparar_recordatorios_turnos();
+        v := 'ejecutado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('9. recordatorios',
+        'A ejecuta disparar_recordatorios_turnos()', 'denegado (42501)', v);
+end $$;
+
+commit;
+
+-- A QUIÉN le llega el aviso, que es la otra mitad de la tarea. Se usa el
+-- perfil gestionado de B (Elsa, `p_g2`), que sigue vivo en este punto -el de A
+-- lo borró el BLOQUE 5- y que no tiene cuenta propia: el único destinatario
+-- posible es su administrador.
+select pruebas_rls.registrar('9. recordatorios',
+       'destinatarios_de_avisos() de un perfil gestionado: su can_manage',
+       'u_b',
+       coalesce((select string_agg(case when d = :u_a then 'u_a'
+                                        when d = :u_b then 'u_b'
+                                        else d::text end, ', ' order by 1)
+                   from public.destinatarios_de_avisos(:p_g2) as d),
+                '(nadie)'));
+
+-- LA REGLA DE docs/modelo-permisos.md §4.3, CON LOS DIENTES AFUERA: se le da a
+-- A un `can_view` + `can_upload` sobre el mismo perfil y NO tiene que aparecer
+-- entre los destinatarios. Poder mirar el historial de alguien no es lo mismo
+-- que ser quien lo lleva al médico, y notificarle sus turnos sería contarle
+-- algo que no le corresponde.
+insert into public.family_permissions
+    (owner_profile_id, granted_profile_id, can_view, can_upload, can_manage)
+values (:p_g2, :p_a, true, true, false);
+
+select pruebas_rls.registrar('9. recordatorios',
+       'Un can_view/can_upload NO recibe los avisos del perfil', 'u_b',
+       coalesce((select string_agg(case when d = :u_a then 'u_a'
+                                        when d = :u_b then 'u_b'
+                                        else d::text end, ', ' order by 1)
+                   from public.destinatarios_de_avisos(:p_g2) as d),
+                '(nadie)'));
+
+-- Y en cuanto ese permiso pasa a can_manage, sí entra.
+update public.family_permissions set can_manage = true
+ where owner_profile_id = :p_g2 and granted_profile_id = :p_a;
+
+select pruebas_rls.registrar('9. recordatorios',
+       'Ascender a can_manage suma a la persona a los destinatarios', 'u_a, u_b',
+       coalesce((select string_agg(case when d = :u_a then 'u_a'
+                                        when d = :u_b then 'u_b'
+                                        else d::text end, ', ' order by 1)
+                   from public.destinatarios_de_avisos(:p_g2) as d),
+                '(nadie)'));
+
+-- Un perfil CON cuenta (el de A) se recibe a sí mismo por la rama del titular,
+-- y suma a quien lo administre -en este punto del script B ya tiene can_manage
+-- sobre A-. El `string_agg` mostraría los repetidos si el `union` no
+-- deduplicara.
+select pruebas_rls.registrar('9. recordatorios',
+       'El titular con cuenta se recibe a sí mismo, sin duplicados, y suma a su can_manage',
+       'u_a, u_b',
+       coalesce((select string_agg(case when d = :u_a then 'u_a'
+                                        when d = :u_b then 'u_b'
+                                        else d::text end, ', ' order by 1)
+                   from public.destinatarios_de_avisos(:p_a) as d),
+                '(nadie)'));
+
+-- Un perfil que no existe no rompe nada ni devuelve a nadie: el barrido lo
+-- cierra con 0 entregas en vez de fallar.
+select pruebas_rls.registrar('9. recordatorios',
+       'Un perfil inexistente no devuelve destinatarios', '(nadie)',
+       coalesce((select string_agg(d::text, ', ')
+                   from public.destinatarios_de_avisos(
+                            '00000000-0000-4000-8000-000000000000') as d),
+                '(nadie)'));
+
+
+-- =============================================================================
+-- BLOQUE 10 — ventanas de los recordatorios: la regla antispam (tarea 6.4)
+-- -----------------------------------------------------------------------------
+-- No es RLS -como el BLOQUE 8- pero vive acá por el mismo motivo: es lógica de
+-- base que ninguna prueba de TypeScript puede ejercitar, y es la garantía de
+-- producto más frágil de la tarea. Si se rompe, la consecuencia no es un error
+-- visible: es que a alguien le llegan cuatro notificaciones juntas del mismo
+-- turno, o que no le llega ninguna.
+--
+-- El caso 5 en particular es una regresión REAL encontrada en revisión: la
+-- primera versión colapsaba las ventanas dentro de una corrida pero no entre
+-- corridas, así que un barrido caído un día mandaba "mañana" y "en 3 horas"
+-- al mismo tiempo.
+-- =============================================================================
+\echo '### BLOQUE 10 — ventanas de los recordatorios (antispam)'
+
+-- Turno de prueba sobre el perfil propio de A, que sigue vivo en este punto.
+-- Se borra al final del bloque; si algo abortara antes, la limpieza general
+-- lo arrastra igual al borrar auth.users.
+insert into public.appointments (id, profile_id, specialty, appointment_date, status)
+values ('a0000000-0000-4000-8000-0000000b10c0'::uuid, :p_a, 'Traumatología',
+        now() + interval '8 days', 'confirmed');
+
+-- Función auxiliar: el estado de las ventanas del turno de prueba, ordenado
+-- de la más ancha a la más próxima, como '7d=omitido, 3h=pendiente'.
+create function pruebas_rls.ventanas() returns text language sql as $$
+    select coalesce(string_agg(ventana || '=' || estado, ', ' order by due_at),
+                    '(sin filas)')
+      from public.appointment_reminders
+     where appointment_id = 'a0000000-0000-4000-8000-0000000b10c0'::uuid;
+$$;
+
+select public.generar_recordatorios_pendientes();
+select pruebas_rls.registrar('10. ventanas',
+       'Turno a 8 días: ninguna ventana vencida todavía',
+       '(sin filas)', pruebas_rls.ventanas());
+
+update public.appointments set appointment_date = now() + interval '6 days 23 hours'
+ where id = 'a0000000-0000-4000-8000-0000000b10c0';
+select public.generar_recordatorios_pendientes();
+select pruebas_rls.registrar('10. ventanas',
+       'Turno a 6d23h: solo vence la de 7 días',
+       '7d=pendiente', pruebas_rls.ventanas());
+
+select public.generar_recordatorios_pendientes();
+select pruebas_rls.registrar('10. ventanas',
+       'Idempotencia: la corrida siguiente no crea nada',
+       '7d=pendiente', pruebas_rls.ventanas());
+
+-- El caso del roadmap: turno cargado (o reprogramado) con TODAS las ventanas
+-- ya vencidas. Cambiar la fecha borra las filas por trigger, así que este
+-- update prueba las dos cosas de una.
+update public.appointments set appointment_date = now() + interval '2 hours 50 minutes'
+ where id = 'a0000000-0000-4000-8000-0000000b10c0';
+select pruebas_rls.registrar('10. ventanas',
+       'Cambiar la fecha borra los recordatorios (trigger)',
+       '(sin filas)', pruebas_rls.ventanas());
+
+select public.generar_recordatorios_pendientes();
+select pruebas_rls.registrar('10. ventanas',
+       'Turno a 2h50m: las 4 ventanas vencidas, se manda SOLO la más próxima',
+       '7d=omitido, 48h=omitido, 24h=omitido, 3h=pendiente', pruebas_rls.ventanas());
+
+-- Colapso ENTRE corridas: se simula un barrido caído dejando un pendiente
+-- viejo y ancho, y se comprueba que la corrida siguiente lo degrada en vez de
+-- sumarle una segunda notificación.
+delete from public.appointment_reminders
+ where appointment_id = 'a0000000-0000-4000-8000-0000000b10c0' and ventana <> '7d';
+update public.appointment_reminders set estado = 'pendiente', claimed_at = null, sent_at = null
+ where appointment_id = 'a0000000-0000-4000-8000-0000000b10c0';
+select public.generar_recordatorios_pendientes();
+select pruebas_rls.registrar('10. ventanas',
+       'Barrido caído: un pendiente viejo NO se suma al nuevo, se degrada [REGRESIÓN]',
+       '7d=omitido, 48h=omitido, 24h=omitido, 3h=pendiente', pruebas_rls.ventanas());
+
+-- Pero el colapso no puede reescribir la historia: lo que ya salió, salió.
+update public.appointment_reminders set estado = 'enviado', sent_at = now(), claimed_at = now()
+ where appointment_id = 'a0000000-0000-4000-8000-0000000b10c0' and ventana = '24h';
+update public.appointment_reminders set estado = 'pendiente', claimed_at = null
+ where appointment_id = 'a0000000-0000-4000-8000-0000000b10c0' and ventana = '48h';
+select public.generar_recordatorios_pendientes();
+select pruebas_rls.registrar('10. ventanas',
+       'El colapso degrada pendientes pero no toca lo ya enviado',
+       '7d=omitido, 48h=omitido, 24h=enviado, 3h=pendiente', pruebas_rls.ventanas());
+
+-- Cancelar: se van los que no salieron, queda el registro de los que sí.
+update public.appointments set status = 'cancelled'
+ where id = 'a0000000-0000-4000-8000-0000000b10c0';
+select pruebas_rls.registrar('10. ventanas',
+       'Cancelar borra lo pendiente y conserva lo enviado',
+       '7d=omitido, 48h=omitido, 24h=enviado', pruebas_rls.ventanas());
+
+select public.generar_recordatorios_pendientes();
+select pruebas_rls.registrar('10. ventanas',
+       'Un turno cancelado no genera recordatorios nuevos',
+       '7d=omitido, 48h=omitido, 24h=enviado', pruebas_rls.ventanas());
+
+-- Caducidad: el turno arrancó mientras el aviso esperaba en la cola.
+update public.appointments set status = 'confirmed', appointment_date = now() + interval '2 hours'
+ where id = 'a0000000-0000-4000-8000-0000000b10c0';
+select public.generar_recordatorios_pendientes();
+update public.appointments set appointment_date = now() - interval '5 minutes'
+ where id = 'a0000000-0000-4000-8000-0000000b10c0';
+insert into public.appointment_reminders (appointment_id, ventana, due_at, estado)
+values ('a0000000-0000-4000-8000-0000000b10c0'::uuid, '3h', now() - interval '5 hours', 'pendiente');
+select public.generar_recordatorios_pendientes();
+select pruebas_rls.registrar('10. ventanas',
+       'Un aviso de un turno que ya empezó no sale: caduca a omitido',
+       '3h=omitido', pruebas_rls.ventanas());
+
+-- Y el borrado del turno se lleva sus recordatorios (ON DELETE CASCADE).
+delete from public.appointments where id = 'a0000000-0000-4000-8000-0000000b10c0';
+select pruebas_rls.registrar('10. ventanas',
+       'Borrar el turno borra sus recordatorios (CASCADE)',
+       '(sin filas)', pruebas_rls.ventanas());
 
 
 -- =============================================================================

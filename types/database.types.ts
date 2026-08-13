@@ -91,6 +91,53 @@ export type Database = {
           },
         ]
       }
+      appointment_reminders: {
+        Row: {
+          appointment_id: string
+          claimed_at: string | null
+          created_at: string
+          due_at: string
+          entregas: number | null
+          estado: string
+          fallos: number | null
+          id: string
+          sent_at: string | null
+          ventana: string
+        }
+        Insert: {
+          appointment_id: string
+          claimed_at?: string | null
+          created_at?: string
+          due_at: string
+          entregas?: number | null
+          estado?: string
+          fallos?: number | null
+          id?: string
+          sent_at?: string | null
+          ventana: string
+        }
+        Update: {
+          appointment_id?: string
+          claimed_at?: string | null
+          created_at?: string
+          due_at?: string
+          entregas?: number | null
+          estado?: string
+          fallos?: number | null
+          id?: string
+          sent_at?: string | null
+          ventana?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "appointment_reminders_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       appointments: {
         Row: {
           appointment_date: string
@@ -885,6 +932,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cerrar_recordatorio_turno: {
+        Args: { p_entregas: number; p_fallos: number; p_id: string }
+        Returns: boolean
+      }
+      configurar_cron_recordatorios: {
+        Args: { p_secreto: string; p_url: string }
+        Returns: undefined
+      }
       confirmar_documento_recien_subido: {
         Args: {
           doc_id: string
@@ -955,9 +1010,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      destinatarios_de_avisos: {
+        Args: { p_profile_id: string }
+        Returns: string[]
+      }
+      disparar_recordatorios_turnos: { Args: never; Returns: string }
       es_perfil_gestionado: { Args: { perfil: string }; Returns: boolean }
       es_sesion_de_usuario: { Args: never; Returns: boolean }
       es_titular: { Args: { perfil: string }; Returns: boolean }
+      generar_recordatorios_pendientes: { Args: never; Returns: number }
       nombres_de_perfiles_vinculados: {
         Args: never
         Returns: {
@@ -976,6 +1037,20 @@ export type Database = {
       puede_cargar_en_perfil: { Args: { perfil: string }; Returns: boolean }
       puede_otorgar_permisos: { Args: { perfil: string }; Returns: boolean }
       puede_ver_perfil: { Args: { perfil: string }; Returns: boolean }
+      reclamar_recordatorios_turnos: {
+        Args: { p_limite?: number }
+        Returns: {
+          appointment_id: string
+          especialidad: string
+          fecha: string
+          lugar: string
+          medico: string
+          preparacion: string
+          profile_id: string
+          recordatorio_id: string
+          ventana: string
+        }[]
+      }
       registrar_suscripcion_push: {
         Args: {
           p_auth: string

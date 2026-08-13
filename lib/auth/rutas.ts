@@ -47,6 +47,28 @@ export const RUTA_POST_LOGIN = "/perfiles"
 export const RUTA_SERVICE_WORKER = "/sw.js"
 
 /**
+ * Barrido de recordatorios de turnos (Sprint 6.4). **"Público" acá significa
+ * "no lo autentica la cookie de sesión", NO "cualquiera puede llamarlo".**
+ *
+ * Quien lo consume es `pg_cron` a través de `pg_net`: un proceso de la base de
+ * datos, sin navegador, sin cookies y sin ninguna cuenta con la cual iniciar
+ * sesión. La sesión de Supabase es el mecanismo equivocado para esta request,
+ * y dejarla bajo la regla "privado por defecto" solo produce un `401` que
+ * ningún login puede resolver.
+ *
+ * La autenticación la hace el propio Route Handler
+ * (`app/api/push/procesar-recordatorios/route.ts`) comparando el header
+ * `x-cron-secret` contra `CRON_SECRET` en tiempo constante, y sin la variable
+ * cargada responde `503` en vez de quedar abierto. El endpoint no devuelve
+ * ningún dato -tres números- ni acepta parámetros: no se le puede pedir que le
+ * mande una notificación a nadie en particular.
+ *
+ * Mismo criterio que `RUTA_SERVICE_WORKER`: la excepción se declara con nombre
+ * propio, comentada, y `tests/unit/rutas.test.ts` la cubre.
+ */
+export const RUTA_CRON_RECORDATORIOS = "/api/push/procesar-recordatorios"
+
+/**
  * Rutas públicas: se sirven con o sin sesión. Cada entrada cubre la ruta
  * exacta y sus subrutas (`/recuperar` cubre `/recuperar/confirmar`), salvo
  * `/` que se compara exacta —si no, cubriría toda la aplicación—.
@@ -57,6 +79,7 @@ export const RUTAS_PUBLICAS = [
   "/registro",
   "/recuperar",
   RUTA_SERVICE_WORKER,
+  RUTA_CRON_RECORDATORIOS,
 ] as const
 
 /**

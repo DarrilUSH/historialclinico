@@ -268,6 +268,11 @@ aparte (17:21:19).
   (presión)** consumen `enviarPushAUsuario(userId, payload)` y **no** hablan
   con `web-push` ni con la tabla: toda la política de bajas vive en
   `lib/push/servidor.ts`.
+  6.4 **ya está hecha y sigue exactamente ese contrato** — ver
+  `docs/recordatorios.md`, que además explica por qué el job de `pg_cron`
+  termina llamando a un endpoint de Next en vez de a una Edge Function de Deno
+  (resumen: `web-push` es Node, y duplicar la clave privada VAPID en los
+  secrets de una Edge Function no compraba nada).
 - El `tag` del payload es la antiduplicación **del lado del dispositivo** (dos
   avisos con el mismo tag se reemplazan). Convención: `turno-{id}-{ventana}`,
   `medicacion-{id}`, `presion-{id}`. La antiduplicación del lado del servidor

@@ -49,6 +49,7 @@ Después se tocó (TAP real, `adb shell input tap`, no un click simulado) el pun
 | sprint5-ultimo-valor.png | Tendencias completas: tarjetas de último valor con badges y variación, chips de métrica y gráfico con banda de referencia y rombo fuera-de-rango (capturada por el orquestador en el checkpoint) |
 | sprint6-maps.png | La URL de Cómo llegar abre Google Maps con el destino de Ushuaia cargado y ruta calculada (verificación del orquestador por intent; permiso de ubicación NO concedido) |
 | sprint6-push.png | **Notificación Web Push real en la bandeja del sistema** (tarea 6.3): "Prueba de recordatorios / Si ves esto en la pantalla del celular, las notificaciones funcionan", con el origen `localhost:3000`, el ícono grande de la app (cruz blanca sobre verde `--primary`) a la derecha y la silueta monocroma del `badge` a la izquierda. Salió de FCM: el circuito completo —clave VAPID, cifrado aes128gcm, Push Service de Google, service worker, bandeja de Android— funcionando de punta a punta |
+| sprint6-recordatorio.png | **Recordatorio de turno PROGRAMADO** (tarea 6.4), expandido en la bandeja: "Turno de Cardiología en 3 horas / Hoy a las 17:54 · Dr. Carlos Rodríguez · Hospital Regional Ushuaia · Venir en ayunas de 8 horas". No lo disparó ningún botón de la app: lo generó `pg_cron` sobre un turno cargado a 2h55m y lo entregó el barrido de `/api/push/procesar-recordatorios`. Debajo se ven los otros dos recordatorios reales que salieron en el mismo barrido para los turnos del seed ("Turno de Cardiología pasado mañana", "Turno de Endocrinología en una semana") |
 
 ## Sprint 6 · Web Push (tarea 6.3) — verificación completa
 
@@ -64,3 +65,35 @@ Flujo real, todo con toques por ADB sobre `http://localhost:3000` (`adb reverse`
 Dos bugs reales que solo aparecieron en el dispositivo, y que están arreglados: `/sw.js` respondía `307 → /login` por la regla "privado por defecto" (el registro de un service worker no sigue redirecciones), y el `notificationclick` abría la app sin navegar porque la pestaña no estaba controlada por el worker. Detalle en `docs/push.md` §4.
 
 Ojo al depurar: Chrome puede reemplazar la notificación del sitio por una tarjeta propia de "Posible spam" con las opciones "Anular suscripción" / "Mostrar notificación". Es su protección antiabuso —se dispara fácil con un `http://localhost` desconocido que repite contenido— y **no** es un fallo de la aplicación.
+
+## Sprint 6 · recordatorios programados (tarea 6.4) — verificación completa
+
+La diferencia con la verificación de 6.3 es que acá **nadie tocó ningún botón**:
+la notificación la generó y la mandó el sistema solo.
+
+1. La suscripción del teléfono de 6.3 seguía activa (`revoked_at` nulo): no hizo
+   falta reactivarla.
+2. Turno de prueba de Cardiología cargado por SQL a **2h55m** sobre el perfil
+   gestionado de Roberto.
+3. `generar_recordatorios_pendientes()` creó las cuatro filas y dejó
+   **`pendiente` solo la de 3hs**; `7d`, `48h` y `24h` quedaron `omitido`. Es la
+   regla que evita cuatro notificaciones simultáneas para un turno cargado
+   tarde.
+4. El job completo (`disparar_recordatorios_turnos()` → `pg_net` → el endpoint
+   de Node) devolvió `200` con `{"procesados":1,"entregas":1,"fallos":1}`, y
+   **la notificación apareció en el teléfono** (`sprint6-recordatorio.png`).
+5. **Tocarla abrió `localhost:3000/turnos`.**
+6. Disparar el job otra vez: `{"procesados":0,...}`. No reenvía.
+7. Cambiar la fecha del turno borró las cuatro filas (trigger) y la corrida
+   siguiente las regeneró desde cero.
+8. `cron.job_run_details` muestra la corrida **automática** de las 18:00 en
+   `succeeded`: el job programado corre solo, sin que nadie lo invoque.
+
+El destinatario fue María, que tiene `can_manage` sobre Roberto. Roberto no
+tiene cuenta y Diego, que solo tiene `can_view`, **no** recibió nada — es la
+regla de `docs/modelo-permisos.md` §4.3 funcionando en un teléfono real.
+
+Un detalle que la prueba dejó a la vista y quedó anotado como límite conocido en
+`docs/recordatorios.md` §9: la notificación abre `/turnos`, que muestra los
+turnos del **perfil activo**. María tenía activo su propio perfil, así que
+aterrizó en una lista vacía aunque el aviso era de un turno de Roberto.
