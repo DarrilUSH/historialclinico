@@ -21,10 +21,15 @@
  */
 
 import type { Metadata } from "next"
+import Link from "next/link"
 import { redirect } from "next/navigation"
+
+import { PillIcon } from "lucide-react"
 
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
 import { ProximoTurno } from "@/components/inicio/proximo-turno"
+import { CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA } from "@/components/base/tarjeta"
+import { cn } from "@/lib/utils"
 import { obtenerPerfilActivo, type PermisosPerfilActivo } from "@/lib/perfil-activo"
 
 export const metadata: Metadata = {
@@ -52,6 +57,31 @@ export default async function PaginaInicio() {
 
       {/* Próximo turno (Sprint 6, tarea 6.3) */}
       <ProximoTurno />
+
+      {/*
+        Acceso a /medicacion (Sprint 7, tarea 7.2). Sin slot propio en la
+        bottom nav todavía -llega en el Sprint 9-, así que por ahora el
+        camino de entrada es esta card simple: sin fetch propio (a
+        diferencia de `ProximoTurno`, que sí resuelve datos), es solo un
+        acceso directo, igual para cualquier permiso -Diego (`can_view`)
+        también puede ver la medicación de Roberto, solo que sin botones de
+        edición dentro de la pantalla-.
+      */}
+      <Link
+        href="/medicacion"
+        className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
+      >
+        <span
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+          aria-hidden="true"
+        >
+          <PillIcon className="size-5" />
+        </span>
+        <span className="flex flex-col text-left">
+          <span className="text-base font-semibold text-foreground">Medicación</span>
+          <span className="text-sm text-muted-foreground">Ver horarios, stock y días restantes</span>
+        </span>
+      </Link>
 
       {/*
         El banner de recordatorios se renderiza SIEMPRE desde el servidor y

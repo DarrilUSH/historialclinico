@@ -611,6 +611,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "medication_intakes_medication_id_fkey"
+            columns: ["medication_id"]
+            isOneToOne: false
+            referencedRelation: "v_medicacion_estado"
+            referencedColumns: ["medication_id"]
+          },
+          {
             foreignKeyName: "medication_intakes_profile_id_fkey"
             columns: ["profile_id"]
             isOneToOne: false
@@ -929,7 +936,49 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      v_medicacion_estado: {
+        Row: {
+          active_ingredient: string | null
+          created_at: string | null
+          dias_restantes: number | null
+          dose_amount: number | null
+          dose_unit: string | null
+          dosis_diaria_total: number | null
+          end_date: string | null
+          fecha_estimada_fin: string | null
+          frequency: Database["public"]["Enums"]["medication_frequency"] | null
+          interval_hours: number | null
+          medication_id: string | null
+          name: string | null
+          necesita_renovacion: boolean | null
+          notes: string | null
+          prescription_document_id: string | null
+          presentation: string | null
+          profile_id: string | null
+          schedule_times: string[] | null
+          start_date: string | null
+          stock_units: number | null
+          tomas_por_dia: number | null
+          updated_at: string | null
+          vigente_hoy: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "medications_prescription_document_id_fkey"
+            columns: ["prescription_document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "medications_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       cerrar_recordatorio_turno: {
@@ -1019,6 +1068,7 @@ export type Database = {
       es_sesion_de_usuario: { Args: never; Returns: boolean }
       es_titular: { Args: { perfil: string }; Returns: boolean }
       generar_recordatorios_pendientes: { Args: never; Returns: number }
+      generar_tomas_del_dia: { Args: { fecha?: string }; Returns: number }
       nombres_de_perfiles_vinculados: {
         Args: never
         Returns: {
@@ -1060,6 +1110,50 @@ export type Database = {
           p_user_agent?: string
         }
         Returns: string
+      }
+      registrar_toma: {
+        Args: { intake_id: string }
+        Returns: {
+          created_at: string
+          created_by_profile_id: string | null
+          dose_units: number | null
+          id: string
+          medication_id: string
+          notes: string | null
+          profile_id: string
+          scheduled_at: string
+          status: Database["public"]["Enums"]["medication_intake_status"]
+          taken_at: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "medication_intakes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      revertir_toma: {
+        Args: { intake_id: string }
+        Returns: {
+          created_at: string
+          created_by_profile_id: string | null
+          dose_units: number | null
+          id: string
+          medication_id: string
+          notes: string | null
+          profile_id: string
+          scheduled_at: string
+          status: Database["public"]["Enums"]["medication_intake_status"]
+          taken_at: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "medication_intakes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
     }
     Enums: {
