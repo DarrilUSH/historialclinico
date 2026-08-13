@@ -43,6 +43,7 @@
 \set p_b   '''bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'''
 \set p_g   '''cccccccc-cccc-4ccc-8ccc-cccccccccccc'''
 \set p_g2  '''dddddddd-dddd-4ddd-8ddd-dddddddddddd'''
+\set p_g3  '''f0000000-0000-4000-8000-00000000f001'''
 \set med   '''eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'''
 \set tom1  '''f1111111-1111-4111-8111-111111111111'''
 \set tom2  '''f2222222-2222-4222-8222-222222222222'''
@@ -61,9 +62,16 @@ drop schema if exists pruebas_rls cascade;
 -- primero la cuenta de María, el CASCADE le quitaría a Roberto su único
 -- administrador y el trigger de no orfandad (deuda D4) abortaría — que es
 -- exactamente lo que debe hacer.
-delete from public.profiles  where id    in (:p_g, :p_g2);
+delete from public.profiles  where id    in (:p_g, :p_g2, :p_g3);
 delete from auth.users       where id    in (:u_a, :u_b);
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
+
+-- El BLOQUE 11 genera tomas en una fecha sintética lejana (2099-06-15) también
+-- para las medicaciones del seed, que no cuelgan de los perfiles de prueba. Las
+-- borra al terminar; esto cubre el caso de una corrida que se cayó a la mitad.
+delete from public.medication_intakes
+ where scheduled_at >= (date '2099-06-15'::timestamp at time zone 'America/Argentina/Ushuaia')
+   and scheduled_at <  (date '2099-06-16'::timestamp at time zone 'America/Argentina/Ushuaia');
 
 
 -- =============================================================================
@@ -744,7 +752,8 @@ select pruebas_rls.registrar('7. estructura',
    and p.proname in ('perfil_actor', 'es_titular', 'es_perfil_gestionado', 'puede_ver_perfil',
                      'puede_cargar_en_perfil', 'puede_administrar_perfil', 'puede_otorgar_permisos',
                      'puede_arrancar_administracion', 'es_sesion_de_usuario',
-                     'confirmar_documento_recien_subido', 'descartar_documento_recien_subido')
+                     'confirmar_documento_recien_subido', 'descartar_documento_recien_subido',
+                     'registrar_toma', 'revertir_toma', 'generar_tomas_del_dia')
    and has_function_privilege('anon', p.oid, 'execute');
 
 select pruebas_rls.registrar('7. estructura',
@@ -1482,6 +1491,445 @@ select pruebas_rls.registrar('10. ventanas',
 
 
 -- =============================================================================
+-- BLOQUE 11 — medicación: estado, tomas y stock (tarea 7.1)
+-- -----------------------------------------------------------------------------
+-- `20260813060000_medicacion_estado.sql` agrega tres cosas que este bloque
+-- verifica por separado, porque son de naturaleza distinta:
+--
+--   · `v_medicacion_estado` es una VISTA con `security_invoker = true`: hereda
+--     las políticas de `medications`, así que lo que hay que probar es la
+--     ARITMÉTICA (que los días restantes sean los correctos para los tres
+--     esquemas de frecuencia) y que `anon` no la alcance.
+--   · `registrar_toma()` / `revertir_toma()` son SECURITY DEFINER que bypassean
+--     la RLS por diseño (nota ⑨ de docs/modelo-permisos.md): sus guardas se
+--     prueban LLAMÁNDOLAS con las sesiones simuladas del resto del arnés.
+--   · `generar_tomas_del_dia()` es infraestructura: se prueba su idempotencia y
+--     que no esté al alcance de una sesión de usuario.
+--
+-- Las medicaciones del bloque cuelgan de un perfil GESTIONADO propio (:p_g3),
+-- que es el caso de uso real: la persona mayor no marca sus propias tomas, las
+-- marca quien la cuida. Es un perfil nuevo y no Roberto porque el BLOQUE 5 lo
+-- borra a propósito (la contracara positiva de la nota ③). La limpieza final
+-- del script se lo lleva, y con él sus medicaciones y tomas por CASCADE.
+-- =============================================================================
+\echo '### BLOQUE 11 — medicación: estado, tomas y stock'
+
+insert into public.profiles (id, user_id, full_name, role, created_by_profile_id, blood_type)
+values (:p_g3, null, 'Rosa Medina', 'elder', :p_a, 'A-');
+
+-- María la administra: es quien va a registrar las tomas.
+insert into public.family_permissions (owner_profile_id, granted_profile_id, can_view, can_upload, can_manage)
+values (:p_g3, :p_a, true, true, true);
+
+insert into public.medications
+    (id, profile_id, name, active_ingredient, dose_amount, dose_unit,
+     frequency, schedule_times, interval_hours, stock_units, start_date,
+     is_active, suspended_at)
+values
+    -- 2 tomas/día × 1 comprimido, stock 60 → 30 días (el ejemplo del ROADMAP).
+    ('d0000000-0000-4000-8000-00000000d001', :p_g3, 'Metformina de prueba', 'Metformina',
+     1, 'comprimido', 'daily', '{08:00,20:00}', null, 60, current_date - 30, true, null),
+    -- Cada 8 horas → 3 tomas/día × 1, stock 60 → 20 días.
+    ('d0000000-0000-4000-8000-00000000d002', :p_g3, 'Ibuprofeno de prueba', 'Ibuprofeno',
+     1, 'comprimido', 'interval_hours', null, 8, 60, current_date - 10, true, null),
+    -- A demanda: sin consumo diario, sin días restantes. El stock informa.
+    ('d0000000-0000-4000-8000-00000000d003', :p_g3, 'Paracetamol de prueba', 'Paracetamol',
+     1, 'comprimido', 'as_needed', null, null, 20, current_date - 5, true, null),
+    -- Suspendida: fuera de la vista, aunque tenga stock.
+    ('d0000000-0000-4000-8000-00000000d004', :p_g3, 'Suspendida de prueba', 'Enalapril',
+     1, 'comprimido', 'daily', '{09:00}', null, 30, current_date - 40, false, now()),
+    -- Stock agotado: días restantes 0 y alerta encendida, pero se puede seguir
+    -- registrando tomas (el stock es una guía, no un portero).
+    ('d0000000-0000-4000-8000-00000000d005', :p_g3, 'Sin stock de prueba', 'Losartán',
+     1, 'comprimido', 'daily', '{10:00}', null, 0, current_date - 3, true, null);
+
+insert into public.medication_intakes (id, medication_id, profile_id, scheduled_at, taken_at, status, dose_units)
+values
+    ('e0000000-0000-4000-8000-00000000e001', 'd0000000-0000-4000-8000-00000000d001', :p_g3, now() - interval '2 hours',  null, 'pending', null),
+    ('e0000000-0000-4000-8000-00000000e002', 'd0000000-0000-4000-8000-00000000d001', :p_g3, now() - interval '30 hours', null, 'pending', null),
+    ('e0000000-0000-4000-8000-00000000e003', 'd0000000-0000-4000-8000-00000000d005', :p_g3, now() - interval '1 hour',   null, 'pending', null),
+    -- Registrada AYER: sirve para el límite de "solo el mismo día".
+    ('e0000000-0000-4000-8000-00000000e004', 'd0000000-0000-4000-8000-00000000d001', :p_g3, now() - interval '1 day', now() - interval '1 day', 'taken', 1),
+    ('e0000000-0000-4000-8000-00000000e005', 'd0000000-0000-4000-8000-00000000d001', :p_g3, now() + interval '1 hour',  null, 'pending', null);
+
+-- Diego arranca con can_view sobre Roberto: mira, no toca.
+insert into public.family_permissions (owner_profile_id, granted_profile_id, can_view, can_upload, can_manage)
+values (:p_g3, :p_b, true, false, false);
+
+-- Renderizadores legibles (mismo criterio que pruebas_rls.ventanas()).
+create function pruebas_rls.med(p_id uuid) returns text
+language sql
+as $$
+    select coalesce(
+        (select format('tomas/día=%s dosis diaria=%s días restantes=%s renovar=%s',
+                       coalesce(trim_scale(tomas_por_dia)::text,      'NULL'),
+                       coalesce(trim_scale(dosis_diaria_total)::text, 'NULL'),
+                       coalesce(dias_restantes::text,                 'NULL'),
+                       necesita_renovacion::text)
+           from public.v_medicacion_estado
+          where medication_id = p_id),
+        '(no aparece en la vista)');
+$$;
+
+create function pruebas_rls.stock(p_id uuid) returns text
+language sql
+as $$
+    select coalesce(trim_scale(stock_units)::text, 'NULL')
+      from public.medications where id = p_id;
+$$;
+
+create function pruebas_rls.toma(p_id uuid) returns text
+language sql
+as $$
+    select format('%s dose_units=%s', status,
+                  coalesce(trim_scale(dose_units)::text, 'NULL'))
+      from public.medication_intakes where id = p_id;
+$$;
+
+-- OJO con `date AT TIME ZONE`: un `date` se promueve a timestamptz y el
+-- resultado corre 3 horas. El `::timestamp` explícito es lo que hace que la
+-- ventana sea el día de pared de Ushuaia y no un rango corrido.
+create function pruebas_rls.grilla(p_med uuid, p_fecha date) returns text
+language sql
+as $$
+    select coalesce(
+        string_agg(to_char(mi.scheduled_at at time zone 'America/Argentina/Ushuaia', 'HH24:MI'),
+                   ', ' order by mi.scheduled_at),
+        '(sin tomas)')
+      from public.medication_intakes mi
+     where mi.medication_id = p_med
+       and mi.scheduled_at >= (p_fecha::timestamp       at time zone 'America/Argentina/Ushuaia')
+       and mi.scheduled_at <  ((p_fecha + 1)::timestamp at time zone 'America/Argentina/Ushuaia');
+$$;
+
+
+-- --- 11.1 La aritmética de la vista ------------------------------------------
+
+select pruebas_rls.registrar('11. medicación',
+       'Vista: daily con 2 horarios, stock 60  [CRITERIO DE ACEPTACIÓN]',
+       'tomas/día=2 dosis diaria=2 días restantes=30 renovar=false',
+       pruebas_rls.med('d0000000-0000-4000-8000-00000000d001'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Vista: interval_hours cada 8hs, stock 60  [CRITERIO DE ACEPTACIÓN]',
+       'tomas/día=3 dosis diaria=3 días restantes=20 renovar=false',
+       pruebas_rls.med('d0000000-0000-4000-8000-00000000d002'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Vista: as_needed no proyecta días restantes  [CRITERIO DE ACEPTACIÓN]',
+       'tomas/día=NULL dosis diaria=NULL días restantes=NULL renovar=false',
+       pruebas_rls.med('d0000000-0000-4000-8000-00000000d003'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Vista: una medicación suspendida no aparece',
+       '(no aparece en la vista)',
+       pruebas_rls.med('d0000000-0000-4000-8000-00000000d004'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Vista: stock 0 da 0 días y enciende la alerta de renovación',
+       'tomas/día=1 dosis diaria=1 días restantes=0 renovar=true',
+       pruebas_rls.med('d0000000-0000-4000-8000-00000000d005'));
+
+-- Contra los datos REALES de supabase/seed.sql, no contra los del arnés:
+-- Glucophage 120 comprimidos ÷ 2 por día = 60 días; Enalapril 90 ÷ 1 = 90.
+select pruebas_rls.registrar('11. medicación',
+       'Vista: los días restantes del seed (Glucophage 120/2, Enalapril 90/1)',
+       'Enalapril=90, Glucophage=60',
+       coalesce((select string_agg(name || '=' || dias_restantes, ', ' order by name)
+                   from public.v_medicacion_estado
+                  where medication_id in ('880e8400-e29b-41d4-a716-446655440001',
+                                          '880e8400-e29b-41d4-a716-446655440002')),
+                '(el seed no está cargado)'));
+
+
+-- --- 11.2 registrar_toma: las dos escrituras, atómicas -----------------------
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+-- María administra a Roberto: puede_cargar_en_perfil es true.
+do $$
+declare v text;
+begin
+    begin
+        perform public.registrar_toma('e0000000-0000-4000-8000-00000000e001');
+        v := 'registrada';
+    exception when others then v := 'rechazado (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'A registra la toma pendiente de las últimas horas', 'registrada', v);
+end $$;
+
+-- Segunda llamada sobre la MISMA toma: es lo que impide el doble descuento.
+do $$
+declare v text;
+begin
+    begin
+        perform public.registrar_toma('e0000000-0000-4000-8000-00000000e001');
+        v := 'registrada';
+    exception when others then v := 'rechazado (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'Registrar dos veces la misma toma se rechaza (no descuenta de nuevo)',
+        'rechazado (22023)', v);
+end $$;
+
+-- Una toma de hace 30 horas ya no se "registra": se corrige, y eso es can_manage.
+do $$
+declare v text;
+begin
+    begin
+        perform public.registrar_toma('e0000000-0000-4000-8000-00000000e002');
+        v := 'registrada';
+    exception when others then v := 'rechazado (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'Una toma de hace 30hs queda fuera de la ventana de ±12hs',
+        'rechazado (22023)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('11. medicación',
+       'Registrar la toma marcó taken y guardó lo descontado',
+       'taken dose_units=1', pruebas_rls.toma('e0000000-0000-4000-8000-00000000e001'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Registrar la toma descontó el stock (60 → 59)  [CRITERIO DE ACEPTACIÓN]',
+       '59', pruebas_rls.stock('d0000000-0000-4000-8000-00000000d001'));
+
+
+-- --- 11.3 revertir_toma: deshacer el mismo día -------------------------------
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.revertir_toma('e0000000-0000-4000-8000-00000000e001');
+        v := 'revertida';
+    exception when others then v := 'rechazado (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'A deshace la toma que acaba de marcar', 'revertida', v);
+end $$;
+
+-- La de ayer ya no es un error de tipeo: es historial clínico.
+do $$
+declare v text;
+begin
+    begin
+        perform public.revertir_toma('e0000000-0000-4000-8000-00000000e004');
+        v := 'revertida';
+    exception when others then v := 'rechazado (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'Deshacer una toma de AYER se rechaza (solo el mismo día de Ushuaia)',
+        'rechazado (22023)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('11. medicación',
+       'Deshacer restituye el stock exacto (59 → 60)  [CRITERIO DE ACEPTACIÓN]',
+       '60', pruebas_rls.stock('d0000000-0000-4000-8000-00000000d001'));
+
+select pruebas_rls.registrar('11. medicación',
+       'La toma deshecha vuelve a pending y suelta dose_units',
+       'pending dose_units=NULL', pruebas_rls.toma('e0000000-0000-4000-8000-00000000e001'));
+
+
+-- --- 11.4 Stock en cero: se registra igual -----------------------------------
+-- La abuela puede tener una caja que nadie cargó en la app. Bloquear el
+-- registro sería que la app le discuta un hecho consumado.
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.registrar_toma('e0000000-0000-4000-8000-00000000e003');
+        v := 'registrada';
+    exception when others then v := 'rechazado (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'Con stock 0 la toma se registra igual (el stock es guía, no portero)',
+        'registrada', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('11. medicación',
+       'Con stock 0 no se descuenta nada: dose_units queda NULL',
+       'taken dose_units=NULL', pruebas_rls.toma('e0000000-0000-4000-8000-00000000e003'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Con stock 0 el stock no se va a negativo', '0',
+       pruebas_rls.stock('d0000000-0000-4000-8000-00000000d005'));
+
+
+-- --- 11.5 Quién puede registrar: la nota ⑨, con los dientes afuera ----------
+
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.registrar_toma('e0000000-0000-4000-8000-00000000e005');
+        v := 'registrada';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'rechazado (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'B con solo can_view NO registra tomas  [CRITERIO DE ACEPTACIÓN]',
+        'rechazado (42501)', v);
+end $$;
+
+commit;
+
+-- Se le suma can_upload: registrar la toma del día es EXACTAMENTE la tarea de
+-- quien cuida, y el RPC se la habilita sin darle UPDATE sobre `medications`.
+update public.family_permissions
+   set can_upload = true
+ where owner_profile_id = :p_g3 and granted_profile_id = :p_b;
+
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.registrar_toma('e0000000-0000-4000-8000-00000000e005');
+        v := 'registrada';
+    exception when others then v := 'rechazado (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'B con can_upload SÍ registra la toma y descuenta stock (nota ⑨)',
+        'registrada', v);
+end $$;
+
+-- Pero sigue SIN poder tocar `medications` por la vía directa: el RPC no le
+-- amplió el permiso, le dio un camino acotado.
+do $$
+declare v text; c integer;
+begin
+    begin
+        update public.medications set stock_units = 999
+         where id = 'd0000000-0000-4000-8000-00000000d001';
+        get diagnostics c = row_count;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'B con can_upload NO edita el stock por la vía directa (nota ⑨)',
+        '0 filas', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('11. medicación',
+       'La toma de B descontó el stock (60 → 59)', '59',
+       pruebas_rls.stock('d0000000-0000-4000-8000-00000000d001'));
+
+
+-- --- 11.6 generar_tomas_del_dia: la grilla y su idempotencia -----------------
+-- Se usa una fecha lejana y sintética para no pisar ninguna toma real ni la del
+-- seed, y se borra al final del bloque.
+
+select public.generar_tomas_del_dia(date '2099-06-15');
+
+select pruebas_rls.registrar('11. medicación',
+       'Generar el día: daily materializa sus dos horarios',
+       '08:00, 20:00', pruebas_rls.grilla('d0000000-0000-4000-8000-00000000d001', date '2099-06-15'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Generar el día: cada 8hs arma la grilla módulo 24 desde las 8:00',
+       '00:00, 08:00, 16:00', pruebas_rls.grilla('d0000000-0000-4000-8000-00000000d002', date '2099-06-15'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Generar el día: as_needed no programa nada',
+       '(sin tomas)', pruebas_rls.grilla('d0000000-0000-4000-8000-00000000d003', date '2099-06-15'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Generar el día: una medicación suspendida no programa nada',
+       '(sin tomas)', pruebas_rls.grilla('d0000000-0000-4000-8000-00000000d004', date '2099-06-15'));
+
+select pruebas_rls.registrar('11. medicación',
+       'Correrla de nuevo no crea ni una toma más  [CRITERIO DE ACEPTACIÓN]',
+       '0', public.generar_tomas_del_dia(date '2099-06-15')::text);
+
+delete from public.medication_intakes
+ where scheduled_at >= (date '2099-06-15'::timestamp at time zone 'America/Argentina/Ushuaia')
+   and scheduled_at <  (date '2099-06-16'::timestamp at time zone 'America/Argentina/Ushuaia');
+
+
+-- --- 11.7 Superficie expuesta de lo nuevo ------------------------------------
+-- La vista es una RELACIÓN: nace con los privilegios `Dxtm` que el default de
+-- Supabase le da a anon y authenticated sobre todo lo nuevo de `public`, y
+-- aparece en `role_table_grants` igual que una tabla. El caso "Privilegios de
+-- anon sobre tablas de public" del BLOQUE 7 la cubre; acá se prueba el efecto.
+
+begin;
+select set_config('request.jwt.claims', '', true);
+set local role anon;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.v_medicacion_estado;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'anon lee v_medicacion_estado', 'denegado (42501)', v);
+end $$;
+
+commit;
+
+-- `generar_tomas_del_dia` recorre TODOS los perfiles de la base: no es una
+-- operación de sesión de usuario y no se le otorga a authenticated.
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.generar_tomas_del_dia(date '2099-06-15');
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('11. medicación',
+        'A ejecuta generar_tomas_del_dia (barre toda la base)',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('11. medicación',
+       'El job diario de tomas está programado en pg_cron', '5 3 * * *',
+       coalesce((select schedule from cron.job where jobname = 'generar-tomas-del-dia'),
+                '(el job no existe)'));
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
@@ -1523,7 +1971,7 @@ select count(*)                          as casos,
 -- BLOQUE 5 ya verifica de forma explícita.
 -- =============================================================================
 
-delete from public.profiles  where id in (:p_g, :p_g2);
+delete from public.profiles  where id in (:p_g, :p_g2, :p_g3);
 delete from auth.users       where id in (:u_a, :u_b);
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 
