@@ -30,6 +30,7 @@ import { MapPinIcon, PencilIcon, StethoscopeIcon, UserRoundIcon } from "lucide-r
 
 import { Boton } from "@/components/base/boton"
 import { BadgeEstadoTurno } from "@/components/turnos/badge-estado-turno"
+import { AccionesTurno } from "@/components/turnos/acciones-turno"
 import { Tarjeta } from "@/components/base/tarjeta"
 import { formatearFechaLargaTurno, formatearHoraTurno } from "@/lib/turnos/formato"
 import { tiempoRelativo } from "@/lib/turnos/tiempo-relativo"
@@ -44,6 +45,9 @@ export interface TurnoParaTarjeta {
   location_name: string | null
   location_address: string | null
   status: EstadoTurno
+  latitude?: number | null
+  longitude?: number | null
+  preparation_notes?: string | null
 }
 
 export interface TarjetaTurnoProps {
@@ -105,28 +109,35 @@ export function TarjetaTurno({ turno, puedeEditar, ahora = new Date() }: Tarjeta
         )}
       </div>
 
-      {/* CONTRATO Sprint 6, tarea 6.2 (ROADMAP_SPRINTS.md): acá van los
-          botones de logística -Cómo llegar / Pedir viaje / Agregar al
-          calendario- (`components/turnos/acciones-turno.tsx`,
-          `lib/logistica/deep-links.ts`). Reciben `turno.location_name`,
-          `turno.location_address`, latitude/longitude y `appointment_date`
-          (no expuestos todavía en `TurnoParaTarjeta`: sumarlos ahí). Van en
-          esta misma fila de pie, junto al botón "Editar" -no anidados dentro
-          de él ni de ningún `<Link>` que envuelva la tarjeta, ver el
-          comentario de cabecera-. */}
-      {puedeEditar && (
-        <div className="flex justify-end">
-          <Boton
-            render={<Link href={`/turnos/${turno.id}/editar`} />}
-            nativeButton={false}
-            variant="outline"
-            size="sm"
-          >
-            <PencilIcon aria-hidden="true" />
-            Editar
-          </Boton>
-        </div>
-      )}
+      {/* Botones de logística + Editar */}
+      <div className="space-y-2">
+        <AccionesTurno
+          turnoId={turno.id}
+          especialidad={turno.specialty}
+          nombreMedico={turno.doctor_name?.split(" ").slice(0, -1).join(" ") || undefined}
+          apellidoMedico={turno.doctor_name?.split(" ").slice(-1).join("") || undefined}
+          fechaHora={turno.appointment_date}
+          ubicacion={turno.location_name || undefined}
+          direccion={turno.location_address || undefined}
+          latitude={turno.latitude}
+          longitude={turno.longitude}
+          notas={turno.preparation_notes || undefined}
+        />
+
+        {puedeEditar && (
+          <div className="flex justify-end">
+            <Boton
+              render={<Link href={`/turnos/${turno.id}/editar`} />}
+              nativeButton={false}
+              variant="outline"
+              size="sm"
+            >
+              <PencilIcon aria-hidden="true" />
+              Editar
+            </Boton>
+          </div>
+        )}
+      </div>
     </Tarjeta>
   )
 }
