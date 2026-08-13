@@ -437,11 +437,13 @@ provoque.
   Mandar a `/turnos/{id}` daría un 404 justo cuando la persona más confía en el
   aviso. Se cambia en `RUTA_RECORDATORIO` (`lib/turnos/recordatorios.ts`) y en
   ningún otro lado.
-- **`/turnos` muestra el perfil ACTIVO, que puede no ser el del turno.** Se vio
-  en la prueba real: el aviso era de un turno de Roberto, pero María tenía su
-  propio perfil activo y llegó a una lista vacía. La notificación debería
-  cambiar el perfil activo al del turno, o al menos decir de quién es el turno.
-  **Es lo primero a resolver cuando exista el detalle de turno.**
+- ~~**`/turnos` muestra el perfil ACTIVO, que puede no ser el del turno.**~~
+  **Resuelto en la tarea correctiva 6.6, ver §10.** Se vio en la prueba real:
+  el aviso era de un turno de Roberto, pero María tenía su propio perfil
+  activo y llegó a una lista vacía. Antes se pensaba resolver recién cuando
+  existiera el detalle de turno; terminó resolviéndose antes, con un deep
+  link que cambia el perfil activo -revalidando el permiso- antes de mostrar
+  la lista.
 - **Un turno cargado a menos de 3 horas espera hasta 15 minutos** para su aviso:
   la generación la hace el cron, no un trigger de INSERT. Es aceptable porque
   quien lo cargó ya sabe que existe; el aviso es para los demás destinatarios.
@@ -461,3 +463,67 @@ provoque.
 - **En producción falta correr `configurar_cron_recordatorios()`** con la URL
   real y cargar `CRON_SECRET` en Vercel. Es parte de la tarea "Jobs de
   producción" del Sprint 12.
+
+---
+
+## 10. El deep link aterriza en el perfil del turno (tarea correctiva 6.6)
+
+El límite de §9 -tocar la notificación mostraba el perfil ACTIVO de quien la
+tocaba, no el del turno- se resolvió sin esperar al detalle de turno.
+
+**El mecanismo, en tres piezas:**
+
+1. **La url del payload lleva el perfil.** `construirRecordatorio`
+   (`lib/turnos/recordatorios.ts`) arma `/turnos?perfil={profileId}` cuando el
+   turno trae `profileId` -que siempre trae, en el uso real:
+   `app/api/push/procesar-recordatorios/route.ts` lo pasa desde
+   `fila.profile_id`, `NOT NULL` en `appointments`-. Sin `profileId` (los
+   tests del módulo puro, que arman turnos mínimos) la url queda pelada, el
+   comportamiento de antes de esta tarea.
+
+2. **`/turnos` reenvía, no procesa.** `turnos/page.tsx` es un Server
+   Component: no puede escribir la cookie `perfil_activo` él mismo (Next.js
+   solo permite escribir cookies en un Server Action o un Route Handler,
+   nunca durante el render de una página, ni siquiera si esa página llama a
+   `redirect()` después). Si ve `?perfil=`, redirige a `/turnos/enlace` con el
+   mismo valor.
+
+3. **`/turnos/enlace` (`turnos/enlace/route.ts`) hace el trabajo real.**
+   Llama a `cambiarPerfilDesdeParametro` (`lib/perfil-activo.ts`), que por
+   dentro es `fijarPerfilActivo` -la misma función que usa el selector de
+   perfiles, así que revalida `requerirPermiso(perfilId, "view")` contra la
+   base en cada llamada- y siempre termina en `redirect("/turnos")`, con o sin
+   cambio de perfil, con o sin permiso. Ese `redirect()` es lo que limpia la
+   url (nunca queda `?perfil=` en la barra de direcciones) y lo que hace que
+   el request siguiente a `/turnos` -layout incluido, con el encabezado "Viendo
+   a..."- vea la cookie nueva desde el arranque, en vez de mostrar el perfil
+   viejo un instante y corregirse después.
+
+   Está fuera de `/api` a propósito: un Route Handler bajo `/api` responde
+   `401` JSON cuando no hay sesión (`esRutaDeApi` en `lib/auth/rutas.ts`), lo
+   correcto para código (`pg_cron`) pero no para una persona tocando una
+   notificación con la sesión vencida, que merece la pantalla de login con
+   `?desde=` de vuelta a este mismo enlace -igual que le pasa a `/turnos`
+   pelado-.
+
+**La decisión de seguridad: silencio total.** Si el uuid de `?perfil=` no
+tiene forma de uuid, no existe, o la sesión no tiene permiso `view` sobre él,
+`/turnos/enlace` no lo dice de ninguna forma distinguible: redirige exactamente
+igual que en el caso exitoso, a `/turnos` pelado, sin perfil nuevo. Contestar
+distinto -un 403, un `?error=`- convertiría el enlace en un oráculo para
+adivinar ids de perfiles ajenos con solo mirar la respuesta. Es el mismo
+principio que ya aplica `ErrorPermisoDenegado` en `lib/auth/guardas.ts`, que
+tampoco distingue "no existe" de "no tenés permiso".
+
+**Reutilizable.** `cambiarPerfilDesdeParametro` es la pieza que le falta a
+cualquier deep link futuro con el mismo problema -Sprint 7 (medicación),
+Sprint 9 (alertas)-: un Route Handler chico, fuera de `/api`, que la llama y
+redirige a su propia pantalla. No hace falta generalizar más que eso hasta
+que el patrón se repita una tercera vez.
+
+**Sin cambios en `public/sw.js`.** El service worker abre la url que venga en
+el payload tal cual (`notificationclick`); no le importa si es `/turnos` o
+`/turnos?perfil=...`, y sigue redirecciones HTTP con normalidad -a diferencia
+del registro del propio worker (`navigator.serviceWorker.register()`), que sí
+las rechaza (ver el comentario de `RUTA_SERVICE_WORKER` en
+`lib/auth/rutas.ts`)-.

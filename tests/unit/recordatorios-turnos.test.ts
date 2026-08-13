@@ -202,6 +202,23 @@ describe("construirRecordatorio", () => {
     }
   })
 
+  it("con profileId, la url lleva ?perfil= para que /turnos/enlace cambie el perfil activo (Sprint 6.6)", () => {
+    // El caso real: `app/api/push/procesar-recordatorios/route.ts` siempre
+    // pasa `profileId` (viene de `fila.profile_id`, NOT NULL en la base).
+    const conPerfil: TurnoParaRecordatorio = {
+      ...TURNO,
+      profileId: "b3f3e4b0-7f8e-4b7b-9b1e-6c8f6c9d1a2b",
+    }
+
+    const url = construirRecordatorio(conPerfil, "24h", AHORA).url
+    expect(url).toBe(`/turnos?perfil=${conPerfil.profileId}`)
+    expect(url.startsWith(RUTA_RECORDATORIO)).toBe(true)
+  })
+
+  it("sin profileId, la url queda pelada (compatibilidad con turnos mínimos)", () => {
+    expect(construirRecordatorio(TURNO, "24h", AHORA).url).toBe(RUTA_RECORDATORIO)
+  })
+
   it("ninguna ventana genera un título ni un cuerpo vacío, ni siquiera con el turno mínimo", () => {
     // `serializarPayload` lanza si el título viene vacío: hay que garantizar
     // que ninguna combinación llegue a ese estado.

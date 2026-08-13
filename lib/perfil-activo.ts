@@ -232,6 +232,99 @@ export const obtenerPerfilActivo = cache(async (): Promise<PerfilActivo | null> 
   }
 })
 
+/**
+ * Cambia el perfil activo a partir de un parámetro de deep link (`?perfil=`),
+ * el mecanismo que usa la notificación de un recordatorio de turno para
+ * aterrizar en el perfil DEL TURNO en vez del perfil activo de quien toca el
+ * aviso (Sprint 6.6, docs/recordatorios.md §9: María con su propio perfil
+ * activo, notificación de un turno de Roberto, aterrizaba en una lista
+ * vacía). Reutilizable por cualquier deep link futuro con el mismo problema
+ * (Sprint 7 medicación, Sprint 9 alertas): quien la llama es siempre un
+ * Route Handler fuera de `/api` -ver el comentario de
+ * `app/(app)/(con-nav)/turnos/enlace/route.ts` sobre por qué tiene que ser
+ * un Route Handler y no la página misma-, y esta función es la única pieza
+ * que necesita reimplementar: el resto (leer el parámetro, redirigir a la
+ * URL limpia) es el mismo molde chico.
+ *
+ * ## Por qué recibe `perfilActivoId` en vez de resolverlo por su cuenta
+ *
+ * Evita una llamada redundante a `obtenerPerfilActivo()` cuando quien llama
+ * ya la hizo, y sobre todo evita ESCRIBIR cuando no hace falta:
+ * `fijarPerfilActivo` audita `ver_perfil` (`lib/auditoria.ts`) en cada
+ * llamada exitosa. Sin este chequeo, re-tocar la notificación de un turno
+ * propio -perfil del turno == perfil ya activo- generaría una fila de
+ * auditoría nueva por cada toque, en vez de la cero filas que corresponde a
+ * "no cambió nada".
+ *
+ * ## La decisión de seguridad: nunca distinguir "no existe" de "sin permiso"
+ *
+ * Cualquier fallo de `fijarPerfilActivo` -uuid con forma inválida
+ * (`ErrorPerfilInvalido`), perfil ajeno sin `view` (`ErrorPermisoDenegado`),
+ * o incluso sesión ausente (`ErrorSesionRequerida`; no debería llegar a
+ * pasar acá porque la ruta que invoca esto ya exige sesión en `proxy.ts`,
+ * pero se cubre igual)- se trata EXACTAMENTE IGUAL: se ignora en silencio y
+ * la función devuelve `false`. Quien llama SIEMPRE tiene que terminar en un
+ * `redirect()` a la misma URL limpia que en el caso exitoso -nunca renderizar
+ * con el `?perfil=` todavía puesto, nunca exponer un mensaje distinto-: la
+ * alternativa -un 403, un `?error=`- convertiría este mecanismo en un
+ * oráculo para adivinar ids de perfiles ajenos con solo mirar la respuesta,
+ * el mismo principio que ya aplica `ErrorPermisoDenegado` en
+ * `lib/auth/guardas.ts`.
+ *
+ * Un fallo TRANSITORIO (`ErrorVerificacionPermiso`: la base no respondió) se
+ * propaga -igual que en `obtenerPerfilActivo`-: un hipo de red no es "sin
+ * permiso" y no hay motivo para tratarlo en silencio como si lo fuera. OJO,
+ * porque es una trampa real: `ErrorVerificacionPermiso` TAMBIÉN extiende
+ * `ErrorGuarda` (`lib/auth/guardas.ts`), así que `esErrorDeGuarda()` -el
+ * chequeo genérico que sí usan otras Server Actions, como
+ * `app/(app)/(sin-nav)/perfiles/actions.ts`- lo atraparía igual que a los
+ * otros tres. Por eso el `catch` de esta función no usa `esErrorDeGuarda()`:
+ * lista a mano los tres tipos que sí corresponde silenciar, el mismo patrón
+ * (y la misma lista) que ya usa `obtenerPerfilActivo` unas líneas más
+ * arriba en este archivo.
+ *
+ * @param valor Valor crudo de leer `searchParams` (`string`, `string[]` si la
+ *   key viene repetida en la URL -se toma el primero-, `null` o `undefined`).
+ * @param perfilActivoId El perfil activo ANTES de procesar el parámetro, o
+ *   `null` si no hay ninguno. Ausente, vacío o igual al activo → no-op.
+ * @returns `true` si el perfil activo CAMBIÓ de verdad -quien llama debe
+ *   `redirect()` a una URL fresca para que el resto del árbol (el layout con
+ *   el encabezado, ya renderizado con la cookie VIEJA en este mismo
+ *   request) vea la cookie nueva en el próximo request-. `false` si no hacía
+ *   falta nada o si el cambio no se pudo hacer.
+ */
+export async function cambiarPerfilDesdeParametro(
+  valor: string | string[] | null | undefined,
+  perfilActivoId: string | null,
+): Promise<boolean> {
+  const perfilId = Array.isArray(valor) ? valor[0] : valor
+
+  if (!perfilId || perfilId === perfilActivoId) {
+    return false
+  }
+
+  try {
+    await fijarPerfilActivo(perfilId)
+    return true
+  } catch (error) {
+    // OJO: `esErrorDeGuarda` NO sirve acá -es un `instanceof ErrorGuarda`
+    // genérico, y `ErrorVerificacionPermiso` (`lib/auth/guardas.ts`) TAMBIÉN
+    // extiende `ErrorGuarda`-. Hay que listar a mano los tres casos que son
+    // de verdad "esto no es válido", el mismo patrón (y la misma lista) que
+    // ya usa `obtenerPerfilActivo` más arriba en este archivo.
+    if (
+      error instanceof ErrorPerfilInvalido ||
+      error instanceof ErrorPermisoDenegado ||
+      error instanceof ErrorSesionRequerida
+    ) {
+      return false
+    }
+    // `ErrorVerificacionPermiso` (la base no respondió) u otra cosa
+    // inesperada: no es "sin permiso", se propaga.
+    throw error
+  }
+}
+
 // Re-exportado para que quien maneja el resultado de `fijarPerfilActivo` en
 // una Server Action pueda distinguir "permiso denegado" sin importar directo
 // de `lib/auth/guardas`.

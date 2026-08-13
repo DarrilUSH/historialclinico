@@ -74,6 +74,16 @@ describe("lib/auth/rutas.ts", () => {
     }
   })
 
+  it("el deep link de perfil (/turnos/enlace, Sprint 6.6) exige sesión, sin sesión rebota a /login y no a un 401 JSON", () => {
+    // A diferencia de `RUTA_CRON_RECORDATORIOS`, acá quien llega es una
+    // persona tocando una notificación, no un proceso sin cookies: por eso
+    // `turnos/enlace/route.ts` vive fuera de `/api` (`esRutaDeApi` da
+    // `false`) y sin sesión cae en la rama de redirect a `/login?desde=...`
+    // de `proxy.ts`, no en la de 401 JSON.
+    expect(esRutaPrivada("/turnos/enlace", EN_PROD)).toBe(true)
+    expect(esRutaDeApi("/turnos/enlace")).toBe(false)
+  })
+
   it("una ruta pública por prefijo no se cuela con un nombre parecido", () => {
     // `/loginfalso` NO es subruta de `/login`.
     expect(esRutaPublica("/loginfalso", EN_PROD)).toBe(false)

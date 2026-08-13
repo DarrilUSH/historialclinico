@@ -20,6 +20,12 @@
  * Botón "Nuevo turno" solo si `can_upload` (docs/modelo-permisos.md §6.1:
  * INSERT en `appointments` = dueño O `can_upload` O `can_manage`) — Diego
  * (`can_view`) ve la lista sin él, y sin el botón "Editar" de cada tarjeta.
+ *
+ * `?perfil=` (Sprint 6.6, docs/recordatorios.md §9): un deep link que puede
+ * traer el `profile_id` del TURNO, no el del perfil activo de quien llega acá
+ * -típicamente al tocar la notificación de un recordatorio-. Esta página se
+ * limita a reenviarlo a `/turnos/enlace` (`turnos/enlace/route.ts`), el único
+ * lugar que puede escribir la cookie de perfil activo.
  */
 
 import type { Metadata } from "next"
@@ -42,11 +48,33 @@ export const metadata: Metadata = {
 
 const COLUMNAS = "id, specialty, doctor_name, appointment_date, location_name, location_address, status"
 
-export default async function PaginaTurnos() {
+export default async function PaginaTurnos({
+  searchParams,
+}: {
+  searchParams: Promise<{ perfil?: string | string[] }>
+}) {
   const activo = await obtenerPerfilActivo()
 
   if (!activo) {
     redirect("/perfiles")
+  }
+
+  // Deep link de una notificación de turno (Sprint 6.6, docs/recordatorios.md
+  // §9): el payload push arma la url como `/turnos?perfil={profile_id_del_turno}`
+  // (`lib/turnos/recordatorios.ts`), que puede no ser el perfil activo de
+  // quien toca el aviso -María con su propio perfil activo, notificación de
+  // un turno de Roberto-.
+  //
+  // Esta página NO puede procesar el parámetro ella misma: cambiar el
+  // perfil activo escribe una cookie, y Next.js solo permite escribir
+  // cookies durante un Server Action o un Route Handler, nunca durante el
+  // render de un Server Component (ni siquiera si ese componente después
+  // llama a `redirect()`). Por eso se delega en `/turnos/enlace`
+  // (`app/(app)/(con-nav)/turnos/enlace/route.ts`), que sí corre en esa fase.
+  const { perfil: parametroPerfil } = await searchParams
+  if (parametroPerfil) {
+    const valor = Array.isArray(parametroPerfil) ? parametroPerfil[0] : parametroPerfil
+    redirect(`/turnos/enlace?perfil=${encodeURIComponent(valor)}`)
   }
 
   const { supabase } = await requerirSesion({ desde: "/turnos" })

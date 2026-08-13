@@ -240,6 +240,10 @@ export async function POST(request: Request) {
         medico: fila.medico,
         lugar: fila.lugar,
         preparacion: fila.preparacion,
+        // Sprint 6.6: la url del payload lleva `?perfil={profileId}` para que
+        // tocar la notificación aterrice en el perfil DEL TURNO, no en el
+        // perfil activo de quien la toca. Ver `TurnoParaRecordatorio.profileId`.
+        profileId: fila.profile_id,
       }
 
       const payload = construirRecordatorio(turno, fila.ventana, ahora)

@@ -66,6 +66,27 @@ export interface TurnoParaRecordatorio {
   lugar?: string | null
   /** `appointments.preparation_notes` (ayuno, llevar estudios previos). */
   preparacion?: string | null
+  /**
+   * `appointments.profile_id`: A QUIÉN pertenece el turno.
+   *
+   * Sprint 6.6 (docs/recordatorios.md §9): sin esto, tocar la notificación
+   * abre `/turnos` mostrando el perfil ACTIVO de quien la toca, no el del
+   * turno -si María tiene su propio perfil activo y el aviso es de un turno
+   * de Roberto, aterriza en una lista vacía-. Con `profileId`, la url lleva
+   * `?perfil={profileId}` (ver `urlDelRecordatorio` más abajo) y
+   * `/turnos/enlace` (`app/(app)/(con-nav)/turnos/enlace/route.ts`) cambia
+   * el perfil activo ANTES de que se muestre la lista, revalidando el
+   * permiso contra la base -nunca confía en que quien generó el push tenía
+   * razón sobre a quién pertenece el turno-.
+   *
+   * Opcional PARA EL TIPO, no para el uso real: toda fila de `appointments`
+   * tiene `profile_id NOT NULL`, y `app/api/push/procesar-recordatorios/route.ts`
+   * siempre lo pasa. Queda opcional acá para no romper los tests de este
+   * módulo puro que arman turnos mínimos sin esa columna -y porque un
+   * `RecordatorioPush` sin perfil sigue siendo válido: simplemente abre
+   * `/turnos` pelado, el comportamiento de antes del Sprint 6.6-.
+   */
+  profileId?: string
 }
 
 /** Payload listo para `enviarPushAUsuario()` (`lib/push/servidor.ts`). */
@@ -86,6 +107,20 @@ export interface RecordatorioPush {
  * ningún otro lado.
  */
 export const RUTA_RECORDATORIO = "/turnos"
+
+/**
+ * Arma la url final del payload: `RUTA_RECORDATORIO`, y si el turno trae
+ * `profileId`, con `?perfil={profileId}` (Sprint 6.6). `encodeURIComponent`
+ * es defensivo -un uuid no tiene caracteres que escapar-, no una validación:
+ * la validación de verdad (¿es un uuid?, ¿hay permiso `view`?) la hace
+ * `requerirPermiso` del lado de `/turnos/enlace`, nunca acá. Este módulo es
+ * puro y no tiene forma de preguntarle nada a la base.
+ */
+function urlDelRecordatorio(profileId: string | undefined): string {
+  return profileId
+    ? `${RUTA_RECORDATORIO}?perfil=${encodeURIComponent(profileId)}`
+    : RUTA_RECORDATORIO
+}
 
 /**
  * Tope del texto de preparación dentro del cuerpo. Una notificación es un
@@ -220,6 +255,12 @@ export function cuerpoDeRecordatorio(
  * si el barrido llegara a repetir un envío. La antiduplicación real -no volver
  * a mandar lo ya mandado- la garantiza el `UNIQUE (appointment_id, ventana)`
  * de la base.
+ *
+ * `url` lleva `?perfil={turno.profileId}` cuando el turno trae ese dato (ver
+ * `urlDelRecordatorio` y el comentario de `profileId` en
+ * `TurnoParaRecordatorio`, Sprint 6.6). Sin `profileId` -los tests de este
+ * módulo que arman turnos mínimos- la url es `RUTA_RECORDATORIO` pelada,
+ * igual que antes del Sprint 6.6.
  */
 export function construirRecordatorio(
   turno: TurnoParaRecordatorio,
@@ -231,7 +272,7 @@ export function construirRecordatorio(
   return {
     titulo: `Turno de ${especialidad} ${fraseDeAnticipacion(ventana, turno.fechaIso, ahora)}`,
     cuerpo: cuerpoDeRecordatorio(turno, ventana, ahora),
-    url: RUTA_RECORDATORIO,
+    url: urlDelRecordatorio(turno.profileId),
     tag: `turno-${turno.id}-${ventana}`,
   }
 }
