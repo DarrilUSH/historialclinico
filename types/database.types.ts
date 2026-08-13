@@ -885,8 +885,16 @@ export type Database = {
       es_perfil_gestionado: { Args: { perfil: string }; Returns: boolean }
       es_sesion_de_usuario: { Args: never; Returns: boolean }
       es_titular: { Args: { perfil: string }; Returns: boolean }
+      nombres_de_perfiles_vinculados: {
+        Args: never
+        Returns: {
+          full_name: string
+          perfil_id: string
+        }[]
+      }
       perfil_actor: { Args: never; Returns: string }
       perfil_de_objeto_storage: { Args: { objeto: string }; Returns: string }
+      perfil_id_por_email: { Args: { email_buscado: string }; Returns: string }
       puede_administrar_perfil: { Args: { perfil: string }; Returns: boolean }
       puede_arrancar_administracion: {
         Args: { autorizado: string; perfil: string }
