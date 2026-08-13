@@ -27,6 +27,12 @@ import { redirect } from "next/navigation"
 import type { AuthError } from "@supabase/supabase-js"
 
 import { createClient } from "@/lib/supabase/server"
+import {
+  PARAM_DESDE,
+  RUTA_LOGIN,
+  RUTA_POST_LOGIN,
+  destinoSeguro,
+} from "@/lib/auth/rutas"
 
 export type EstadoAuth = {
   error: string | null
@@ -161,15 +167,25 @@ export async function registrarse(
     }
   }
 
-  redirect("/perfiles")
+  redirect(RUTA_POST_LOGIN)
 }
 
+/**
+ * Login. Si el formulario trae el campo oculto `desde` —lo pone la pantalla
+ * de login cuando `proxy.ts` interceptó una ruta privada—, se vuelve a esa
+ * ruta en vez de ir al selector de perfiles.
+ *
+ * El valor se revalida acá con `destinoSeguro` aunque la pantalla ya lo haya
+ * validado: el `formData` lo manda el navegador y se puede alterar. Sin esta
+ * segunda pasada, el login propio sería un open redirect.
+ */
 export async function iniciarSesion(
   _estadoPrevio: EstadoAuth,
   formData: FormData,
 ): Promise<EstadoAuth> {
   const email = normalizarTexto(formData.get("email")).toLowerCase()
   const password = normalizarTexto(formData.get("password"))
+  const destino = destinoSeguro(normalizarTexto(formData.get(PARAM_DESDE)))
 
   if (!esEmailValido(email)) {
     return { error: "Ingresá un correo electrónico válido." }
@@ -185,13 +201,13 @@ export async function iniciarSesion(
     return { error: mapearErrorAuth(error) }
   }
 
-  redirect("/perfiles")
+  redirect(destino ?? RUTA_POST_LOGIN)
 }
 
 export async function cerrarSesion(): Promise<void> {
   const supabase = await createClient()
   await supabase.auth.signOut()
-  redirect("/login")
+  redirect(RUTA_LOGIN)
 }
 
 /**
@@ -274,5 +290,5 @@ export async function actualizarContrasena(
     return { error: mapearErrorAuth(errorActualizacion) }
   }
 
-  redirect("/login?recuperada=1")
+  redirect(`${RUTA_LOGIN}?recuperada=1`)
 }

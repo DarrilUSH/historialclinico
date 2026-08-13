@@ -21,6 +21,19 @@ export type PermisoFamiliarInsert = TablesInsert<"family_permissions">
 /** Actualización de permiso familiar */
 export type PermisoFamiliarUpdate = TablesUpdate<"family_permissions">
 
+/**
+ * Verbo de permiso sobre un perfil: los tres flags de `family_permissions`
+ * leídos como operación (docs/modelo-permisos.md §4 y §6.1).
+ *
+ * - `view` → `SELECT` (dueño, o `can_view` / `can_upload` / `can_manage`)
+ * - `upload` → `INSERT` (dueño, o `can_upload` / `can_manage`)
+ * - `manage` → `UPDATE` / `DELETE` (dueño, o `can_manage`)
+ *
+ * Se mantiene en inglés a propósito: son los nombres de las columnas de la
+ * base y los de la firma que fija el roadmap para `requerirPermiso`.
+ */
+export type VerboPermiso = "view" | "upload" | "manage"
+
 /** Registro de acceso y auditoría */
 export type RegistroAcceso = Tables<"access_logs">
 /** Inserción de registro de acceso */

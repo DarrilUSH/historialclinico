@@ -9,9 +9,10 @@
  * Importante: `cookies()` de Next.js es de solo lectura dentro de un Server
  * Component — por eso `setAll` va envuelto en try/catch. Si este cliente
  * intenta refrescar el token desde un Server Component, el `set` falla
- * silenciosamente ahí, pero el middleware (`lib/supabase/middleware.ts`) ya
- * se encarga de refrescar y persistir la sesión en cada request, así que no
- * hace falta que Server Components puedan escribir cookies.
+ * silenciosamente ahí, pero el proxy (`lib/supabase/proxy.ts`, invocado desde
+ * `proxy.ts` en la raíz) ya se encarga de refrescar y persistir la sesión en
+ * cada request, así que no hace falta que Server Components puedan escribir
+ * cookies.
  *
  * Uso: solo desde código de servidor (sin `"use client"`).
  *

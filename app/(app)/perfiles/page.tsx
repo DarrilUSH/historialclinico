@@ -1,20 +1,22 @@
 /**
  * Stub del selector de perfiles — se implementa en la tarea "Selector de
  * perfiles estilo Netflix" (Sprint 2). Esta versión solo existe para poder
- * probar el flujo completo de auth: confirma server-side que hay sesión y
- * muestra el email logueado, con un botón de cerrar sesión para poder
- * volver a probar el login sin abrir una ventana de incógnito.
+ * probar el flujo completo de auth: muestra el email logueado, con un botón
+ * de cerrar sesión para poder volver a probar el login sin abrir una ventana
+ * de incógnito.
  *
- * Todavía no hay guardas de rutas privadas (tarea siguiente del roadmap),
- * así que esta página no redirige si no hay sesión: solo muestra un mensaje
- * distinto.
+ * Uso canónico de `requerirSesion()`: la página no chequea la sesión a mano
+ * ni contempla el caso "sin sesión". Si no hay sesión, la guarda corta el
+ * render y redirige a `/login?desde=/perfiles`. Es doble cobertura a
+ * propósito —`proxy.ts` ya redirige antes de llegar acá—: el proxy depende de
+ * su `matcher`, y una pantalla que toca datos de salud no puede depender de
+ * que nadie edite un regex.
  */
 
 import type { Metadata } from "next"
-import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
-import { createClient } from "@/lib/supabase/server"
+import { requerirSesion } from "@/lib/auth/guardas"
 import { cerrarSesion } from "@/app/(auth)/actions"
 
 export const metadata: Metadata = {
@@ -22,38 +24,22 @@ export const metadata: Metadata = {
 }
 
 export default async function PaginaPerfiles() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  const { usuario } = await requerirSesion({ desde: "/perfiles" })
 
   return (
     <main className="flex min-h-dvh w-full flex-col items-center justify-center gap-4 px-4 py-10 text-center">
       <h1 className="text-2xl font-semibold">Selector de perfiles — próximamente</h1>
 
-      {user ? (
-        <>
-          <p className="text-base text-muted-foreground">
-            Sesión iniciada como{" "}
-            <span className="font-medium text-foreground">{user.email}</span>
-          </p>
-          <form action={cerrarSesion}>
-            <Button type="submit" variant="outline" className="h-12 text-base">
-              Cerrar sesión
-            </Button>
-          </form>
-        </>
-      ) : (
-        <p className="text-base text-muted-foreground">
-          No hay una sesión iniciada.{" "}
-          <Link
-            href="/login"
-            className="font-medium text-primary underline-offset-4 hover:underline"
-          >
-            Iniciar sesión
-          </Link>
-        </p>
-      )}
+      <p className="text-base text-muted-foreground">
+        Sesión iniciada como{" "}
+        <span className="font-medium text-foreground">{usuario.email}</span>
+      </p>
+
+      <form action={cerrarSesion}>
+        <Button type="submit" variant="outline" className="h-12 text-base">
+          Cerrar sesión
+        </Button>
+      </form>
     </main>
   )
 }

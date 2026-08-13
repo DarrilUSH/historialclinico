@@ -10,6 +10,10 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    // `tests/unit/*.test.ts` corre con `node --test` y el type stripping
+    // nativo de Node 24, que exige la extensión `.ts` en el import. Solo se
+    // puede activar con `noEmit` (que este proyecto ya tiene).
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,
