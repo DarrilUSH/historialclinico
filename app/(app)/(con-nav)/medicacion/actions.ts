@@ -446,3 +446,132 @@ export async function revertirToma(
   revalidatePath("/inicio")
   redirect("/medicacion?tomarevertida=1")
 }
+
+const SIN_DOCUMENTO_ID = "No pudimos identificar el documento. Volvé a intentarlo desde la edición."
+
+const ERROR_DOCUMENTO_NO_ENCONTRADO =
+  "No encontramos esa receta, o ya no está disponible para este perfil."
+
+const ERROR_INESPERADO_ASOCIAR_RECETA =
+  "Ocurrió un problema y no pudimos asociar la receta. Probá de nuevo en unos minutos."
+
+const ERROR_INESPERADO_DESASOCIAR_RECETA =
+  "Ocurrió un problema y no pudimos desasociar la receta. Probá de nuevo en unos minutos."
+
+/**
+ * Asocia un documento categoría `prescription` ya confirmado a una medicación.
+ * Valida que el documento pertenece al perfil activo y es de la categoría correcta.
+ * Requiere permiso `manage`.
+ */
+export async function asociarReceta(
+  _estadoPrevio: EstadoMedicacionAccion,
+  formData: FormData,
+): Promise<EstadoMedicacionAccion> {
+  try {
+    const activo = await obtenerPerfilActivo()
+    if (!activo) {
+      return { error: SIN_PERFIL_ACTIVO }
+    }
+
+    const medicacionId = campo(formData, "medicacionId")
+    if (!PATRON_UUID.test(medicacionId)) {
+      return { error: SIN_MEDICACION_ID }
+    }
+
+    const recetaId = campo(formData, "recetaId")
+    if (!PATRON_UUID.test(recetaId)) {
+      return { error: SIN_DOCUMENTO_ID }
+    }
+
+    const { supabase } = await requerirPermiso(activo.perfil.id, "manage", {
+      siNoHaySesion: "lanzar",
+    })
+
+    // Verificar que el documento pertenece al perfil, es categoría prescription y está confirmado
+    const { data: documento } = await supabase
+      .from("documents")
+      .select("id")
+      .eq("id", recetaId)
+      .eq("profile_id", activo.perfil.id)
+      .eq("category", "prescription")
+      .not("confirmed_at", "is", null)
+      .maybeSingle()
+
+    if (!documento) {
+      return { error: ERROR_DOCUMENTO_NO_ENCONTRADO }
+    }
+
+    // Actualizar la medicación con la receta asociada
+    const { error, count } = await supabase
+      .from("medications")
+      .update({ prescription_document_id: recetaId }, { count: "exact" })
+      .eq("id", medicacionId)
+      .eq("profile_id", activo.perfil.id)
+
+    if (error) {
+      console.error(`[medicacion] Fallo al asociar la receta ${recetaId} a ${medicacionId}:`, error)
+      return { error: ERROR_INESPERADO_ASOCIAR_RECETA }
+    }
+    if (!count) {
+      return { error: ERROR_MEDICACION_NO_ENCONTRADA }
+    }
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message }
+    }
+    console.error("[medicacion] Fallo inesperado al asociar una receta:", error)
+    return { error: ERROR_INESPERADO_ASOCIAR_RECETA }
+  }
+
+  revalidatePath("/medicacion")
+  redirect(`/medicacion/${campo(formData, "medicacionId")}/editar?receta=asociada`)
+}
+
+/**
+ * Desasocia un documento de una medicación (NO borra el documento).
+ * Requiere permiso `manage`.
+ */
+export async function desasociarReceta(
+  _estadoPrevio: EstadoMedicacionAccion,
+  formData: FormData,
+): Promise<EstadoMedicacionAccion> {
+  try {
+    const activo = await obtenerPerfilActivo()
+    if (!activo) {
+      return { error: SIN_PERFIL_ACTIVO }
+    }
+
+    const medicacionId = campo(formData, "medicacionId")
+    if (!PATRON_UUID.test(medicacionId)) {
+      return { error: SIN_MEDICACION_ID }
+    }
+
+    const { supabase } = await requerirPermiso(activo.perfil.id, "manage", {
+      siNoHaySesion: "lanzar",
+    })
+
+    // Actualizar la medicación: prescription_document_id a NULL
+    const { error, count } = await supabase
+      .from("medications")
+      .update({ prescription_document_id: null }, { count: "exact" })
+      .eq("id", medicacionId)
+      .eq("profile_id", activo.perfil.id)
+
+    if (error) {
+      console.error(`[medicacion] Fallo al desasociar la receta de ${medicacionId}:`, error)
+      return { error: ERROR_INESPERADO_DESASOCIAR_RECETA }
+    }
+    if (!count) {
+      return { error: ERROR_MEDICACION_NO_ENCONTRADA }
+    }
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message }
+    }
+    console.error("[medicacion] Fallo inesperado al desasociar una receta:", error)
+    return { error: ERROR_INESPERADO_DESASOCIAR_RECETA }
+  }
+
+  revalidatePath("/medicacion")
+  redirect(`/medicacion/${campo(formData, "medicacionId")}/editar?receta=quitada`)
+}

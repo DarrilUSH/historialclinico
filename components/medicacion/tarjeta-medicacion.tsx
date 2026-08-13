@@ -1,5 +1,5 @@
 /**
- * Tarjetas de medicación (Sprint 7, tarea 7.2). Dos variantes, para las dos
+ * Tarjetas de medicación (Sprint 7, tarea 7.2 / 7.5). Dos variantes, para las dos
  * secciones de `/medicacion`:
  *
  * - `TarjetaMedicacionActiva` — lee `v_medicacion_estado`
@@ -9,7 +9,8 @@
  *   advertencia visual cuando `necesita_renovacion`-. Nunca se calcula nada
  *   acá: la vista ya trae `dias_restantes`, `fecha_estimada_fin` y
  *   `necesita_renovacion` resueltos (docs/modelo-medicacion.md §2, "el umbral
- *   se define UNA vez, en la vista").
+ *   se define UNA vez, en la vista"). Incluye link "Ver receta" si está
+ *   asociada (tarea 7.5).
  * - `TarjetaMedicacionSuspendida` — lee `medications` directo (la vista NO
  *   incluye suspendidas, docs/modelo-medicacion.md §2.5): versión reducida,
  *   sin días restantes -"para una medicación suspendida esa pregunta no
@@ -20,7 +21,8 @@
  * por un stock bajo, solo avisa.
  */
 
-import { AlarmClockIcon, PackageIcon, PillIcon, TriangleAlertIcon } from "lucide-react"
+import Link from "next/link"
+import { AlarmClockIcon, FileTextIcon, PackageIcon, PillIcon, TriangleAlertIcon } from "lucide-react"
 
 import { Alerta } from "@/components/base/alerta"
 import { Tarjeta } from "@/components/base/tarjeta"
@@ -169,6 +171,16 @@ export function TarjetaMedicacionActiva({
         <Alerta variante="info" estatica className="text-sm">
           Sin stock cargado. Editá la medicación para agregarlo y ver los días restantes.
         </Alerta>
+      )}
+
+      {medicacion.prescription_document_id && (
+        <Link
+          href={`/estudios/${medicacion.prescription_document_id}`}
+          className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+        >
+          <FileTextIcon className="size-4 shrink-0" aria-hidden="true" />
+          Ver receta
+        </Link>
       )}
 
       {puedeEditar && (

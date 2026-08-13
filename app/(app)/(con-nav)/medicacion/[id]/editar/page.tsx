@@ -19,6 +19,7 @@ import { redirect } from "next/navigation"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { FormularioMedicacion, type ValoresMedicacion } from "@/components/medicacion/formulario-medicacion"
+import { SelectorReceta } from "@/components/medicacion/selector-receta"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
@@ -54,7 +55,7 @@ export default async function PaginaEditarMedicacion({
   const { data: medicacion } = await supabase
     .from("medications")
     .select(
-      "id, name, active_ingredient, presentation, dose_amount, dose_unit, frequency, schedule_times, interval_hours, start_date, end_date, stock_units, notes",
+      "id, name, active_ingredient, presentation, dose_amount, dose_unit, frequency, schedule_times, interval_hours, start_date, end_date, stock_units, notes, prescription_document_id",
     )
     .eq("id", id)
     .eq("profile_id", activo.perfil.id)
@@ -62,6 +63,26 @@ export default async function PaginaEditarMedicacion({
 
   if (!medicacion) {
     redirect("/medicacion")
+  }
+
+  // Traer recetas disponibles (documentos confirmados categoría prescription)
+  const { data: recetasDisponibles } = await supabase
+    .from("documents")
+    .select("id, title")
+    .eq("profile_id", activo.perfil.id)
+    .eq("category", "prescription")
+    .not("confirmed_at", "is", null)
+    .order("document_date", { ascending: false })
+
+  // Traer el documento asociado si existe, para mostrar su título
+  let recetaActual: { id: string; title: string } | null = null
+  if (medicacion.prescription_document_id) {
+    const { data: doc } = await supabase
+      .from("documents")
+      .select("id, title")
+      .eq("id", medicacion.prescription_document_id)
+      .maybeSingle()
+    recetaActual = doc
   }
 
   const valoresIniciales: Partial<ValoresMedicacion> = {
@@ -95,6 +116,13 @@ export default async function PaginaEditarMedicacion({
       </div>
 
       <FormularioMedicacion modo="editar" medicacionId={medicacion.id} valoresIniciales={valoresIniciales} />
+
+      <SelectorReceta
+        medicacionId={medicacion.id}
+        recetaActualId={recetaActual?.id ?? null}
+        recetaActualTitulo={recetaActual?.title ?? null}
+        recetasDisponibles={recetasDisponibles ?? []}
+      />
     </div>
   )
 }
