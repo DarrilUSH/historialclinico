@@ -12,9 +12,10 @@
 import * as React from "react"
 import { useActionState } from "react"
 import { useFormStatus } from "react-dom"
-import { CircleCheckIcon, Loader2Icon } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { Alerta } from "@/components/base/alerta"
+import { Boton } from "@/components/base/boton"
+import { CampoTexto } from "@/components/base/campo-texto"
 import {
   Card,
   CardContent,
@@ -23,8 +24,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import type { EstadoAuth } from "@/app/(auth)/actions"
 
 export interface CampoFormularioAuth {
@@ -50,6 +49,7 @@ interface FormularioAuthProps {
 }
 
 const ESTADO_INICIAL: EstadoAuth = { error: null, mensaje: null }
+const ID_ERROR = "formulario-auth-error"
 
 export function FormularioAuth({
   titulo,
@@ -77,13 +77,7 @@ export function FormularioAuth({
 
       {huboExito ? (
         <CardContent>
-          <div
-            role="status"
-            className="flex items-start gap-3 rounded-lg border border-exito/40 bg-exito-suave px-4 py-3 text-base font-medium text-exito-fuerte"
-          >
-            <CircleCheckIcon className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-            <span>{estado.mensaje}</span>
-          </div>
+          <Alerta variante="exito">{estado.mensaje}</Alerta>
         </CardContent>
       ) : (
         <form action={enviarAccion} noValidate>
@@ -94,34 +88,23 @@ export function FormularioAuth({
               ))}
 
             {campos.map((campo) => (
-              <div key={campo.id} className="flex flex-col gap-2">
-                <Label htmlFor={campo.id} className="text-base font-medium">
-                  {campo.etiqueta}
-                </Label>
-                <Input
-                  id={campo.id}
-                  name={campo.id}
-                  type={campo.tipo ?? "text"}
-                  autoComplete={campo.autoComplete}
-                  required={campo.requerido ?? true}
-                  aria-invalid={estado.error ? true : undefined}
-                  aria-describedby={estado.error ? "formulario-auth-error" : undefined}
-                  className="h-12 text-base md:text-base"
-                />
-                {campo.ayuda && (
-                  <p className="text-sm text-muted-foreground">{campo.ayuda}</p>
-                )}
-              </div>
+              <CampoTexto
+                key={campo.id}
+                id={campo.id}
+                label={campo.etiqueta}
+                type={campo.tipo ?? "text"}
+                autoComplete={campo.autoComplete}
+                required={campo.requerido ?? true}
+                ayuda={campo.ayuda}
+                invalido={Boolean(estado.error)}
+                describedBy={estado.error ? ID_ERROR : undefined}
+              />
             ))}
 
             {estado.error && (
-              <p
-                id="formulario-auth-error"
-                role="alert"
-                className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-base font-medium text-destructive"
-              >
+              <Alerta variante="error" id={ID_ERROR}>
                 {estado.error}
-              </p>
+              </Alerta>
             )}
           </CardContent>
 
@@ -143,14 +126,8 @@ function BotonEnviar({ children }: { children: React.ReactNode }) {
   const { pending } = useFormStatus()
 
   return (
-    <Button
-      type="submit"
-      disabled={pending}
-      aria-busy={pending}
-      className="h-12 w-full text-base"
-    >
-      {pending && <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />}
+    <Boton type="submit" cargando={pending} className="w-full">
       {pending ? "Un momento…" : children}
-    </Button>
+    </Boton>
   )
 }

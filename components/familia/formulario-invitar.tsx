@@ -9,13 +9,13 @@
 
 import { useActionState, useEffect, useRef } from "react"
 import { useFormStatus } from "react-dom"
-import { CircleCheckIcon, Loader2Icon, SendIcon } from "lucide-react"
+import { SendIcon } from "lucide-react"
 
 import { invitarFamiliar, type EstadoFamilia } from "@/app/(app)/(con-nav)/familia/actions"
-import { Button } from "@/components/ui/button"
+import { Alerta } from "@/components/base/alerta"
+import { Boton } from "@/components/base/boton"
+import { CampoTexto } from "@/components/base/campo-texto"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 
 interface FormularioInvitarProps {
   perfilId: string
@@ -44,27 +44,18 @@ export function FormularioInvitar({ perfilId }: FormularioInvitarProps) {
     >
       <input type="hidden" name="perfilId" value={perfilId} />
 
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="familia-email" className="text-base font-medium">
-          Invitar por email
-        </Label>
-        <Input
-          id="familia-email"
-          name="email"
-          type="email"
-          inputMode="email"
-          autoComplete="email"
-          required
-          placeholder="nombre@ejemplo.com.ar"
-          aria-invalid={estado.error ? true : undefined}
-          aria-describedby={estado.error ? "familia-email-error" : undefined}
-          className="h-11 text-base"
-        />
-        <p className="text-sm text-muted-foreground">
-          Tiene que ser el email de una cuenta ya creada en Historial Médico. Por defecto solo va
-          a poder ver el historial.
-        </p>
-      </div>
+      <CampoTexto
+        id="familia-email"
+        name="email"
+        label="Invitar por email"
+        type="email"
+        inputMode="email"
+        autoComplete="email"
+        required
+        placeholder="nombre@ejemplo.com.ar"
+        ayuda="Tiene que ser el email de una cuenta ya creada en Historial Médico. Por defecto solo va a poder ver el historial."
+        error={estado.error ?? undefined}
+      />
 
       <div className="flex flex-col gap-3">
         <label className="flex items-start gap-2.5 text-sm">
@@ -89,24 +80,8 @@ export function FormularioInvitar({ perfilId }: FormularioInvitarProps) {
         </label>
       </div>
 
-      {estado.error && (
-        <p
-          id="familia-email-error"
-          role="alert"
-          className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm font-medium text-destructive"
-        >
-          {estado.error}
-        </p>
-      )}
-
       {estado.mensaje && !estado.error && (
-        <p
-          role="status"
-          className="flex items-center gap-2 rounded-lg border border-exito/40 bg-exito-suave px-3 py-2.5 text-base font-medium text-exito-fuerte"
-        >
-          <CircleCheckIcon className="size-4 shrink-0" aria-hidden="true" />
-          {estado.mensaje}
-        </p>
+        <Alerta variante="exito">{estado.mensaje}</Alerta>
       )}
 
       <BotonInvitar />
@@ -117,13 +92,9 @@ export function FormularioInvitar({ perfilId }: FormularioInvitarProps) {
 function BotonInvitar() {
   const { pending } = useFormStatus()
   return (
-    <Button type="submit" disabled={pending} aria-busy={pending} className="h-11 gap-2 text-base">
-      {pending ? (
-        <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />
-      ) : (
-        <SendIcon className="size-4" aria-hidden="true" />
-      )}
+    <Boton type="submit" cargando={pending} className="gap-2">
+      {!pending && <SendIcon className="size-4" aria-hidden="true" />}
       {pending ? "Enviando…" : "Otorgar acceso"}
-    </Button>
+    </Boton>
   )
 }

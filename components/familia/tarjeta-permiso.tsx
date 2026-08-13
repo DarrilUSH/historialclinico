@@ -30,18 +30,10 @@ import {
 } from "lucide-react"
 
 import { actualizarPermiso, revocarPermiso, type EstadoFamilia } from "@/app/(app)/(con-nav)/familia/actions"
+import { Boton } from "@/components/base/boton"
+import { DialogoConfirmacion } from "@/components/base/dialogo-confirmacion"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 import { colorAvatarPara, inicialesDe } from "@/lib/perfiles/avatar"
 import { cn } from "@/lib/utils"
 
@@ -160,37 +152,18 @@ export function TarjetaPermiso({
             <BotonGuardar />
           </form>
 
-          <Dialog>
-            <DialogTrigger render={<Button type="button" variant="destructive" size="sm" />}>
-              <Trash2Icon className="size-4" aria-hidden="true" />
-              Revocar acceso
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>¿Revocar el acceso de {permiso.nombre}?</DialogTitle>
-                <DialogDescription>
-                  Deja de ver este historial de inmediato: sus próximas consultas van a devolver
-                  cero resultados. Lo que ya vio mientras tuvo acceso queda igual en el registro
-                  de accesos.
-                </DialogDescription>
-              </DialogHeader>
-              <form action={enviarRevocacion}>
-                <input type="hidden" name="perfilId" value={perfilId} />
-                <input type="hidden" name="permisoId" value={permiso.id} />
-                {estadoRevocacion.error && (
-                  <p role="alert" className="mb-1 text-sm font-medium text-destructive">
-                    {estadoRevocacion.error}
-                  </p>
-                )}
-                <DialogFooter>
-                  <DialogClose render={<Button type="button" variant="outline" />}>
-                    Cancelar
-                  </DialogClose>
-                  <BotonRevocar />
-                </DialogFooter>
-              </form>
-            </DialogContent>
-          </Dialog>
+          <DialogoConfirmacion
+            disparador={<Boton variant="destructivo" size="sm" />}
+            titulo={`¿Revocar el acceso de ${permiso.nombre}?`}
+            consecuencia="Deja de ver este historial de inmediato: sus próximas consultas van a devolver cero resultados. Lo que ya vio mientras tuvo acceso queda igual en el registro de accesos."
+            accion={enviarRevocacion}
+            camposOcultos={{ perfilId, permisoId: permiso.id }}
+            error={estadoRevocacion.error}
+            textoConfirmar="Sí, revocar"
+          >
+            <Trash2Icon className="size-4" aria-hidden="true" />
+            Revocar acceso
+          </DialogoConfirmacion>
         </div>
       )}
     </li>
@@ -203,16 +176,6 @@ function BotonGuardar() {
     <Button type="submit" variant="outline" size="sm" disabled={pending} aria-busy={pending}>
       {pending && <Loader2Icon className="size-3.5 animate-spin" aria-hidden="true" />}
       {pending ? "Guardando…" : "Guardar cambios"}
-    </Button>
-  )
-}
-
-function BotonRevocar() {
-  const { pending } = useFormStatus()
-  return (
-    <Button type="submit" variant="destructive" disabled={pending} aria-busy={pending}>
-      {pending && <Loader2Icon className="size-4 animate-spin" aria-hidden="true" />}
-      {pending ? "Revocando…" : "Sí, revocar"}
     </Button>
   )
 }
