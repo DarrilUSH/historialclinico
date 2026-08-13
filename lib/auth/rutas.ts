@@ -44,10 +44,10 @@ export const RUTAS_SOLO_ANONIMAS = ["/login", "/registro"] as const
 
 /**
  * Rutas de diagnóstico públicas **solo en desarrollo**. En producción
- * `/estado` ya se autobloquea con `notFound()`, pero igual no se declara
- * pública ahí: defensa en profundidad, por si mañana alguien saca ese guard.
+ * `/estado` y `/estilos` ya se autobloquean con `notFound()`, pero igual no se declaran
+ * públicas ahí: defensa en profundidad, por si mañana alguien saca ese guard.
  */
-export const RUTAS_PUBLICAS_DEV = ["/estado"] as const
+export const RUTAS_PUBLICAS_DEV = ["/estado", "/estilos"] as const
 
 /** Prefijo de los Route Handlers. Sin sesión responden 401, no redirect. */
 export const PREFIJO_API = "/api"
