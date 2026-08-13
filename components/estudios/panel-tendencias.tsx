@@ -1,10 +1,12 @@
 "use client"
 
 /**
- * Orquestador de la interacción en `/estudios/tendencias` (Sprint 5, tarea
- * 5.4): mantiene qué métrica está elegida (estado local, ver
- * `selector-metrica.tsx` sobre por qué NO vive en la URL) y renderiza el
- * gráfico de esa serie.
+ * Orquestador de la interacción en `/estudios/tendencias` (Sprint 5, tareas
+ * 5.2 y 5.4): mantiene qué métrica está elegida (estado local) y renderiza:
+ * 1. Tarjetas compactas de "último valor" con variación (tarea 5.2).
+ * 2. Selector de métrica y gráfico de la serie elegida (tarea 5.4).
+ *
+ * Las tarjetas actúan como selector alternativo: tocar una cambia la métrica.
  *
  * Recibe `series`/`metricasDisponibles` YA resueltos como props desde
  * `app/(app)/(con-nav)/estudios/tendencias/page.tsx` (Server Component,
@@ -16,7 +18,9 @@ import * as React from "react"
 
 import { GraficoMetrica } from "@/components/estudios/grafico-metrica"
 import { SelectorMetrica } from "@/components/estudios/selector-metrica"
+import { TarjetaUltimoValor } from "@/components/estudios/tarjeta-ultimo-valor"
 import type { MetricaDisponible, SerieMetrica } from "@/lib/laboratorio/series"
+import { resumenUltimoValor } from "@/lib/laboratorio/ultimo-valor"
 
 export interface PanelTendenciasProps {
   series: SerieMetrica[]
@@ -46,19 +50,37 @@ export function PanelTendencias({ series, metricasDisponibles }: PanelTendencias
 
   return (
     <div className="flex flex-col gap-4">
-      <SelectorMetrica
-        metricas={metricasDisponibles}
-        claveSeleccionada={claveSeleccionada}
-        onSeleccionar={setClaveSeleccionada}
-      />
+      {/* Tarjetas de último valor: grilla responsiva */}
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 lg:gap-3">
+        {series.map((serie) => {
+          const resumen = resumenUltimoValor(serie.puntos)
+          return (
+            <TarjetaUltimoValor
+              key={serie.clave}
+              etiqueta={serie.etiqueta}
+              resumen={resumen}
+              onSeleccionar={() => setClaveSeleccionada(serie.clave)}
+            />
+          )
+        })}
+      </div>
 
-      {serieSeleccionada && (
-        <GraficoMetrica
-          key={serieSeleccionada.clave}
-          serie={serieSeleccionada}
-          colorIndice={Math.max(0, indiceColor)}
+      {/* Selector de métrica + gráfico */}
+      <div className="flex flex-col gap-4 pt-2 border-t border-borde-sutil">
+        <SelectorMetrica
+          metricas={metricasDisponibles}
+          claveSeleccionada={claveSeleccionada}
+          onSeleccionar={setClaveSeleccionada}
         />
-      )}
+
+        {serieSeleccionada && (
+          <GraficoMetrica
+            key={serieSeleccionada.clave}
+            serie={serieSeleccionada}
+            colorIndice={Math.max(0, indiceColor)}
+          />
+        )}
+      </div>
     </div>
   )
 }
