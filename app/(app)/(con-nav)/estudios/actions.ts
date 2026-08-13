@@ -141,13 +141,20 @@ const ERROR_INESPERADO_DESCARTE =
   "Ocurrió un problema y no pudimos descartar el documento. Probá de nuevo en unos minutos."
 
 /**
- * Confirma el documento recién subido: valida los cuatro campos editables
- * del formulario de revisión y llama al RPC `confirmar_documento_recien_subido`
+ * Confirma el documento recién subido: valida los siete campos editables del
+ * formulario de revisión (título, categoría, fecha, resumen, institución,
+ * especialidad, médico) y llama al RPC `confirmar_documento_recien_subido`
  * (`supabase/migrations/20260813010000_confirmacion_documentos.sql`, extendido
- * por `20260813020000_metricas_en_confirmacion.sql`), que hace las cuatro
+ * por `20260813020000_metricas_en_confirmacion.sql` y por
+ * `20260813030000_confirmacion_metadatos_completos.sql`), que hace las
  * guardas del lado de la base (creador, ventana de 1 hora, no confirmado
  * antes, valores válidos), sella `confirmed_at` y -en la MISMA transacción-
- * inserta las métricas de laboratorio ya normalizadas en `lab_metrics`.
+ * inserta las métricas de laboratorio ya normalizadas en `lab_metrics` y
+ * persiste institución/especialidad/médico en
+ * `documents.institution`/`.specialty`/`.doctor_name` -las mismas columnas
+ * que ya leen el filtro de institución de `/estudios`, la tarjeta de la
+ * galería y el detalle del estudio, sin que ninguna de esas pantallas
+ * necesite cambios-.
  *
  * Es el ÚNICO camino que persiste datos del formulario de revisión: "Cancelar"
  * llama a `descartarDocumento`, que borra en vez de guardar.
@@ -181,6 +188,9 @@ export async function confirmarDocumento(
     categoria: formData.get("categoria"),
     fecha: formData.get("fecha"),
     resumen: formData.get("resumen"),
+    institucion: formData.get("institucion"),
+    especialidad: formData.get("especialidad"),
+    medico: formData.get("medico"),
   }
 
   const validacion = validarConfirmacionDocumento(crudo)
@@ -188,7 +198,8 @@ export async function confirmarDocumento(
     return { error: validacion.error }
   }
 
-  const { documentoId, titulo, categoria, fecha, resumen } = validacion.datos
+  const { documentoId, titulo, categoria, fecha, resumen, institucion, especialidad, medico } =
+    validacion.datos
 
   // Las métricas son best-effort: un campo oculto roto o con forma inesperada
   // NUNCA bloquea la confirmación del documento -la regla de oro del roadmap
@@ -239,6 +250,13 @@ export async function confirmarDocumento(
       // forma fija (sin index signature) no es asignable de forma implícita
       // a un tipo indexado como `Json`.
       metricas: (metricasParaRpc.length > 0 ? metricasParaRpc : null) as Json | null,
+      // Mismo criterio que `nuevo_resumen`: se manda string vacía en vez de
+      // `null` para no pelear con el tipo generado (`string`, sin `| null`),
+      // aunque el RPC (`nullif(btrim(coalesce(...)), '')`) trata las dos
+      // formas exactamente igual.
+      nueva_institucion: institucion ?? "",
+      nueva_especialidad: especialidad ?? "",
+      nuevo_medico: medico ?? "",
     })
 
     if (error) {

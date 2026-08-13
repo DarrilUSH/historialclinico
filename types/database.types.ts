@@ -890,7 +890,10 @@ export type Database = {
           doc_id: string
           metricas?: Json
           nueva_categoria: string
+          nueva_especialidad?: string
           nueva_fecha: string
+          nueva_institucion?: string
+          nuevo_medico?: string
           nuevo_resumen: string
           nuevo_titulo: string
         }

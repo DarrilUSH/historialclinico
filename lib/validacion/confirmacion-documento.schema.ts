@@ -88,6 +88,33 @@ export const schemaConfirmacionDocumento = z.object({
     .max(2000, 'El resumen es demasiado largo (máx. 2000 caracteres).')
     .optional()
     .transform((valor) => (valor && valor.length > 0 ? valor : undefined)),
+
+  // Institución, especialidad y médico: mismo patrón opcional que `resumen`
+  // -viajan como texto libre, vacío se normaliza a `undefined`-. Los topes de
+  // longitud están calcados de la guarda 6 del RPC
+  // (`supabase/migrations/20260813030000_confirmacion_metadatos_completos.sql`),
+  // mismo criterio del resto de este archivo: que un error de validación se
+  // muestre ANTES de gastar el viaje de red.
+  institucion: z
+    .string({ message: 'La institución debe ser texto.' })
+    .trim()
+    .max(150, 'La institución es demasiado larga (máx. 150 caracteres).')
+    .optional()
+    .transform((valor) => (valor && valor.length > 0 ? valor : undefined)),
+
+  especialidad: z
+    .string({ message: 'La especialidad debe ser texto.' })
+    .trim()
+    .max(100, 'La especialidad es demasiado larga (máx. 100 caracteres).')
+    .optional()
+    .transform((valor) => (valor && valor.length > 0 ? valor : undefined)),
+
+  medico: z
+    .string({ message: 'El nombre del médico debe ser texto.' })
+    .trim()
+    .max(100, 'El nombre del médico es demasiado largo (máx. 100 caracteres).')
+    .optional()
+    .transform((valor) => (valor && valor.length > 0 ? valor : undefined)),
 })
 
 export type ConfirmacionDocumento = z.infer<typeof schemaConfirmacionDocumento>

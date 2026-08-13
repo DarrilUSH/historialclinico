@@ -8,10 +8,15 @@
  * REGLA DE ORO: la IA nunca guarda sola, y la subida nunca queda bloqueada
  * por la IA.
  *
- * - `extraccion` presente → los cuatro campos vienen PRE-CARGADOS con lo que
- *   detectó Gemini, con ayuda "Detectado automáticamente — revisalo" (o "No se
- *   detectó — completalo vos" en el campo que quedó sin dato real: ver
- *   `lib/documentos/sugerir-titulo.ts`).
+ * - `extraccion` presente → título, fecha, categoría, resumen, institución,
+ *   especialidad y médico vienen PRE-CARGADOS con lo que detectó Gemini, con
+ *   ayuda "Detectado automáticamente — revisalo" (o "No se detectó —
+ *   completalo vos" en el campo que quedó sin dato real: ver
+ *   `lib/documentos/sugerir-titulo.ts`). Institución, especialidad y médico
+ *   son OPCIONALES -pueden quedar vacíos, tanto si Gemini no los detectó como
+ *   si la persona los borra a mano-: el RPC (`confirmar_documento_recien_subido`,
+ *   `supabase/migrations/20260813030000_confirmacion_metadatos_completos.sql`)
+ *   los normaliza a NULL igual que ya hace con el resumen.
  * - `extraccion` es `null` (la extracción falló o Gemini devolvió algo que no
  *   pasó la validación Zod) → el MISMO formulario, con la `<Alerta>` de arriba
  *   explicando que no se pudo leer, y los campos que la IA habría llenado
@@ -146,6 +151,15 @@ export function FormularioRevision({
   const resumenInicial = extraccion?.resumen ?? ""
   const resumenDetectado = Boolean(extraccion?.resumen)
 
+  const institucionInicial = extraccion?.institucion?.trim() ?? ""
+  const institucionDetectada = Boolean(institucionInicial)
+
+  const especialidadInicial = extraccion?.especialidad?.trim() ?? ""
+  const especialidadDetectada = Boolean(especialidadInicial)
+
+  const medicoInicial = extraccion?.medico?.trim() ?? ""
+  const medicoDetectado = Boolean(medicoInicial)
+
   const metricas = extraccion?.metricas ?? []
 
   return (
@@ -203,6 +217,30 @@ export function FormularioRevision({
             {categoriaDetectada ? AYUDA_DETECTADO : "Elegí la categoría que corresponda."}
           </p>
         </div>
+
+        <CampoTexto
+          id="institucion"
+          label="Institución"
+          defaultValue={institucionInicial}
+          maxLength={150}
+          ayuda={institucionDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
+        />
+
+        <CampoTexto
+          id="especialidad"
+          label="Especialidad"
+          defaultValue={especialidadInicial}
+          maxLength={100}
+          ayuda={especialidadDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
+        />
+
+        <CampoTexto
+          id="medico"
+          label="Médico"
+          defaultValue={medicoInicial}
+          maxLength={100}
+          ayuda={medicoDetectado ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
+        />
 
         <CampoTextarea
           id="resumen"

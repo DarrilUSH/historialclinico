@@ -1048,6 +1048,116 @@ select pruebas_rls.registrar('8b. parámetro metricas',
 
 
 -- =============================================================================
+-- BLOQUE 8c — parámetros institución/especialidad/médico (Sprint 5, tarea
+-- correctiva de metadatos)
+-- -----------------------------------------------------------------------------
+-- `confirmar_documento_recien_subido` se extendió en
+-- `20260813030000_confirmacion_metadatos_completos.sql` con tres parámetros
+-- más (`nueva_institucion`, `nueva_especialidad`, `nuevo_medico`, los tres
+-- `text DEFAULT NULL`) que persisten en `documents.institution` / `.specialty`
+-- / `.doctor_name` dentro de la MISMA transacción que sella `confirmed_at`.
+-- Este bloque prueba lo que 8 y 8b no cubren: que el caso feliz persiste los
+-- tres campos (guarda 6), y que un valor demasiado largo aborta la llamada
+-- COMPLETA -mismo criterio de atomicidad que la guarda 5 de métricas-. Que
+-- BLOQUE 8 y 8b sigan pasando sin cambios (llaman con 5 y 6 argumentos)
+-- confirma la compatibilidad posicional que documenta el encabezado de la
+-- migración: los tres parámetros nuevos van al FINAL, todos con default.
+-- =============================================================================
+\echo '### BLOQUE 8c — parámetros institución/especialidad/médico del RPC de confirmación'
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+insert into public.documents (id, profile_id, title, category, document_date, storage_path) values
+    ('30303030-3030-4303-8303-303030303030', :p_a, 'Análisis con metadatos (sin revisar)',           'other', '2026-08-09', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8c-ok.pdf'),
+    ('40404040-4040-4404-8404-404040404040', :p_a, 'Análisis con institución demasiado larga (sin revisar)', 'other', '2026-08-10', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8c-mal.pdf');
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '30303030-3030-4303-8303-303030303030',
+            'Análisis con metadatos — agosto', 'laboratory', '2026-08-09', null, null,
+            'Laboratorio Central Ushuaia', 'Clínica médica', 'Dr. Pérez MP 1234');
+        v := coalesce((select institution || ' / ' || specialty || ' / ' || doctor_name
+                         from public.documents
+                        where id = '30303030-3030-4303-8303-303030303030'),
+                      'NO ENCONTRADO');
+    exception when others then v := 'error ' || sqlstate || ' ' || sqlerrm;
+    end;
+    perform pruebas_rls.registrar('8c. institución/especialidad/médico',
+        'A confirma CON institución/especialidad/médico: quedan persistidos en documents',
+        'Laboratorio Central Ushuaia / Clínica médica / Dr. Pérez MP 1234', v);
+end $$;
+
+commit;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '30303030-3030-4303-8303-303030303030',
+            'Segundo intento', 'laboratory', '2026-08-09', null);
+        v := 'confirmado de nuevo';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8c. institución/especialidad/médico',
+        'Llamando SIN los tres parámetros nuevos (5 argumentos) sigue resolviendo contra la MISMA función -guarda 3, doble confirmación-',
+        'rechazado (42501)', v);
+end $$;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text; institucion_larga text;
+begin
+    institucion_larga := rpad('X', 151, 'X');
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '40404040-4040-4404-8404-404040404040',
+            'Análisis con institución demasiado larga', 'laboratory', '2026-08-10', null, null,
+            institucion_larga, null, null);
+        v := 'confirmado (no debería)';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                   then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8c. institución/especialidad/médico',
+        'A confirma con INSTITUCIÓN de 151 caracteres (guarda 6): se rechaza la llamada completa',
+        'rechazado (22023)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8c. institución/especialidad/médico',
+       'El rechazo por guarda 6 es atómico: el documento sigue SIN confirmar y sin institución',
+       'sin confirmar, sin institución',
+       case when exists (
+                 select 1 from public.documents
+                  where id = '40404040-4040-4404-8404-404040404040'
+                    and confirmed_at is null
+                    and institution is null
+                    and title = 'Análisis con institución demasiado larga (sin revisar)')
+            then 'sin confirmar, sin institución'
+            else 'estado inesperado' end);
+
+-- Los dos documentos de este bloque no se borran acá a propósito, mismo
+-- criterio que el cierre de BLOQUE 8/8b: la limpieza final del script los
+-- arrastra por CASCADE al borrar auth.users.
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
