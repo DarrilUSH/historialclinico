@@ -28,7 +28,7 @@ import Link from "next/link"
 import { redirect } from "next/navigation"
 import { Suspense } from "react"
 
-import { UploadIcon } from "lucide-react"
+import { ChartLineIcon, UploadIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
 import { AvisoConfirmacion } from "@/components/estudios/aviso-confirmacion"
@@ -40,6 +40,7 @@ import {
   parsearFiltrosEstudios,
   type SearchParamsFiltrosEstudios,
 } from "@/lib/estudios/filtros"
+import { existenMetricasDeLaboratorio } from "@/lib/laboratorio/series"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 export const metadata: Metadata = {
@@ -84,6 +85,12 @@ export default async function PaginaEstudios({
   const { supabase } = await requerirSesion({ desde: "/estudios" })
   const instituciones = await obtenerInstitucionesDistintas(supabase, activo.perfil.id)
 
+  // Mismo criterio: chequeo liviano (`count: "exact", head: true`, sin traer
+  // filas) para decidir si el link "Ver tendencias" (Sprint 5, tarea 5.4)
+  // tiene sentido -sin ninguna métrica de laboratorio cargada, esa pantalla
+  // solo mostraría un estado vacío-.
+  const hayMetricas = await existenMetricasDeLaboratorio(supabase, activo.perfil.id)
+
   // Clave del `<Suspense>`: cualquier combinación distinta de filtros o de
   // paginación es, a todos los efectos, un árbol nuevo -mismo motivo que ya
   // documentaba `key={hasta}` para "Ver más", extendido a los cinco filtros:
@@ -102,6 +109,19 @@ export default async function PaginaEstudios({
         <h1 className="text-2xl font-semibold tracking-tight text-balance">Estudios</h1>
         {activo.permisos.canUpload && <BotonSubir />}
       </div>
+
+      {hayMetricas && (
+        <Boton
+          render={<Link href="/estudios/tendencias" />}
+          nativeButton={false}
+          variant="outline"
+          size="lg"
+          className="w-full sm:w-fit"
+        >
+          <ChartLineIcon aria-hidden="true" />
+          Ver tendencias
+        </Boton>
+      )}
 
       <FiltrosEstudios instituciones={instituciones} />
 
