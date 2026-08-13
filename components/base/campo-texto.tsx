@@ -10,10 +10,15 @@
  * `campo-numero.tsx` se construye ENCIMA de este componente (mismo layout,
  * agrega `inputMode`/`pattern`), así que los dos comparten exactamente la
  * misma estructura visual y de accesibilidad.
+ *
+ * `conDictado` agrega `boton-dictado.tsx` a la derecha del campo (Sprint 3).
+ * Deliberadamente NO existe en `campo-numero.tsx`: ver el comentario de la
+ * prop más abajo para el porqué.
  */
 
 import * as React from "react"
 
+import { BotonDictado } from "@/components/base/boton-dictado"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
@@ -43,6 +48,21 @@ export interface CampoTextoProps
   sufijo?: string
   /** Clases para el contenedor (label + input + ayuda/error), no para el input. */
   contenedorClassName?: string
+  /**
+   * Agrega el botón de dictado por voz (`boton-dictado.tsx`) a la derecha
+   * del campo, en `es-AR`. Si el navegador no soporta la Web Speech API el
+   * botón simplemente no se renderiza y el campo sigue siendo 100%
+   * escribible: nunca es un requisito.
+   *
+   * Deliberadamente NO se hereda en `campo-numero.tsx`. Un número dictado es
+   * ambiguo de una forma que un texto libre no lo es: "dieciséis" puede
+   * transcribirse "16" o "116", una coma decimal hablada rara vez se
+   * reconoce como tal, y en esta app un número mal transcripto no es un
+   * error de UX menor -es una dosis de medicación o una presión arterial
+   * mal cargada-. El riesgo supera la ganancia, así que los campos
+   * numéricos se siguen escribiendo a mano.
+   */
+  conDictado?: boolean
 }
 
 export function CampoTexto({
@@ -54,6 +74,7 @@ export function CampoTexto({
   describedBy,
   icono,
   sufijo,
+  conDictado = false,
   className,
   contenedorClassName,
   name,
@@ -66,39 +87,100 @@ export function CampoTexto({
   const describedByFinal =
     [idAyuda, idError, describedBy].filter(Boolean).join(" ") || undefined
 
+  const inputRef = React.useRef<HTMLInputElement | null>(null)
+
+  // Inserta el texto dictado en la posición del cursor (o al final si no
+  // hay selección conocida) sin pisar lo ya escrito, y dispara el `onChange`
+  // normal del campo: el formulario no distingue dictado de tipeo. Se hace
+  // con el setter nativo de `<input>` + un evento `input` real (en vez de
+  // llamar a `onChange` a mano) porque `Input` viene de `@base-ui/react` y
+  // este camino funciona igual sea el campo controlado o no controlado.
+  const manejarTranscripcion = React.useCallback((textoDictado: string) => {
+    const input = inputRef.current
+    if (!input || !textoDictado) return
+
+    const valorPrevio = input.value
+    let inicio = valorPrevio.length
+    let fin = valorPrevio.length
+    try {
+      inicio = input.selectionStart ?? valorPrevio.length
+      fin = input.selectionEnd ?? valorPrevio.length
+    } catch {
+      // Algunos `type` (number, email, date) no soportan selectionStart y
+      // tiran InvalidStateError: se cae al comportamiento seguro de
+      // insertar al final. En la práctica `conDictado` solo se usa con
+      // campos de texto libre, así que esto casi nunca se ejecuta.
+    }
+
+    // Espacio de cortesía a los dos lados si hace falta, así dictar en medio
+    // de una frase no pega las palabras ("...Antesmañanadespués...").
+    const necesitaEspacioAntes = inicio > 0 && !/\s$/.test(valorPrevio.slice(0, inicio))
+    const separadorAntes = necesitaEspacioAntes ? " " : ""
+    const necesitaEspacioDespues = fin < valorPrevio.length && !/^\s/.test(valorPrevio.slice(fin))
+    const separadorDespues = necesitaEspacioDespues ? " " : ""
+    const nuevoValor =
+      valorPrevio.slice(0, inicio) +
+      separadorAntes +
+      textoDictado +
+      separadorDespues +
+      valorPrevio.slice(fin)
+
+    const descriptorNativo = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      "value",
+    )
+    if (descriptorNativo?.set) {
+      descriptorNativo.set.call(input, nuevoValor)
+    } else {
+      input.value = nuevoValor
+    }
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+
+    const posicionCursor = inicio + separadorAntes.length + textoDictado.length
+    requestAnimationFrame(() => {
+      input.focus()
+      input.setSelectionRange(posicionCursor, posicionCursor)
+    })
+  }, [])
+
   return (
     <div className={cn("flex flex-col gap-2", contenedorClassName)}>
       <Label htmlFor={id}>{label}</Label>
 
-      <div className="relative flex items-center">
-        {icono && (
-          <span
-            className="pointer-events-none absolute left-3.5 flex text-muted-foreground [&_svg]:size-5"
-            aria-hidden="true"
-          >
-            {icono}
-          </span>
-        )}
+      <div className="flex items-center gap-2">
+        <div className="relative flex flex-1 items-center">
+          {icono && (
+            <span
+              className="pointer-events-none absolute left-3.5 flex text-muted-foreground [&_svg]:size-5"
+              aria-hidden="true"
+            >
+              {icono}
+            </span>
+          )}
 
-        <Input
-          {...props}
-          id={id}
-          name={name ?? id}
-          type={type}
-          required={required}
-          aria-invalid={error || invalido ? true : undefined}
-          aria-describedby={describedByFinal}
-          className={cn(icono && "pl-11", sufijo && "pr-14", className)}
-        />
+          <Input
+            {...props}
+            ref={inputRef}
+            id={id}
+            name={name ?? id}
+            type={type}
+            required={required}
+            aria-invalid={error || invalido ? true : undefined}
+            aria-describedby={describedByFinal}
+            className={cn(icono && "pl-11", sufijo && "pr-14", className)}
+          />
 
-        {sufijo && (
-          <span
-            className="pointer-events-none absolute right-3.5 text-base text-muted-foreground"
-            aria-hidden="true"
-          >
-            {sufijo}
-          </span>
-        )}
+          {sufijo && (
+            <span
+              className="pointer-events-none absolute right-3.5 text-base text-muted-foreground"
+              aria-hidden="true"
+            >
+              {sufijo}
+            </span>
+          )}
+        </div>
+
+        {conDictado && <BotonDictado onTranscripcion={manejarTranscripcion} />}
       </div>
 
       {ayuda && !error && (
