@@ -56,13 +56,22 @@
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 
-import { esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
+import { esErrorDeGuarda, requerirPermiso, requerirSesion } from "@/lib/auth/guardas"
 import { ErrorIngesta, ingestarDocumento } from "@/lib/documentos/ingesta"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { BUCKETS, borrarObjeto } from "@/lib/storage-admin"
+import {
+  validarConfirmacionDocumento,
+  validarDescarteDocumento,
+} from "@/lib/validacion/confirmacion-documento.schema"
 
 export interface EstadoSubida {
   error: string | null
   documentoId: string | null
+}
+
+export interface EstadoConfirmacion {
+  error: string | null
 }
 
 const SIN_PERFIL_ACTIVO =
@@ -120,4 +129,162 @@ export async function subirDocumento(formData: FormData): Promise<EstadoSubida> 
 
   // Fuera del try/catch: ver el contrato de retorno en el encabezado.
   redirect(`/estudios/nuevo/procesando?doc=${documentoId}`)
+}
+
+const ERROR_INESPERADO_CONFIRMACION =
+  "Ocurrió un problema y no pudimos guardar el documento. Probá de nuevo en unos minutos."
+
+const ERROR_INESPERADO_DESCARTE =
+  "Ocurrió un problema y no pudimos descartar el documento. Probá de nuevo en unos minutos."
+
+/**
+ * Confirma el documento recién subido: valida los cuatro campos editables
+ * del formulario de revisión y llama al RPC `confirmar_documento_recien_subido`
+ * (`supabase/migrations/20260813010000_confirmacion_documentos.sql`), que
+ * hace las cuatro guardas del lado de la base (creador, ventana de 1 hora,
+ * no confirmado antes, valores válidos) y sella `confirmed_at`.
+ *
+ * Es el ÚNICO camino que persiste datos del formulario de revisión: "Cancelar"
+ * llama a `descartarDocumento`, que borra en vez de guardar.
+ *
+ * `metricas` viaja en el `FormData` (campo oculto, JSON) porque
+ * `formulario-revision.tsx` las muestra de solo lectura y las deja listas
+ * para que la tarea 4.6 del roadmap ("Persistencia de métricas de
+ * laboratorio") las inserte en `lab_metrics` sin tener que tocar el
+ * formulario. Esta acción las parsea de forma defensiva -si el JSON viniera
+ * roto, no aborta la confirmación por eso- pero TODAVÍA NO LAS PERSISTE: es
+ * deuda explícita de esta tarea, resuelta por la 4.6.
+ *
+ * Firma `(prevState, formData)` para poder usarse con `useActionState` desde
+ * `formulario-revision.tsx`, mismo patrón que `familia/actions.ts`.
+ */
+export async function confirmarDocumento(
+  _estadoPrevio: EstadoConfirmacion,
+  formData: FormData,
+): Promise<EstadoConfirmacion> {
+  const crudo = {
+    documentoId: formData.get("documentoId"),
+    titulo: formData.get("titulo"),
+    categoria: formData.get("categoria"),
+    fecha: formData.get("fecha"),
+    resumen: formData.get("resumen"),
+  }
+
+  const validacion = validarConfirmacionDocumento(crudo)
+  if (!validacion.ok) {
+    return { error: validacion.error }
+  }
+
+  const { documentoId, titulo, categoria, fecha, resumen } = validacion.datos
+
+  // Deuda declarada (ver el comentario de la función): se parsean para dejar
+  // el contrato listo para la tarea 4.6, pero no se insertan en lab_metrics
+  // todavía.
+  const metricasCrudo = formData.get("metricas")
+  if (typeof metricasCrudo === "string") {
+    try {
+      JSON.parse(metricasCrudo)
+    } catch {
+      console.warn(
+        `[estudios] El campo oculto "metricas" no era JSON válido para ${documentoId}; se ignora (deuda de la tarea 4.6).`,
+      )
+    }
+  }
+
+  try {
+    const { supabase } = await requerirSesion({ siNoHaySesion: "lanzar" })
+
+    const { error } = await supabase.rpc("confirmar_documento_recien_subido", {
+      doc_id: documentoId,
+      nuevo_titulo: titulo,
+      nueva_categoria: categoria,
+      nueva_fecha: fecha,
+      // El RPC trata "" igual que NULL (`nullif(btrim(...), '')`): se manda
+      // string vacía en vez de `null` para no pelear con el tipo generado
+      // (`nuevo_resumen: string`, sin `| null`, aunque el parámetro SQL sí
+      // acepta NULL).
+      nuevo_resumen: resumen ?? "",
+    })
+
+    if (error) {
+      // Los mensajes del RPC ya están escritos para mostrarse tal cual (ver
+      // el encabezado de la migración): "Solo la persona que subió este
+      // documento puede confirmarlo.", "Pasó más de una hora...", etc.
+      return { error: error.message || ERROR_INESPERADO_CONFIRMACION }
+    }
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message }
+    }
+    console.error(`[estudios] Fallo inesperado al confirmar ${documentoId}:`, error)
+    return { error: ERROR_INESPERADO_CONFIRMACION }
+  }
+
+  revalidatePath("/estudios")
+  redirect("/estudios?confirmado=1")
+}
+
+/**
+ * Descarta (borra) el documento recién subido: es el "Cancelar" de la
+ * pantalla de revisión, disparado desde `DialogoConfirmacion` después de que
+ * la persona confirma el diálogo "¿Descartar este documento?".
+ *
+ * Llama al RPC `descartar_documento_recien_subido`, que ya borra la FILA con
+ * las mismas guardas de creador+1h+no-confirmado (el trigger
+ * `documents_encolar_purga_storage` encola el `storage_path` en
+ * `storage_purge_queue` automáticamente, como en cualquier `DELETE` de
+ * `documents`). Acá además se borra el OBJETO de Storage de inmediato con
+ * `lib/storage-admin.ts` -patrón "belt-and-suspenders" del roadmap: la cola es
+ * la red de seguridad, este borrado inmediato es la vía rápida cuando todo
+ * sale bien. Si el borrado inmediato fallara, la fila YA está borrada -el RPC
+ * es lo que importa para que el documento desaparezca del historial- y la
+ * cola lo va a purgar igual más tarde, así que el fallo se registra pero no
+ * cambia la respuesta.
+ */
+export async function descartarDocumento(
+  _estadoPrevio: EstadoConfirmacion,
+  formData: FormData,
+): Promise<EstadoConfirmacion> {
+  const validacion = validarDescarteDocumento({ documentoId: formData.get("documentoId") })
+  if (!validacion.ok) {
+    return { error: validacion.error }
+  }
+
+  const { documentoId } = validacion.datos
+
+  try {
+    const { supabase } = await requerirSesion({ siNoHaySesion: "lanzar" })
+
+    const { data: filaBorrada, error } = await supabase.rpc(
+      "descartar_documento_recien_subido",
+      { doc_id: documentoId },
+    )
+
+    if (error) {
+      return { error: error.message || ERROR_INESPERADO_DESCARTE }
+    }
+
+    if (filaBorrada?.storage_path) {
+      try {
+        await borrarObjeto(BUCKETS.documentos, filaBorrada.storage_path)
+      } catch (errorBorrado) {
+        // Belt-and-suspenders: la fila ya está borrada y encolada para purga
+        // (ver el comentario de la función). No se le devuelve un error a la
+        // persona por esto.
+        console.error(
+          `[estudios] El RPC de descarte borró la fila de ${documentoId}, pero el borrado inmediato del objeto ${filaBorrada.storage_path} falló (queda igual en storage_purge_queue):`,
+          errorBorrado,
+        )
+      }
+    }
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message }
+    }
+    console.error(`[estudios] Fallo inesperado al descartar ${documentoId}:`, error)
+    return { error: ERROR_INESPERADO_DESCARTE }
+  }
+
+  revalidatePath("/estudios")
+  redirect("/estudios?descartado=1")
 }

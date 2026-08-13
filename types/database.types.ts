@@ -244,6 +244,7 @@ export type Database = {
           ai_confidence: number | null
           ai_summary: string | null
           category: Database["public"]["Enums"]["doc_category"]
+          confirmed_at: string | null
           created_at: string
           created_by_profile_id: string | null
           doctor_id: string | null
@@ -264,6 +265,7 @@ export type Database = {
           ai_confidence?: number | null
           ai_summary?: string | null
           category?: Database["public"]["Enums"]["doc_category"]
+          confirmed_at?: string | null
           created_at?: string
           created_by_profile_id?: string | null
           doctor_id?: string | null
@@ -284,6 +286,7 @@ export type Database = {
           ai_confidence?: number | null
           ai_summary?: string | null
           category?: Database["public"]["Enums"]["doc_category"]
+          confirmed_at?: string | null
           created_at?: string
           created_by_profile_id?: string | null
           doctor_id?: string | null
@@ -882,6 +885,72 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      confirmar_documento_recien_subido: {
+        Args: {
+          doc_id: string
+          nueva_categoria: string
+          nueva_fecha: string
+          nuevo_resumen: string
+          nuevo_titulo: string
+        }
+        Returns: {
+          ai_confidence: number | null
+          ai_summary: string | null
+          category: Database["public"]["Enums"]["doc_category"]
+          confirmed_at: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          doctor_id: string | null
+          doctor_name: string | null
+          document_date: string
+          file_size_bytes: number | null
+          id: string
+          institution: string | null
+          mime_type: string | null
+          profile_id: string
+          raw_ocr_text: string | null
+          specialty: string | null
+          storage_path: string
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "documents"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      descartar_documento_recien_subido: {
+        Args: { doc_id: string }
+        Returns: {
+          ai_confidence: number | null
+          ai_summary: string | null
+          category: Database["public"]["Enums"]["doc_category"]
+          confirmed_at: string | null
+          created_at: string
+          created_by_profile_id: string | null
+          doctor_id: string | null
+          doctor_name: string | null
+          document_date: string
+          file_size_bytes: number | null
+          id: string
+          institution: string | null
+          mime_type: string | null
+          profile_id: string
+          raw_ocr_text: string | null
+          specialty: string | null
+          storage_path: string
+          title: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "documents"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       es_perfil_gestionado: { Args: { perfil: string }; Returns: boolean }
       es_sesion_de_usuario: { Args: never; Returns: boolean }
       es_titular: { Args: { perfil: string }; Returns: boolean }

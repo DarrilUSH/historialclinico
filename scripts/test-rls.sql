@@ -736,7 +736,8 @@ select pruebas_rls.registrar('7. estructura',
  where n.nspname = 'public'
    and p.proname in ('perfil_actor', 'es_titular', 'es_perfil_gestionado', 'puede_ver_perfil',
                      'puede_cargar_en_perfil', 'puede_administrar_perfil', 'puede_otorgar_permisos',
-                     'puede_arrancar_administracion', 'es_sesion_de_usuario')
+                     'puede_arrancar_administracion', 'es_sesion_de_usuario',
+                     'confirmar_documento_recien_subido', 'descartar_documento_recien_subido')
    and has_function_privilege('anon', p.oid, 'execute');
 
 select pruebas_rls.registrar('7. estructura',
@@ -756,6 +757,186 @@ select pruebas_rls.registrar('7. estructura',
  where p.user_id is null
    and not exists (select 1 from public.family_permissions fp
                     where fp.owner_profile_id = p.id and fp.can_manage);
+
+
+-- =============================================================================
+-- BLOQUE 8 — confirmación acotada del documento recién subido (RPC, tarea 4.5)
+-- -----------------------------------------------------------------------------
+-- Las cuatro guardas de `confirmar_documento_recien_subido` / `descartar_documento_recien_subido`
+-- (`supabase/migrations/20260813010000_confirmacion_documentos.sql`) no son
+-- políticas RLS -son un SECURITY DEFINER que bypassea la RLS de `documents`
+-- por diseño-, así que este bloque las prueba por separado, LLAMANDO al RPC
+-- con las mismas sesiones simuladas del resto del arnés. Documentos propios
+-- del bloque, con storage_path únicos para no chocar con el resto del script.
+-- =============================================================================
+\echo '### BLOQUE 8 — confirmación acotada del documento recién subido (RPC)'
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+-- doc_propio: para el caso feliz + doble confirmación.
+-- doc_ajeno:  para que Diego intente confirmarlo/descartarlo sin ser el creador.
+insert into public.documents (id, profile_id, title, category, document_date, storage_path) values
+    ('77777777-7777-4777-8777-777777777777', :p_a, 'Análisis de sangre (sin revisar)', 'other', '2026-08-05', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8-propio.pdf'),
+    ('88888888-8888-4888-8888-888888888888', :p_a, 'Radiografía (sin revisar)',        'other', '2026-08-06', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8-ajeno.pdf');
+
+-- doc_viejo: mismo creador y sin confirmar todavía, pero created_at ya pasó la
+-- ventana de 1 hora -el trigger sellador solo toca created_by_profile_id, así
+-- que el created_at explícito del INSERT llega intacto a la fila.
+insert into public.documents (id, profile_id, title, category, document_date, storage_path, created_at) values
+    ('99999999-9999-4999-8999-999999999999', :p_a, 'Consulta vieja (sin revisar)', 'other', '2026-07-20', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8-viejo.pdf', now() - interval '2 hours');
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare
+    v    text;
+    fila public.documents%rowtype;
+begin
+    begin
+        select * into fila from public.confirmar_documento_recien_subido(
+            '77777777-7777-4777-8777-777777777777',
+            'Análisis de sangre — agosto (editado por A)',
+            'laboratory', '2026-08-05', 'Todo dentro de rango.');
+        v := 'confirmado: título="' || fila.title || '", confirmed_at ' ||
+             case when fila.confirmed_at is not null then 'sellado' else 'NULL' end;
+    exception when others then v := 'error ' || sqlstate || ' ' || sqlerrm;
+    end;
+    perform pruebas_rls.registrar('8. confirmación RPC',
+        'A confirma SU documento dentro de la hora (el título editado, no el original, queda persistido)',
+        'confirmado: título="Análisis de sangre — agosto (editado por A)", confirmed_at sellado', v);
+end $$;
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '77777777-7777-4777-8777-777777777777',
+            'Segundo intento de confirmación', 'laboratory', '2026-08-05', null);
+        v := 'confirmado de nuevo';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8. confirmación RPC',
+        'A vuelve a confirmar el MISMO documento (doble confirmación, guarda 3)', 'rechazado (42501)', v);
+end $$;
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '88888888-8888-4888-8888-888888888888',
+            'Título puesto por Diego', 'imaging', '2026-08-06', null);
+        v := 'confirmado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8. confirmación RPC',
+        'Diego (jwt de B) confirma un documento AJENO de A — no es el creador (guarda 1)',
+        'rechazado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.descartar_documento_recien_subido('88888888-8888-4888-8888-888888888888');
+        v := 'descartado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8. confirmación RPC',
+        'Diego (jwt de B) descarta el mismo documento AJENO — no es el creador (guarda 1)',
+        'rechazado (42501)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8. confirmación RPC',
+       'El documento ajeno sigue intacto tras los dos intentos de Diego (ni confirmado ni borrado)',
+       'existe, confirmed_at NULL, título original',
+       case when exists (select 1 from public.documents
+                           where id = '88888888-8888-4888-8888-888888888888'
+                             and confirmed_at is null
+                             and title = 'Radiografía (sin revisar)')
+            then 'existe, confirmed_at NULL, título original'
+            else 'estado inesperado' end);
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '99999999-9999-4999-8999-999999999999',
+            'Consulta vieja actualizada', 'consultation', '2026-07-20', null);
+        v := 'confirmado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8. confirmación RPC',
+        'A (SÍ es la creadora) confirma un documento con created_at retrocedido > 1 hora (guarda 2)',
+        'rechazado (42501)', v);
+end $$;
+
+commit;
+
+-- Cierre prolijo del bloque: A, la dueña real del documento ajeno, lo
+-- descarta legítimamente -a diferencia del intento de Diego, esta llamada sí
+-- cumple las tres guardas (creadora, dentro de la hora, sin confirmar)-.
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        perform public.descartar_documento_recien_subido('88888888-8888-4888-8888-888888888888');
+        select count(*) into c from public.documents where id = '88888888-8888-4888-8888-888888888888';
+        v := case when c = 0 then 'descartado (fila borrada)' else 'sigue existiendo' end;
+    exception when others then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8. confirmación RPC',
+        'A (la creadora real) descarta su propio documento sin revisar', 'descartado (fila borrada)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8. confirmación RPC',
+       'El descarte encoló el objeto borrado en storage_purge_queue (mismo trigger que cualquier DELETE)',
+       'encolado',
+       case when exists (select 1 from public.storage_purge_queue
+                           where source_table = 'documents'
+                             and storage_path = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8-ajeno.pdf')
+            then 'encolado' else 'NO encolado' end);
+
+-- doc_propio (confirmado) y doc_viejo (rechazado, nunca confirmado) no se
+-- borran acá a propósito: la limpieza final del script, al borrar auth.users
+-- de A y B, hace cascade profiles -> documents y se lleva estas dos filas
+-- igual que cualquier otro documento de prueba del resto del arnés.
 
 
 -- =============================================================================

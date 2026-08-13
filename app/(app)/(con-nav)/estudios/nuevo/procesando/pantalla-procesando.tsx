@@ -2,71 +2,55 @@
 
 /**
  * Lectura automática del documento: dispara `POST /api/documentos/extraer`
- * al montar y recorre tres estados -leyendo / listo / error- hasta mostrar el
- * resultado. Vive aparte de `page.tsx` por el mismo motivo que
- * `pantalla-carga.tsx` en `/estudios/nuevo`: `page.tsx` es un Server Component
- * (usa `cookies()` para el guard) y esto necesita `useEffect` y estado de
- * React.
+ * al montar y, pase lo que pase -éxito, falla de Gemini, respuesta vacía o
+ * inválida-, termina mostrando `FormularioRevision`
+ * (`components/documentos/formulario-revision.tsx`), la pantalla de revisión
+ * real de la tarea 4.5. Vive aparte de `page.tsx` por el mismo motivo que
+ * `pantalla-carga.tsx` en `/estudios/nuevo`: `page.tsx` es un Server
+ * Component (usa `cookies()` para el guard) y esto necesita `useEffect` y
+ * estado de React.
  *
- * Esta pantalla es DELIBERADAMENTE PROVISORIA: muestra el JSON que devolvió
- * Gemini en una tabla simple de campos, de solo lectura, con una nota de que
- * el próximo paso permite corregir y confirmar. La pantalla de revisión y
- * edición real -formulario editable, indicador de confianza baja, fallback en
- * blanco si la IA no devolvió nada- es la tarea 4.5 del roadmap
- * ("Pantalla de revisión y fallback de edición manual") y no se implementa
- * acá.
+ * REGLA DE ORO (ROADMAP_SPRINTS.md, Sprint 4): la subida NUNCA queda
+ * bloqueada por la IA. Antes esta pantalla tenía un tercer estado ("error")
+ * que terminaba en un callejón sin salida -un botón "Ver mis estudios" y
+ * nada más, dejando el documento provisional (título de archivo, categoría
+ * "Otro") sin ninguna forma de corregirlo salvo pedirle a un `can_manage` que
+ * lo edite-. Ahora CUALQUIER desenlace de la extracción lleva al mismo
+ * formulario: con `extraccion` si Gemini devolvió algo válido, con
+ * `extraccion: null` (+ el mensaje de error) si no.
  *
  * `disparado` (un `useRef`, no un `useState`) evita una segunda llamada real
  * a Gemini si el efecto corre dos veces -el comportamiento de React 19 en
  * modo desarrollo (Strict Mode) para detectar efectos no idempotentes-: a
  * diferencia de un simple `console.log` duplicado, acá una segunda ejecución
- * gasta cuota real de la API.
+ * gasta cuota real de la API. Ver la explicación completa en el commit que
+ * introdujo este patrón (tarea 4.3 del roadmap).
  */
 
 import * as React from "react"
-import Link from "next/link"
 
 import { Loader2Icon } from "lucide-react"
 
-import { Alerta } from "@/components/base/alerta"
-import { Boton } from "@/components/base/boton"
-import { Tarjeta } from "@/components/base/tarjeta"
-import type { CategoriaDocumentoExtraida, DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
+import { FormularioRevision } from "@/components/documentos/formulario-revision"
+import type { DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
+import type { CategoriaDocumento } from "@/types/dominio"
 
 export interface PantallaProcesandoProps {
   documentoId: string
+  /** Título ya guardado en `documents.title` (provisional, derivado del nombre de archivo). */
+  tituloProvisional: string
+  /** Categoría ya guardada en `documents.category` (default `"other"`). */
+  categoriaProvisional: CategoriaDocumento
+  /** Fecha ya guardada en `documents.document_date` (default: hoy). */
+  fechaProvisional: string
+  /** Fecha de hoy en `YYYY-MM-DD`, hora de pared de Ushuaia — tope del input date del formulario. */
+  fechaMaximaIso: string
 }
 
-type Estado = "leyendo" | "listo" | "error"
-
-const ETIQUETA_CATEGORIA: Record<CategoriaDocumentoExtraida, string> = {
-  laboratory: "Análisis de laboratorio",
-  imaging: "Estudio por imágenes",
-  prescription: "Receta",
-  consultation: "Consulta",
-  other: "Documento",
-}
-
-/**
- * `document_date`/`fecha` viaja como "aaaa-mm-dd" sin hora: se formatea en
- * UTC a propósito, mismo criterio que `app/(app)/(con-nav)/estudios/page.tsx`
- * -si no, la hora de Ushuaia (-03) podría correr la fecha un día.
- */
-const FORMATO_FECHA = new Intl.DateTimeFormat("es-AR", {
-  timeZone: "UTC",
-  day: "numeric",
-  month: "long",
-  year: "numeric",
-})
-
-function formatearFecha(fechaIso: string): string {
-  if (!fechaIso) return "No se detectó una fecha"
-  const fecha = new Date(`${fechaIso}T00:00:00Z`)
-  return Number.isNaN(fecha.getTime()) ? fechaIso : FORMATO_FECHA.format(fecha)
-}
+type Estado = "leyendo" | "revisando"
 
 const MENSAJE_ERROR_RED =
-  "No pudimos conectarnos para leer el documento. Revisá tu conexión y probá de nuevo."
+  "No pudimos conectarnos para leer el documento. Revisá tu conexión: podés cargar los datos a mano igual."
 
 function extraerMensajeError(cuerpo: unknown): string {
   if (
@@ -87,35 +71,21 @@ function extraerDocumento(cuerpo: unknown): DocumentoMedicoExtraido | null {
   return null
 }
 
-export function PantallaProcesando({ documentoId }: PantallaProcesandoProps) {
+export function PantallaProcesando({
+  documentoId,
+  tituloProvisional,
+  categoriaProvisional,
+  fechaProvisional,
+  fechaMaximaIso,
+}: PantallaProcesandoProps) {
   const [estado, setEstado] = React.useState<Estado>("leyendo")
   const [extraccion, setExtraccion] = React.useState<DocumentoMedicoExtraido | null>(null)
-  const [error, setError] = React.useState<string>(MENSAJE_ERROR_RED)
+  const [mensajeError, setMensajeError] = React.useState<string | null>(null)
   const disparado = React.useRef(false)
 
   React.useEffect(() => {
-    // `disparado` es lo único que hace falta para que la llamada real a
-    // Gemini ocurra UNA sola vez. React 19 en modo desarrollo (Strict Mode)
-    // corre setup → cleanup → setup de cada efecto una vez al montar, sobre
-    // la MISMA instancia -el `useRef` sobrevive ese ciclo sintético-: el
-    // primer `setup` dispara `extraer()` y marca `disparado.current = true`;
-    // el `cleanup` sintético no cancela nada; el segundo `setup` ve
-    // `disparado.current` en `true` y no vuelve a llamar a Gemini. Se
-    // comprobaron -y se descartaron- en la verificación manual de esta tarea
-    // dos variantes rotas: (a) cancelar el `fetch` con `AbortController` en
-    // el cleanup mata la única request real antes de que responda
-    // (`net::ERR_ABORTED`, sin costo real ahorrado: el Route Handler no
-    // escucha la desconexión del cliente, así que el servidor sigue
-    // llamando a Gemini igual); (b) una bandera `vivo` que se apaga en el
-    // cleanup sintético descarta el resultado de esa ÚNICA request real
-    // cuando llega, porque el cleanup sintético corre ANTES de que la
-    // promesa resuelva -la pantalla queda en "Leyendo…" para siempre aunque
-    // el `fetch` haya devuelto 200 con el JSON correcto-. La solución es no
-    // tener ninguna de las dos: sin `AbortController` y sin bandera de
-    // desmontaje, la única llamada real corre hasta el final y actualiza el
-    // estado cuando llega. Un desmontaje de verdad (navegar a otra pantalla)
-    // deja un `setState` de una instancia ya desmontada, que React descarta
-    // sola sin error ni warning desde React 18.
+    // Ver el comentario del encabezado: evita una segunda llamada real a
+    // Gemini cuando el efecto corre dos veces en Strict Mode.
     if (disparado.current) return
     disparado.current = true
 
@@ -132,15 +102,15 @@ export function PantallaProcesando({ documentoId }: PantallaProcesandoProps) {
 
         if (extraida) {
           setExtraccion(extraida)
-          setEstado("listo")
-          return
+        } else {
+          setMensajeError(extraerMensajeError(cuerpo))
         }
-
-        setError(extraerMensajeError(cuerpo))
-        setEstado("error")
       } catch {
-        setError(MENSAJE_ERROR_RED)
-        setEstado("error")
+        setMensajeError(MENSAJE_ERROR_RED)
+      } finally {
+        // La extracción NUNCA bloquea la subida: haya salido bien o mal, se
+        // pasa al formulario de revisión.
+        setEstado("revisando")
       }
     }
 
@@ -163,75 +133,15 @@ export function PantallaProcesando({ documentoId }: PantallaProcesandoProps) {
     )
   }
 
-  if (estado === "error") {
-    return (
-      <div className="flex w-full flex-col gap-4">
-        <Alerta variante="error">{error}</Alerta>
-        <p className="text-base text-muted-foreground">
-          No hay problema: en el próximo paso vas a poder cargar los datos a mano.
-        </p>
-        {/* `nativeButton={false}`: el `render` es un `<Link>`, no un `<button>` nativo. */}
-        <Boton render={<Link href="/estudios" />} nativeButton={false} size="lg">
-          Ver mis estudios
-        </Boton>
-      </div>
-    )
-  }
-
-  if (!extraccion) return null
-
   return (
-    <div className="flex w-full flex-col gap-4">
-      <Alerta variante="info" estatica className="text-left">
-        Así entendimos el documento. En el próximo paso vas a poder corregir y confirmar estos
-        datos.
-      </Alerta>
-
-      <Tarjeta className="gap-4 px-(--card-spacing) text-left">
-        <CampoExtraido etiqueta="Fecha" valor={formatearFecha(extraccion.fecha)} />
-        <CampoExtraido
-          etiqueta="Categoría"
-          valor={ETIQUETA_CATEGORIA[extraccion.categoria] ?? extraccion.categoria}
-        />
-        <CampoExtraido etiqueta="Especialidad" valor={extraccion.especialidad || "No detectada"} />
-        <CampoExtraido etiqueta="Institución" valor={extraccion.institucion || "No detectada"} />
-        <CampoExtraido etiqueta="Médico" valor={extraccion.medico || "No detectado"} />
-        <CampoExtraido etiqueta="Resumen" valor={extraccion.resumen || "Sin resumen"} />
-      </Tarjeta>
-
-      {extraccion.metricas.length > 0 && (
-        <Tarjeta className="gap-3 px-(--card-spacing) text-left">
-          <p className="text-base font-semibold text-foreground">Resultados de laboratorio</p>
-          <ul className="flex flex-col gap-2">
-            {extraccion.metricas.map((metrica, indice) => (
-              <li
-                key={`${metrica.nombre}-${indice}`}
-                className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-2 last:border-0 last:pb-0"
-              >
-                <span className="text-base font-medium text-foreground">{metrica.nombre}</span>
-                <span className="text-base text-muted-foreground numeros-clinicos">
-                  {metrica.valor} {metrica.unidad}
-                  {metrica.rango && ` (ref: ${metrica.rango})`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Tarjeta>
-      )}
-
-      {/* `nativeButton={false}`: el `render` es un `<Link>`, no un `<button>` nativo. */}
-      <Boton render={<Link href="/estudios" />} nativeButton={false} size="lg">
-        Ver mis estudios
-      </Boton>
-    </div>
-  )
-}
-
-function CampoExtraido({ etiqueta, valor }: { etiqueta: string; valor: string }) {
-  return (
-    <div className="flex flex-col gap-0.5">
-      <p className="text-sm font-medium text-muted-foreground">{etiqueta}</p>
-      <p className="text-base text-foreground">{valor}</p>
-    </div>
+    <FormularioRevision
+      documentoId={documentoId}
+      extraccion={extraccion}
+      mensajeError={mensajeError}
+      tituloProvisional={tituloProvisional}
+      categoriaProvisional={categoriaProvisional}
+      fechaProvisional={fechaProvisional}
+      fechaMaximaIso={fechaMaximaIso}
+    />
   )
 }

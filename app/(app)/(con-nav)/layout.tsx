@@ -53,6 +53,7 @@ import { redirect } from "next/navigation"
 
 import { BottomNav } from "@/components/navegacion/bottom-nav"
 import { EncabezadoPerfil } from "@/components/navegacion/encabezado-perfil"
+import { Toaster } from "@/components/ui/sonner"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 export default async function LayoutConNav({ children }: { children: ReactNode }) {
@@ -76,6 +77,15 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
       </main>
 
       <BottomNav />
+
+      {/* `top-center`: la bottom nav fija ya ocupa la franja inferior -la
+          posición por defecto de sonner ("bottom-right") quedaría tapada por
+          ella en mobile-, y arriba es donde alguien mirando la pantalla la ve
+          primero. `richColors={false}`: los cuatro estilos ya salen de
+          `--normal-*` (tokens del proyecto, ver `components/ui/sonner.tsx`),
+          así un toast de éxito se lee como el mismo sistema que `Alerta`, no
+          como un verde genérico de librería. */}
+      <Toaster position="top-center" duration={5000} />
     </div>
   )
 }

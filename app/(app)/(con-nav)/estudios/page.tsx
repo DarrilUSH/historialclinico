@@ -25,11 +25,13 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
+import { Suspense } from "react"
 
 import { FlaskConicalIcon, UploadIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
+import { AvisoConfirmacion } from "@/components/estudios/aviso-confirmacion"
 import { formatearBytes } from "@/lib/archivos/validacion"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
@@ -103,6 +105,10 @@ export default async function PaginaEstudios() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+      <Suspense fallback={null}>
+        <AvisoConfirmacion />
+      </Suspense>
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight text-balance">Estudios</h1>
@@ -153,6 +159,10 @@ function BotonSubir({ className }: { className?: string }) {
 function SinEstudios({ puedeSubir }: { puedeSubir: boolean }) {
   return (
     <div className="flex w-full flex-1 flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+      <Suspense fallback={null}>
+        <AvisoConfirmacion />
+      </Suspense>
+
       <span
         className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
         aria-hidden="true"
