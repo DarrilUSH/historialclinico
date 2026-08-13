@@ -1,7 +1,9 @@
 /**
  * Estudios: stub digno para que la bottom nav (Sprint 3) no lleve a un 404.
- * La pantalla real -galería cronológica, filtros, visor de documentos y
- * gráficos de tendencias- es del Sprint 4 y 5 (ROADMAP_SPRINTS.md).
+ * La galería cronológica, filtros, visor de documentos y gráficos de
+ * tendencias son del Sprint 5 (ROADMAP_SPRINTS.md). El Sprint 4 le agrega la
+ * puerta de entrada "Subir estudio", que lleva a `/estudios/nuevo`
+ * (cargador de documentos con captura de cámara y selección de PDF).
  *
  * Mismo patrón que `/inicio` y `/familia`: revalida `obtenerPerfilActivo()`
  * y redirige si no hay perfil activo válido, aunque el layout ya lo hizo
@@ -10,10 +12,12 @@
  */
 
 import type { Metadata } from "next"
+import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { FlaskConicalIcon } from "lucide-react"
+import { FlaskConicalIcon, UploadIcon } from "lucide-react"
 
+import { Boton } from "@/components/base/boton"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 export const metadata: Metadata = {
@@ -42,6 +46,19 @@ export default async function PaginaEstudios() {
         Acá vas a poder ver tus análisis y estudios médicos con sus resultados, y un gráfico de
         cómo van cambiando en el tiempo.
       </p>
+      {/* `nativeButton={false}`: el `render` es un `<Link>` (navegación real, no
+          una acción de formulario), y Base UI por defecto espera que el
+          elemento reemplazado sea un `<button>` nativo -sin esto tira un
+          warning en consola pidiendo justo esto. */}
+      <Boton
+        render={<Link href="/estudios/nuevo" />}
+        nativeButton={false}
+        size="lg"
+        className="mt-2"
+      >
+        <UploadIcon aria-hidden="true" />
+        Subir estudio
+      </Boton>
     </div>
   )
 }
