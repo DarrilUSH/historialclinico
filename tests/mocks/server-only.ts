@@ -1,2 +1,3 @@
 // Mock vacío para server-only en tests
-export default {}
+const serverOnlyMock = {}
+export default serverOnlyMock

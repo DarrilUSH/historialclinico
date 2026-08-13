@@ -24,6 +24,7 @@ import type { Metadata } from "next"
 import { redirect } from "next/navigation"
 
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
+import { ProximoTurno } from "@/components/inicio/proximo-turno"
 import { obtenerPerfilActivo, type PermisosPerfilActivo } from "@/lib/perfil-activo"
 
 export const metadata: Metadata = {
@@ -48,6 +49,9 @@ export default async function PaginaInicio() {
         </h1>
         <p className="text-base text-muted-foreground">{descripcionRelacion(permisos)}</p>
       </div>
+
+      {/* Próximo turno (Sprint 6, tarea 6.3) */}
+      <ProximoTurno />
 
       {/*
         El banner de recordatorios se renderiza SIEMPRE desde el servidor y

@@ -3,7 +3,7 @@
  * Facilita el tipado y la legibilidad del código sin exponer `Database["public"]["Tables"][...]`.
  */
 
-import type { Database, Tables, TablesInsert, TablesUpdate, Enums } from "./database.types"
+import type { Tables, TablesInsert, TablesUpdate, Enums } from "./database.types"
 
 // Perfiles de usuario
 /** Perfil de usuario del sistema */

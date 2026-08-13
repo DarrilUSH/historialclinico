@@ -43,7 +43,7 @@ export interface TarjetaUltimoValorProps {
  * otros lugares de la app.
  */
 function formatearFechaCorta(fecha: string): string {
-  const [año, mes, dia] = fecha.split("-")
+  const [, mes, dia] = fecha.split("-")
   return `${dia}/${mes}`
 }
 
