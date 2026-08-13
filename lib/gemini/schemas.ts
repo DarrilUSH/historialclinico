@@ -27,6 +27,22 @@ import { Type, type Schema } from '@google/genai';
  *   valores fijos de `categoria`.
  * - `lab_metrics` guarda `metric_name` / `value` / `unit` / `reference_range`,
  *   de ahí los cuatro campos de cada elemento de `metricas`.
+ *
+ * ## `texto_completo` — decisión de costo/beneficio (Route Handler del Sprint 4)
+ *
+ * `documents.raw_ocr_text` existe en el esquema desde la migración inicial
+ * ("Texto crudo devuelto por el OCR/modelo. Se guarda para poder reprocesar
+ * sin volver a leer el archivo"), pero hasta este Route Handler ningún campo
+ * de `SCHEMA_DOCUMENTO_MEDICO` lo alimentaba. Se agrega `texto_completo` como
+ * el noveno... (en realidad octavo) campo, pero **deliberadamente NO** en
+ * `required`: pedirle a Gemini una transcripción completa en CADA documento
+ * multiplicaría los tokens de salida (y el costo/latencia) de la llamada más
+ * frecuente del producto, para un beneficio -reprocesar sin releer el
+ * archivo- que hoy ningún sprint consume todavía. La solución intermedia:
+ * un extracto ACOTADO (ver el límite en la descripción del campo más abajo)
+ * que el modelo puede omitir si el documento no aporta texto adicional al
+ * `resumen`. `app/api/documentos/extraer/route.ts` además lo trunca de nuevo
+ * en el servidor antes de persistir, por si el modelo no respeta el límite.
  */
 export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
   type: Type.OBJECT,
@@ -106,9 +122,27 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
         propertyOrdering: ['nombre', 'valor', 'unidad', 'rango'],
       },
     },
+    texto_completo: {
+      type: Type.STRING,
+      description:
+        'OPCIONAL — extracto acotado (máximo ~500 caracteres) del texto más relevante del ' +
+        'documento que no haya quedado ya cubierto por los demás campos (nombres, fechas, valores, ' +
+        'diagnósticos textuales). Sirve para poder reprocesar el documento más adelante sin volver a ' +
+        'leer el archivo. NO es una transcripción completa: omitir este campo si el documento es ' +
+        'largo o si el resumen ya alcanza para representarlo.',
+    },
   },
   required: ['fecha', 'especialidad', 'institucion', 'medico', 'resumen', 'categoria', 'metricas'],
-  propertyOrdering: ['fecha', 'especialidad', 'institucion', 'medico', 'resumen', 'categoria', 'metricas'],
+  propertyOrdering: [
+    'fecha',
+    'especialidad',
+    'institucion',
+    'medico',
+    'resumen',
+    'categoria',
+    'metricas',
+    'texto_completo',
+  ],
 };
 
 /** Categorías válidas de documento médico — espejo de `public.doc_category`. */
@@ -130,6 +164,10 @@ export interface MetricaExtraida {
 /**
  * Forma exacta del JSON que devuelve Gemini al usar `SCHEMA_DOCUMENTO_MEDICO`
  * como `responseSchema`. Es el tipo genérico `T` a pasarle a `extraerJson`.
+ *
+ * `texto_completo` es `?` (y no `string`) porque NO está en `required` del
+ * schema: ver el comentario de costo/beneficio sobre `SCHEMA_DOCUMENTO_MEDICO`
+ * más arriba en este archivo.
  */
 export interface DocumentoMedicoExtraido {
   fecha: string;
@@ -139,4 +177,5 @@ export interface DocumentoMedicoExtraido {
   resumen: string;
   categoria: CategoriaDocumentoExtraida;
   metricas: MetricaExtraida[];
+  texto_completo?: string;
 }
