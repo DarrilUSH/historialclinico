@@ -29,6 +29,8 @@ import { PillIcon } from "lucide-react"
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
 import { ProximoTurno } from "@/components/inicio/proximo-turno"
 import { CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA } from "@/components/base/tarjeta"
+import { requerirSesion } from "@/lib/auth/guardas"
+import { obtenerTomasDeHoy } from "@/lib/medicacion/tomas-de-hoy"
 import { cn } from "@/lib/utils"
 import { obtenerPerfilActivo, type PermisosPerfilActivo } from "@/lib/perfil-activo"
 
@@ -44,6 +46,17 @@ export default async function PaginaInicio() {
   }
 
   const { perfil, permisos } = activo
+
+  // Resumen mínimo de la card de medicación (Sprint 7, tarea 7.3): un fetch
+  // simple y best-effort, la misma función que arma la sección completa de
+  // `/medicacion` (`lib/medicacion/tomas-de-hoy.ts`) para no divergir en el
+  // criterio de "hoy". `requerirSesion()` acá NO repite el viaje a la base
+  // de `obtenerPerfilActivo()` -esa está memoizada con `cache()`-, es solo
+  // el cliente de Supabase que esta función necesita y que
+  // `obtenerPerfilActivo()` no expone.
+  const { supabase } = await requerirSesion()
+  const tomasDeHoy = await obtenerTomasDeHoy(supabase, perfil.id)
+  const tomasPendientesHoy = tomasDeHoy.filter((toma) => toma.status === "pending").length
 
   return (
     <div className="flex w-full flex-1 flex-col items-center justify-center gap-8 px-4 py-12 text-center">
@@ -79,7 +92,9 @@ export default async function PaginaInicio() {
         </span>
         <span className="flex flex-col text-left">
           <span className="text-base font-semibold text-foreground">Medicación</span>
-          <span className="text-sm text-muted-foreground">Ver horarios, stock y días restantes</span>
+          <span className="text-sm text-muted-foreground">
+            {textoResumenTomas(tomasDeHoy.length, tomasPendientesHoy)}
+          </span>
         </span>
       </Link>
 
@@ -110,4 +125,23 @@ function descripcionRelacion(permisos: PermisosPerfilActivo): string {
     return "Podés cargar datos en este perfil."
   }
   return "Tenés acceso de solo lectura a este perfil."
+}
+
+/**
+ * Segunda línea de la card de medicación (Sprint 7, tarea 7.3): resumen
+ * mínimo, no un fetch propio de la tarjeta -es la misma consulta de
+ * `lib/medicacion/tomas-de-hoy.ts` que arma la sección completa de
+ * `/medicacion`-. Sin tomas programadas hoy (perfil sin medicación con
+ * horario, o solo `as_needed`) conserva el texto genérico de siempre; con
+ * tomas, el dato accionable es cuántas faltan, y solo cuando no queda
+ * ninguna pendiente confirma que ya están todas registradas.
+ */
+function textoResumenTomas(totalHoy: number, pendientes: number): string {
+  if (totalHoy === 0) {
+    return "Ver horarios, stock y días restantes"
+  }
+  if (pendientes === 0) {
+    return "Todas las tomas de hoy están registradas"
+  }
+  return `${pendientes} ${pendientes === 1 ? "toma pendiente" : "tomas pendientes"} hoy`
 }

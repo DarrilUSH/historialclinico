@@ -22,9 +22,11 @@ import { redirect } from "next/navigation"
 import { PillBottleIcon, PillIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
+import { SeccionTomasDeHoy } from "@/components/medicacion/registro-toma"
 import { SeccionSuspendidas } from "@/components/medicacion/seccion-suspendidas"
 import { TarjetaMedicacionActiva, TarjetaMedicacionSuspendida } from "@/components/medicacion/tarjeta-medicacion"
 import { requerirSesion } from "@/lib/auth/guardas"
+import { obtenerTomasDeHoy } from "@/lib/medicacion/tomas-de-hoy"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 export const metadata: Metadata = {
@@ -43,21 +45,26 @@ export default async function PaginaMedicacion() {
 
   const { supabase } = await requerirSesion({ desde: "/medicacion" })
 
-  const [{ data: activas, error: errorActivas }, { data: suspendidas, error: errorSuspendidas }] =
-    await Promise.all([
-      supabase
-        .from("v_medicacion_estado")
-        .select("*")
-        .eq("profile_id", activo.perfil.id)
-        .order("necesita_renovacion", { ascending: false })
-        .order("name", { ascending: true }),
-      supabase
-        .from("medications")
-        .select(COLUMNAS_SUSPENDIDAS)
-        .eq("profile_id", activo.perfil.id)
-        .eq("is_active", false)
-        .order("suspended_at", { ascending: false }),
-    ])
+  const [
+    { data: activas, error: errorActivas },
+    { data: suspendidas, error: errorSuspendidas },
+    tomasDeHoy,
+  ] = await Promise.all([
+    supabase
+      .from("v_medicacion_estado")
+      .select("*")
+      .eq("profile_id", activo.perfil.id)
+      .order("necesita_renovacion", { ascending: false })
+      .order("name", { ascending: true }),
+    supabase
+      .from("medications")
+      .select(COLUMNAS_SUSPENDIDAS)
+      .eq("profile_id", activo.perfil.id)
+      .eq("is_active", false)
+      .order("suspended_at", { ascending: false }),
+    // Sprint 7, tarea 7.3: la sección "Tomas de hoy" arriba del listado.
+    obtenerTomasDeHoy(supabase, activo.perfil.id),
+  ])
 
   if (errorActivas || errorSuspendidas) {
     return (
@@ -85,6 +92,8 @@ export default async function PaginaMedicacion() {
         <EstadoVacio puedeCargar={activo.permisos.canUpload} />
       ) : (
         <>
+          <SeccionTomasDeHoy tomas={tomasDeHoy} puedeRegistrar={activo.permisos.canUpload} />
+
           {listaActivas.length === 0 ? (
             <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground">
               No tenés medicación activa cargada.

@@ -32,6 +32,17 @@
  * `UPDATE` que no matchea ninguna fila (ya estaba en el estado pedido, o es
  * de otro perfil) no tira error, así que se usa `{ count: "exact" }` para
  * devolver un mensaje claro en vez de fingir éxito.
+ *
+ * - `registrarToma` / `revertirToma` (Sprint 7, tarea 7.3) — NO son
+ *   `INSERT`/`UPDATE` sobre `medication_intakes`: llaman a los RPC
+ *   `SECURITY DEFINER` `registrar_toma(intake_id)` / `revertir_toma(intake_id)`
+ *   que entregó la tarea 7.1 (`supabase/migrations/20260813060000_medicacion_estado.sql`,
+ *   contrato en `docs/modelo-medicacion.md` §4 y §6 — nota ⑨: descontar/restituir
+ *   el stock es un `UPDATE` sobre `medications`, tabla donde `can_upload` no
+ *   escribe por la vía directa). Exigen `upload` -registrar/deshacer una toma
+ *   es cargar un dato del día, igual que confirmar un turno- como DEFENSA EN
+ *   PROFUNDIDAD: el RPC ya valida `puede_cargar_en_perfil` por dentro, así que
+ *   esta guarda de acá nunca debería ser la que rechace en el uso normal.
  */
 
 import { redirect } from "next/navigation"
@@ -53,6 +64,16 @@ const SIN_PERFIL_ACTIVO =
 
 const SIN_MEDICACION_ID =
   "No pudimos identificar la medicación. Volvé a intentarlo desde la lista."
+
+const SIN_TOMA_ID = "No pudimos identificar la toma. Volvé a intentarlo desde la lista."
+
+const ERROR_PERMISO_TOMA = "No tenés permiso para registrar tomas en este perfil."
+
+const ERROR_INESPERADO_REGISTRAR_TOMA =
+  "Ocurrió un problema y no pudimos registrar la toma. Probá de nuevo en unos minutos."
+
+const ERROR_INESPERADO_REVERTIR_TOMA =
+  "Ocurrió un problema y no pudimos deshacer la toma. Probá de nuevo en unos minutos."
 
 const ERROR_INESPERADO_CREAR =
   "Ocurrió un problema y no pudimos guardar la medicación. Probá de nuevo en unos minutos."
@@ -302,4 +323,126 @@ export async function reactivarMedicacion(
     false,
     "/medicacion?reactivada=1",
   )
+}
+
+/**
+ * Traduce los SQLSTATE que devuelven `registrar_toma`/`revertir_toma`
+ * (`docs/modelo-medicacion.md` §9, contrato de la tarea 7.3):
+ *
+ * - `42501` (`insufficient_privilege`) — sin `can_upload` sobre el perfil.
+ *   Mensaje fijo: el RPC redacta uno distinto según sea registrar o
+ *   revertir ("...para registrar/corregir tomas..."), pero el contrato de
+ *   7.3 pide UN mensaje mostrable para este código, así que no se usa el del
+ *   RPC acá.
+ * - `22023` (`invalid_parameter_value`) — toma inexistente, ya registrada,
+ *   fuera de la ventana de ±12hs, o (para revertir) de otro día. El RPC ya
+ *   redacta el mensaje en castellano y es mostrable TAL CUAL (docs, misma
+ *   sección) — nunca se reemplaza acá.
+ * - Cualquier otro código: error inesperado, se loguea y se devuelve el
+ *   mensaje genérico de quien llama.
+ */
+function mapearErrorToma(error: { code?: string; message?: string }, mensajeGenerico: string): string {
+  if (error.code === "42501") {
+    return ERROR_PERMISO_TOMA
+  }
+  if (error.code === "22023") {
+    return error.message || mensajeGenerico
+  }
+  console.error("[medicacion] Error inesperado del RPC de tomas:", error)
+  return mensajeGenerico
+}
+
+/**
+ * Marca como tomada una toma programada de HOY y descuenta el stock, vía
+ * `rpc("registrar_toma", { intake_id })` — NUNCA un `UPDATE` directo a
+ * `medication_intakes`: perdería el descuento de stock y la atomicidad
+ * (nota ⑨, `docs/modelo-medicacion.md` §4). El cliente es el de la SESIÓN
+ * del usuario, no `service_role`: el RPC valida el permiso por dentro y las
+ * dos escrituras (`medication_intakes` + `medications`) corren con la
+ * identidad real de quien registra, para que quede en `created_by_profile_id`.
+ */
+export async function registrarToma(
+  _estadoPrevio: EstadoMedicacionAccion,
+  formData: FormData,
+): Promise<EstadoMedicacionAccion> {
+  try {
+    const activo = await obtenerPerfilActivo()
+    if (!activo) {
+      return { error: SIN_PERFIL_ACTIVO }
+    }
+
+    const tomaId = campo(formData, "tomaId")
+    if (!PATRON_UUID.test(tomaId)) {
+      return { error: SIN_TOMA_ID }
+    }
+
+    const { supabase } = await requerirPermiso(activo.perfil.id, "upload", {
+      siNoHaySesion: "lanzar",
+    })
+
+    const { error } = await supabase.rpc("registrar_toma", { intake_id: tomaId })
+
+    if (error) {
+      console.error(`[medicacion] Fallo al registrar la toma ${tomaId}:`, error)
+      return { error: mapearErrorToma(error, ERROR_INESPERADO_REGISTRAR_TOMA) }
+    }
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message }
+    }
+    console.error("[medicacion] Fallo inesperado al registrar una toma:", error)
+    return { error: ERROR_INESPERADO_REGISTRAR_TOMA }
+  }
+
+  revalidatePath("/medicacion")
+  revalidatePath("/inicio")
+  redirect("/medicacion?tomaregistrada=1")
+}
+
+/**
+ * Deshace una toma marcada por error HOY, vía
+ * `rpc("revertir_toma", { intake_id })`: la vuelve a `pending` y restituye
+ * EXACTAMENTE lo que `registrar_toma` había descontado
+ * (`docs/modelo-medicacion.md` §6). El RPC ya rechaza una toma de otro día
+ * calendario en Ushuaia -esta acción no repite ese chequeo de fecha antes de
+ * llamarlo, sería duplicar la única fuente de verdad-; en el uso normal
+ * nunca llega acá una toma vieja porque `components/medicacion/registro-toma.tsx`
+ * solo ofrece este botón para tomas de la lista "de hoy".
+ */
+export async function revertirToma(
+  _estadoPrevio: EstadoMedicacionAccion,
+  formData: FormData,
+): Promise<EstadoMedicacionAccion> {
+  try {
+    const activo = await obtenerPerfilActivo()
+    if (!activo) {
+      return { error: SIN_PERFIL_ACTIVO }
+    }
+
+    const tomaId = campo(formData, "tomaId")
+    if (!PATRON_UUID.test(tomaId)) {
+      return { error: SIN_TOMA_ID }
+    }
+
+    const { supabase } = await requerirPermiso(activo.perfil.id, "upload", {
+      siNoHaySesion: "lanzar",
+    })
+
+    const { error } = await supabase.rpc("revertir_toma", { intake_id: tomaId })
+
+    if (error) {
+      console.error(`[medicacion] Fallo al deshacer la toma ${tomaId}:`, error)
+      return { error: mapearErrorToma(error, ERROR_INESPERADO_REVERTIR_TOMA) }
+    }
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message }
+    }
+    console.error("[medicacion] Fallo inesperado al deshacer una toma:", error)
+    return { error: ERROR_INESPERADO_REVERTIR_TOMA }
+  }
+
+  revalidatePath("/medicacion")
+  revalidatePath("/inicio")
+  redirect("/medicacion?tomarevertida=1")
 }
