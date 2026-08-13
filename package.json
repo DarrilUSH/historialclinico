@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:rutas": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test tests/unit/rutas.test.ts",
+    "test": "vitest run",
+    "test:rutas": "vitest run tests/unit/rutas.test.ts",
     "types:gen": "supabase gen types typescript --local > types/database.types.ts"
   },
   "dependencies": {
@@ -34,8 +35,10 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "server-only": "^0.0.1",
     "supabase": "^2.114.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
