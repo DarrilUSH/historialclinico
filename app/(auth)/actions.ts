@@ -33,6 +33,7 @@ import {
   RUTA_POST_LOGIN,
   destinoSeguro,
 } from "@/lib/auth/rutas"
+import { limpiarPerfilActivo } from "@/lib/perfil-activo"
 
 export type EstadoAuth = {
   error: string | null
@@ -207,6 +208,11 @@ export async function iniciarSesion(
 export async function cerrarSesion(): Promise<void> {
   const supabase = await createClient()
   await supabase.auth.signOut()
+  // El perfil activo es contexto de esta sesión, no debe sobrevivir a un
+  // logout: en un navegador compartido, la próxima persona que inicie
+  // sesión no tiene por qué heredar (ni siquiera transitoriamente, antes de
+  // la primera revalidación) el perfil que dejó la anterior.
+  await limpiarPerfilActivo()
   redirect(RUTA_LOGIN)
 }
 
