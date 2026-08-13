@@ -58,6 +58,16 @@ import "server-only"
  * | `exportar_ficha`     | Generación de la ficha SOS imprimible | Sprint 6 |
  * | `otorgar_permiso` / `revocar_permiso` | `app/(app)/(con-nav)/familia/actions.ts` | pendiente (fuera del alcance de esta tarea) |
  *
+ * **Deuda declarada: no existe `subir_documento`.** El enum `access_action`
+ * no tiene ningún literal para "cargó un estudio", así que la Server Action
+ * `subirDocumento` (Sprint 4, `app/(app)/(con-nav)/estudios/actions.ts`) NO
+ * escribe en `access_logs`: registrarla como `ver_documento` -el literal más
+ * parecido- convertiría la lista que el titular usa para controlar sus datos
+ * en un registro que miente sobre lo que pasó. La carga igual queda trazada
+ * por `documents.created_by_profile_id` (sellado por trigger) y
+ * `documents.created_at`. Agregar el literal al enum requiere una migración y
+ * queda para el sprint que vuelva a tocar el modelo.
+ *
  * `ver_perfil` se registra en `fijarPerfilActivo` y NO en `obtenerPerfilActivo`
  * a propósito: `obtenerPerfilActivo` corre en cada request de cada página bajo
  * `app/(app)`, así que auditarlo ahí generaría una fila por request y volvería
