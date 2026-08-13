@@ -79,7 +79,7 @@ export function FormularioAuth({
         <CardContent>
           <div
             role="status"
-            className="flex items-start gap-3 rounded-lg border border-green-600/30 bg-green-600/10 px-4 py-3 text-base font-medium text-green-700 dark:text-green-400"
+            className="flex items-start gap-3 rounded-lg border border-exito/40 bg-exito-suave px-4 py-3 text-base font-medium text-exito-fuerte"
           >
             <CircleCheckIcon className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
             <span>{estado.mensaje}</span>

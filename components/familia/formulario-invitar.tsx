@@ -40,7 +40,7 @@ export function FormularioInvitar({ perfilId }: FormularioInvitarProps) {
     <form
       ref={formRef}
       action={enviarAccion}
-      className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 ring-1 ring-foreground/5"
+      className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave"
     >
       <input type="hidden" name="perfilId" value={perfilId} />
 
@@ -102,7 +102,7 @@ export function FormularioInvitar({ perfilId }: FormularioInvitarProps) {
       {estado.mensaje && !estado.error && (
         <p
           role="status"
-          className="flex items-center gap-2 rounded-lg border border-green-600/30 bg-green-600/10 px-3 py-2.5 text-sm font-medium text-green-700 dark:text-green-400"
+          className="flex items-center gap-2 rounded-lg border border-exito/40 bg-exito-suave px-3 py-2.5 text-base font-medium text-exito-fuerte"
         >
           <CircleCheckIcon className="size-4 shrink-0" aria-hidden="true" />
           {estado.mensaje}

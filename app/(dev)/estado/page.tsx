@@ -59,7 +59,7 @@ export default async function PaginaEstado() {
       <h1 className="text-lg font-semibold">
         Diagnóstico — Historial Médico (solo dev)
       </h1>
-      <p className={huboErrorReal ? "text-red-600" : "text-green-600"}>
+      <p className={huboErrorReal ? "text-destructive" : "text-exito"}>
         {mensaje}
       </p>
       {bloqueoEsperadoDeAnon && (

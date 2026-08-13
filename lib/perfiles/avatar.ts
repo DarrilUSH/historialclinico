@@ -8,23 +8,24 @@
  * renders, entre dispositivos ni entre sesiones.
  *
  * La paleta es la única superficie de la app donde el color diferencia
- * identidad en vez de decorar: el resto de la interfaz se mantiene dentro
- * de la escala de grises de `app/globals.css` (más el rojo reservado para
- * `destructive`), así que estos diez tonos no compiten con ningún acento de
- * marca porque, hoy, la app no tiene uno.
+ * identidad en vez de decorar. Por eso no usa los colores sueltos de Tailwind
+ * sino los tokens `--avatar-1..8` de `app/globals.css`: ocho tonos maduros de
+ * la misma familia cromática que la marca, todos medidos contra
+ * `--avatar-foreground` (>= 4.5:1 en tema claro y oscuro, ver
+ * `node scripts/verificar-contraste.mjs`). En tema oscuro los tokens suben de
+ * luminosidad y el texto se invierte, así que el contraste se mantiene sin
+ * tocar este archivo.
  */
 
 const PALETA_AVATAR = [
-  "bg-blue-600",
-  "bg-emerald-600",
-  "bg-violet-600",
-  "bg-rose-600",
-  "bg-cyan-600",
-  "bg-indigo-600",
-  "bg-teal-600",
-  "bg-fuchsia-600",
-  "bg-pink-600",
-  "bg-sky-600",
+  "bg-avatar-1",
+  "bg-avatar-2",
+  "bg-avatar-3",
+  "bg-avatar-4",
+  "bg-avatar-5",
+  "bg-avatar-6",
+  "bg-avatar-7",
+  "bg-avatar-8",
 ] as const
 
 /**

@@ -27,7 +27,7 @@ export default async function PaginaLogin({
       {contrasenaRecuperada && (
         <p
           role="status"
-          className="rounded-lg border border-green-600/30 bg-green-600/10 px-4 py-3 text-base font-medium text-green-700 dark:text-green-400"
+          className="rounded-lg border border-exito/40 bg-exito-suave px-4 py-3 text-base font-medium text-exito-fuerte"
         >
           Tu contraseña se actualizó correctamente. Iniciá sesión con la nueva contraseña.
         </p>

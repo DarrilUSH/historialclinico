@@ -71,16 +71,16 @@ function TarjetaPerfil({
     <button
       type="submit"
       className={cn(
-        "flex w-full min-h-48 flex-col items-center justify-center gap-4 rounded-2xl border border-border bg-card p-8 text-center ring-1 ring-foreground/5",
-        "transition-[transform,box-shadow] duration-200 ease-out",
-        "hover:-translate-y-0.5 hover:shadow-lg hover:shadow-foreground/5",
+        "flex w-full min-h-48 flex-col items-center justify-center gap-4 rounded-2xl border border-border bg-card p-8 text-center shadow-suave",
+        "transition-[transform,box-shadow] duration-[var(--duracion-media)] ease-salida",
+        "hover:-translate-y-0.5 hover:border-primary hover:shadow-elevada",
         "active:translate-y-0 active:scale-[0.99]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       )}
     >
       <span
         className={cn(
-          "flex size-24 shrink-0 items-center justify-center rounded-full text-3xl font-semibold text-white",
+          "flex size-24 shrink-0 items-center justify-center rounded-full text-3xl font-semibold text-avatar-foreground",
           colorAvatarPara(perfil.id),
         )}
         aria-hidden="true"

@@ -77,11 +77,11 @@ export function TarjetaPermiso({
   // desmonta esta tarjeta entera -diálogo incluido-, así que no hace falta
   // cerrarla a mano. Un error la deja abierta sola, porque nada la cierra.
   return (
-    <li className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 ring-1 ring-foreground/5 sm:flex-row sm:items-start sm:justify-between">
+    <li className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave sm:flex-row sm:items-start sm:justify-between">
       <div className="flex items-start gap-3">
         <span
           className={cn(
-            "flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white",
+            "flex size-11 shrink-0 items-center justify-center rounded-full text-base font-semibold text-avatar-foreground",
             colorAvatarPara(permiso.perfilVinculadoId),
           )}
           aria-hidden="true"
