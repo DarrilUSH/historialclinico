@@ -1,12 +1,23 @@
 "use client"
 
 /**
- * Carga de un documento médico: dos caminos grandes y claros -sacar foto con
- * la cámara o elegir un archivo ya existente (PDF o imagen)-, validación por
- * MIME real, compresión client-side de fotos grandes con estado visual
- * ("Preparando…") y vista previa antes de confirmar. Ver
+ * Carga de un documento médico: tres caminos grandes y claros -sacar foto con
+ * la cámara, elegir una imagen de la galería o elegir un PDF ya guardado-,
+ * validación por MIME real, compresión client-side de fotos grandes con
+ * estado visual ("Preparando…") y vista previa antes de confirmar. Ver
  * `lib/archivos/validacion.ts` y `lib/archivos/compresion.ts` para el detalle
  * de cada paso del pipeline.
+ *
+ * ## Por qué "galería" y "PDF" son inputs separados (y no uno solo con
+ * `accept=".pdf,image/*"`)
+ *
+ * Se verificó en un Samsung Galaxy A71 real (Android 13, Chrome) que un
+ * input con `accept` mixto -PDF más cualquier MIME de imagen- abre siempre
+ * la hoja multimedia "Cámara / Fotos y videos" del sistema: el PDF queda
+ * inalcanzable desde el celular aunque la persona lo tenga guardado. Con
+ * `accept="application/pdf"` a solas, Chrome sí abre el selector de
+ * documentos correcto. La solución es tener un input de un solo tipo por
+ * camino -nunca combinar PDF con imagen en el mismo `accept`-.
  *
  * Componente CONTROLADO en el sentido de que no hace nada por su cuenta con
  * el archivo confirmado: expone `onArchivoListo({ blob, mimeType, nombre })`
@@ -15,7 +26,7 @@
  * determinístico") lo conecta a una Server Action que sube a
  * `documentos-medicos`; acá no se toca la red ni Supabase.
  *
- * Los dos `<input type="file">` van con `className="hidden"` (display:none),
+ * Los tres `<input type="file">` van con `className="hidden"` (display:none),
  * no `sr-only`: así quedan afuera del orden de tabulación y del árbol de
  * accesibilidad -el control que el usuario ve, tabula y activa es siempre la
  * `TarjetaInteractiva` (un `<button>` real), que dispara el input por
@@ -25,7 +36,7 @@
 
 import * as React from "react"
 
-import { CameraIcon, FileTextIcon, FileUpIcon, Loader2Icon, RotateCcwIcon } from "lucide-react"
+import { CameraIcon, FileTextIcon, ImagesIcon, Loader2Icon, RotateCcwIcon } from "lucide-react"
 
 import { Alerta } from "@/components/base/alerta"
 import { Boton } from "@/components/base/boton"
@@ -84,7 +95,8 @@ export function CargadorDocumento({ onArchivoListo, className }: CargadorDocumen
   const [error, setError] = React.useState<string | null>(null)
 
   const inputCamaraRef = React.useRef<HTMLInputElement>(null)
-  const inputArchivoRef = React.useRef<HTMLInputElement>(null)
+  const inputGaleriaRef = React.useRef<HTMLInputElement>(null)
+  const inputPdfRef = React.useRef<HTMLInputElement>(null)
 
   // El object URL de la miniatura se libera al reemplazar el archivo o al
   // desmontar el componente: si no, cada foto que el usuario descarta con
@@ -170,7 +182,7 @@ export function CargadorDocumento({ onArchivoListo, className }: CargadorDocumen
       )}
 
       {paso === "elegir" && (
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-3">
           <input
             ref={inputCamaraRef}
             type="file"
@@ -195,26 +207,55 @@ export function CargadorDocumento({ onArchivoListo, className }: CargadorDocumen
             </span>
           </TarjetaInteractiva>
 
+          {/* `accept="image/*"` a solas, SIN `capture`: dispara el selector de
+              galería/archivos de imágenes del sistema. No combinar con el
+              input de PDF de abajo -ver el comentario de cabecera del
+              archivo sobre el bug de `accept` mixto en Android Chrome-. */}
           <input
-            ref={inputArchivoRef}
+            ref={inputGaleriaRef}
             type="file"
-            accept=".pdf,image/*"
+            accept="image/*"
             className="hidden"
             onChange={manejarSeleccion}
           />
           <TarjetaInteractiva
-            onClick={() => inputArchivoRef.current?.click()}
+            onClick={() => inputGaleriaRef.current?.click()}
             className="flex flex-col items-center gap-3 px-6 py-8 text-center"
           >
             <span
               className="flex size-14 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
               aria-hidden="true"
             >
-              <FileUpIcon className="size-7" />
+              <ImagesIcon className="size-7" />
             </span>
-            <span className="text-lg font-semibold text-foreground">Elegir archivo</span>
+            <span className="text-lg font-semibold text-foreground">Elegir de la galería</span>
             <span className="text-base text-muted-foreground">
-              Buscá un PDF o una imagen ya guardada en el dispositivo
+              Buscá una foto o imagen ya guardada en el dispositivo
+            </span>
+          </TarjetaInteractiva>
+
+          {/* `accept="application/pdf"` a solas: es el único valor que abre el
+              selector de documentos del sistema en Android Chrome. */}
+          <input
+            ref={inputPdfRef}
+            type="file"
+            accept="application/pdf"
+            className="hidden"
+            onChange={manejarSeleccion}
+          />
+          <TarjetaInteractiva
+            onClick={() => inputPdfRef.current?.click()}
+            className="flex flex-col items-center gap-3 px-6 py-8 text-center"
+          >
+            <span
+              className="flex size-14 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+              aria-hidden="true"
+            >
+              <FileTextIcon className="size-7" />
+            </span>
+            <span className="text-lg font-semibold text-foreground">Elegir un PDF</span>
+            <span className="text-base text-muted-foreground">
+              Buscá un PDF ya guardado en el dispositivo
             </span>
           </TarjetaInteractiva>
         </div>
