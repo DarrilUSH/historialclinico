@@ -58,8 +58,11 @@ import { revalidatePath } from "next/cache"
 
 import { esErrorDeGuarda, requerirPermiso, requerirSesion } from "@/lib/auth/guardas"
 import { ErrorIngesta, ingestarDocumento } from "@/lib/documentos/ingesta"
+import { schemaExtraccionDocumento } from "@/lib/validacion/documento.schema"
+import { prepararMetricas } from "@/lib/laboratorio/normalizacion"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { BUCKETS, borrarObjeto } from "@/lib/storage-admin"
+import type { Json } from "@/types/database.types"
 import {
   validarConfirmacionDocumento,
   validarDescarteDocumento,
@@ -140,20 +143,30 @@ const ERROR_INESPERADO_DESCARTE =
 /**
  * Confirma el documento recién subido: valida los cuatro campos editables
  * del formulario de revisión y llama al RPC `confirmar_documento_recien_subido`
- * (`supabase/migrations/20260813010000_confirmacion_documentos.sql`), que
- * hace las cuatro guardas del lado de la base (creador, ventana de 1 hora,
- * no confirmado antes, valores válidos) y sella `confirmed_at`.
+ * (`supabase/migrations/20260813010000_confirmacion_documentos.sql`, extendido
+ * por `20260813020000_metricas_en_confirmacion.sql`), que hace las cuatro
+ * guardas del lado de la base (creador, ventana de 1 hora, no confirmado
+ * antes, valores válidos), sella `confirmed_at` y -en la MISMA transacción-
+ * inserta las métricas de laboratorio ya normalizadas en `lab_metrics`.
  *
  * Es el ÚNICO camino que persiste datos del formulario de revisión: "Cancelar"
  * llama a `descartarDocumento`, que borra en vez de guardar.
  *
  * `metricas` viaja en el `FormData` (campo oculto, JSON) porque
- * `formulario-revision.tsx` las muestra de solo lectura y las deja listas
- * para que la tarea 4.6 del roadmap ("Persistencia de métricas de
- * laboratorio") las inserte en `lab_metrics` sin tener que tocar el
- * formulario. Esta acción las parsea de forma defensiva -si el JSON viniera
- * roto, no aborta la confirmación por eso- pero TODAVÍA NO LAS PERSISTE: es
- * deuda explícita de esta tarea, resuelta por la 4.6.
+ * `formulario-revision.tsx` las muestra de solo lectura -esta acción es la
+ * primera vez que se tocan de verdad-. El camino es: (1) parsear el JSON de
+ * forma defensiva -si viniera roto, NO aborta la confirmación del documento
+ * por eso, se sigue como si no hubiera métricas-, (2) revalidar la forma de
+ * cada item con el mismo schema Zod que ya usa la extracción de Gemini
+ * (`schemaExtraccionDocumento.shape.metricas`: nombre no vacío, valor
+ * numérico finito, máx. 50 items) porque el campo oculto es JSON que viajó
+ * por HTTP y no hay garantía de que el cliente no lo haya tocado, y (3)
+ * normalizar con `prepararMetricas` (`lib/laboratorio/normalizacion.ts`):
+ * resuelve el nombre canónico contra el diccionario de sinónimos, parsea el
+ * rango de referencia textual y deduplica dentro del documento. El RPC repite
+ * su propia validación server-side sobre el resultado -es la última palabra,
+ * no esta acción-, así que acá alcanza con un filtrado razonable, no con
+ * paranoia total.
  *
  * Firma `(prevState, formData)` para poder usarse con `useActionState` desde
  * `formulario-revision.tsx`, mismo patrón que `familia/actions.ts`.
@@ -177,16 +190,28 @@ export async function confirmarDocumento(
 
   const { documentoId, titulo, categoria, fecha, resumen } = validacion.datos
 
-  // Deuda declarada (ver el comentario de la función): se parsean para dejar
-  // el contrato listo para la tarea 4.6, pero no se insertan en lab_metrics
-  // todavía.
+  // Las métricas son best-effort: un campo oculto roto o con forma inesperada
+  // NUNCA bloquea la confirmación del documento -la regla de oro del roadmap
+  // ("la subida nunca queda bloqueada por la IA") se extiende acá-, se sigue
+  // sin métricas y queda logueado para diagnóstico.
+  let metricasParaRpc: ReturnType<typeof prepararMetricas>["filas"] = []
   const metricasCrudo = formData.get("metricas")
-  if (typeof metricasCrudo === "string") {
+  if (typeof metricasCrudo === "string" && metricasCrudo.trim().length > 0) {
     try {
-      JSON.parse(metricasCrudo)
-    } catch {
+      const parseado: unknown = JSON.parse(metricasCrudo)
+      const validacionMetricas = schemaExtraccionDocumento.shape.metricas.safeParse(parseado)
+      if (validacionMetricas.success) {
+        metricasParaRpc = prepararMetricas(validacionMetricas.data, fecha).filas
+      } else {
+        console.warn(
+          `[estudios] El campo oculto "metricas" no tenía la forma esperada para ${documentoId}; se confirma sin métricas.`,
+          validacionMetricas.error.issues,
+        )
+      }
+    } catch (error) {
       console.warn(
-        `[estudios] El campo oculto "metricas" no era JSON válido para ${documentoId}; se ignora (deuda de la tarea 4.6).`,
+        `[estudios] El campo oculto "metricas" no era JSON válido para ${documentoId}; se confirma sin métricas.`,
+        error,
       )
     }
   }
@@ -204,6 +229,16 @@ export async function confirmarDocumento(
       // (`nuevo_resumen: string`, sin `| null`, aunque el parámetro SQL sí
       // acepta NULL).
       nuevo_resumen: resumen ?? "",
+      // `null` y no `[]` cuando no hay métricas: el RPC distingue "no venían
+      // métricas" (skip total del bloque de insert) de "vino una lista vacía"
+      // -mismo resultado práctico, pero `null` es la forma explícita del
+      // contrato del parámetro (`metricas jsonb DEFAULT NULL`). El cast a
+      // `Json` es seguro: `FilaLabMetricPreparada` es un objeto plano de
+      // strings/numbers/null, exactamente lo que `metricas jsonb` espera del
+      // otro lado; TypeScript exige el cast solo porque una interfaz con
+      // forma fija (sin index signature) no es asignable de forma implícita
+      // a un tipo indexado como `Json`.
+      metricas: (metricasParaRpc.length > 0 ? metricasParaRpc : null) as Json | null,
     })
 
     if (error) {

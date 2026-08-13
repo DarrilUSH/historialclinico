@@ -28,10 +28,12 @@
  * `descartarDocumento` (RPC `descartar_documento_recien_subido` + borrado
  * inmediato del objeto de Storage).
  *
- * Las MÉTRICAS detectadas se muestran de solo lectura -esta tarea no las
- * persiste, es la tarea 4.6 del roadmap-, pero viajan en un campo oculto
- * (`metricas`, JSON) dentro del mismo `<form>` para que la Server Action de
- * 4.6 las tenga disponibles sin cambiar el formulario.
+ * Las MÉTRICAS detectadas se muestran de solo lectura -esta pantalla no las
+ * edita- pero viajan en un campo oculto (`metricas`, JSON) dentro del mismo
+ * `<form>`: `confirmarDocumento` (tarea 4.6 del roadmap) las normaliza con
+ * `lib/laboratorio/normalizacion.ts` y las persiste en `lab_metrics` de forma
+ * atómica con la confirmación del documento, vía el RPC
+ * `confirmar_documento_recien_subido`.
  */
 
 import * as React from "react"
@@ -239,8 +241,7 @@ export function FormularioRevision({
               ))}
             </ul>
             <p className="text-sm text-muted-foreground">
-              Por ahora quedan asociados a este documento; en un próximo paso vas a poder verlos
-              como serie de laboratorio.
+              Se van a guardar como serie de laboratorio al confirmar.
             </p>
           </Tarjeta>
         )}

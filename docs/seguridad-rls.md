@@ -6,7 +6,7 @@
 
 - **Motor verificado:** PostgreSQL 17.6 (Supabase local, contenedor `supabase_db_historialclinico`).
 - **Cobertura:** 13 tablas con RLS habilitada, 49 políticas de tabla, 3 buckets privados con 5 políticas de `storage.objects`, 10 funciones auxiliares, 5 funciones de trigger (14 triggers) que cubren lo que RLS no puede expresar.
-- **Estado de las pruebas:** `scripts/test-rls.sql` — **54 casos, 54 PASS, 0 FAIL**; `scripts/test-storage-rls.sh` — **20 casos, 20 PASS, 0 FAIL**.
+- **Estado de las pruebas:** `scripts/test-rls.sql` — **66 casos, 66 PASS, 0 FAIL** (incluye BLOQUE 8 y 8b, la confirmación acotada del documento y el parámetro `metricas` del RPC, Sprint 4); `scripts/test-storage-rls.sh` — **20 casos, 20 PASS, 0 FAIL**.
 
 ---
 
@@ -287,7 +287,7 @@ export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 # 1. Aplicar las tres migraciones desde cero
 npx supabase db reset
 
-# 2. Correr la suite de aislamiento de las TABLAS (54 casos)
+# 2. Correr la suite de aislamiento de las TABLAS (66 casos)
 docker exec -i supabase_db_historialclinico psql -U postgres -d postgres < scripts/test-rls.sql
 
 # 3. Correr la suite de aislamiento de STORAGE (20 casos, por HTTP)

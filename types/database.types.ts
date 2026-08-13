@@ -888,6 +888,7 @@ export type Database = {
       confirmar_documento_recien_subido: {
         Args: {
           doc_id: string
+          metricas?: Json
           nueva_categoria: string
           nueva_fecha: string
           nuevo_resumen: string

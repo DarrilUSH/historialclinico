@@ -940,6 +940,114 @@ select pruebas_rls.registrar('8. confirmación RPC',
 
 
 -- =============================================================================
+-- BLOQUE 8b — parámetro `metricas` del RPC (tarea 4.6)
+-- -----------------------------------------------------------------------------
+-- `confirmar_documento_recien_subido` se extendió en
+-- `20260813020000_metricas_en_confirmacion.sql` con un sexto parámetro
+-- `metricas jsonb DEFAULT NULL` que inserta en `lab_metrics` DENTRO de la
+-- misma transacción que sella `confirmed_at`. Este bloque prueba lo que el
+-- resto de BLOQUE 8 no cubre: que el caso feliz persiste las filas con
+-- `measurement_date` forzado a la fecha CONFIRMADA, y que una métrica
+-- inválida (guarda 5) aborta la llamada COMPLETA -ni el documento queda
+-- confirmado ni se cuela ninguna fila de lab_metrics-, la garantía de
+-- atomicidad que motivó meter las métricas dentro del RPC en primer lugar.
+--
+-- Documentos propios del bloque, mismo patrón que 8: storage_path únicos.
+-- `metric_canonical` se manda explícito en el JSON porque acá se llama al RPC
+-- directo -sin pasar por `lib/laboratorio/normalizacion.ts`-, así que el
+-- nombre canónico lo pone esta prueba, no el diccionario de TypeScript (ese
+-- diccionario ya lo cubre `tests/unit/laboratorio.test.ts`).
+-- =============================================================================
+\echo '### BLOQUE 8b — parámetro metricas del RPC de confirmación'
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+insert into public.documents (id, profile_id, title, category, document_date, storage_path) values
+    ('10101010-1010-4101-8101-101010101010', :p_a, 'Análisis con métricas (sin revisar)',       'other', '2026-08-07', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8b-ok.pdf'),
+    ('20202020-2020-4202-8202-202020202020', :p_a, 'Análisis con métrica inválida (sin revisar)', 'other', '2026-08-08', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8b-mal.pdf');
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare
+    v text;
+    n integer;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '10101010-1010-4101-8101-101010101010',
+            'Análisis con métricas — agosto', 'laboratory', '2026-08-07', null,
+            '[{"metric_name":"Glucemia","metric_canonical":"Glucosa","value":95,"unit":"mg/dl","reference_range":"70 - 110","reference_min":70,"reference_max":110},
+              {"metric_name":"COL TOTAL","metric_canonical":"Colesterol total","value":180,"unit":"mg/dl"}]'::jsonb);
+        select count(*) into n from public.lab_metrics where document_id = '10101010-1010-4101-8101-101010101010';
+        v := 'confirmado, ' || n || ' métricas insertadas';
+    exception when others then v := 'error ' || sqlstate || ' ' || sqlerrm;
+    end;
+    perform pruebas_rls.registrar('8b. parámetro metricas',
+        'A confirma CON métricas válidas: quedan insertadas atómicamente en lab_metrics',
+        'confirmado, 2 métricas insertadas', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8b. parámetro metricas',
+       'La métrica "Glucemia" quedó con metric_canonical resuelto y measurement_date = fecha CONFIRMADA (no la del JSON, que no la trae)',
+       'Glucosa / 2026-08-07',
+       coalesce((select metric_canonical || ' / ' || measurement_date::text
+                   from public.lab_metrics
+                  where document_id = '10101010-1010-4101-8101-101010101010'
+                    and metric_name = 'Glucemia'),
+                'NO ENCONTRADA'));
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '20202020-2020-4202-8202-202020202020',
+            'Análisis con métrica inválida', 'laboratory', '2026-08-08', null,
+            '[{"metric_name":"Rara","value":"no-es-un-numero"}]'::jsonb);
+        v := 'confirmado (no debería)';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                   then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8b. parámetro metricas',
+        'A confirma con una métrica de VALOR NO NUMÉRICO (guarda 5): se rechaza la llamada completa',
+        'rechazado (22023)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8b. parámetro metricas',
+       'El rechazo por guarda 5 es atómico: el documento sigue SIN confirmar y no se coló ninguna fila de lab_metrics',
+       'sin confirmar, sin métricas',
+       case when exists (
+                 select 1 from public.documents
+                  where id = '20202020-2020-4202-8202-202020202020'
+                    and confirmed_at is null
+                    and title = 'Análisis con métrica inválida (sin revisar)')
+             and not exists (
+                 select 1 from public.lab_metrics
+                  where document_id = '20202020-2020-4202-8202-202020202020')
+            then 'sin confirmar, sin métricas'
+            else 'estado inesperado' end);
+
+-- Los dos documentos de este bloque (y las métricas del primero) no se
+-- borran acá a propósito, mismo criterio que el cierre de BLOQUE 8: la
+-- limpieza final del script los arrastra por CASCADE al borrar auth.users.
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
