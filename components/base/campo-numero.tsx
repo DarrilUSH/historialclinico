@@ -25,14 +25,25 @@ export interface CampoNumeroProps
    * simple sin tecla de coma/punto.
    */
   decimal?: boolean
+  /**
+   * Permite un signo `-` opcional al inicio. Default `false` a propósito: los
+   * valores clínicos que usó este campo hasta el Sprint 5 (peso, dosis,
+   * tensión, stock) nunca son negativos, y aceptar un "-" ahí convertiría un
+   * error de carga en un dato guardado sin aviso. Sprint 6 lo necesita para
+   * coordenadas geográficas (`components/turnos/formulario-turno.tsx`):
+   * Ushuaia, como el resto del hemisferio sur y oeste, tiene latitud y
+   * longitud siempre negativas.
+   */
+  permiteNegativo?: boolean
 }
 
-export function CampoNumero({ decimal = false, ...props }: CampoNumeroProps) {
+export function CampoNumero({ decimal = false, permiteNegativo = false, ...props }: CampoNumeroProps) {
+  const signo = permiteNegativo ? "-?" : ""
   return (
     <CampoTexto
       type="text"
       inputMode={decimal ? "decimal" : "numeric"}
-      pattern={decimal ? "[0-9]*[.,]?[0-9]*" : "[0-9]*"}
+      pattern={decimal ? `${signo}[0-9]*[.,]?[0-9]*` : `${signo}[0-9]*`}
       {...props}
     />
   )
