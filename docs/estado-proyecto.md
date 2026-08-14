@@ -22,7 +22,9 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 | 7.2 ABM de medicación (Sonnet) | ✅ Auditado y pusheado (`a6fa322`) — `/medicacion` (lista + alta + edición + suspender), chips de horarios, card de acceso en `/inicio` |
 | 7.3 Registro de tomas (Sonnet) | ✅ Auditado y pusheado (`40bcf0a`) — "Tomas de hoy" en `/medicacion` + resumen en `/inicio`, registrar/deshacer vía RPCs con mapeo de SQLSTATEs |
 | 7.5 Vinculación receta (Haiku) | ✅ Auditado y pusheado (`097dec3`) — selector en edición, "Ver receta" → visor `/estudios/[id]`. La auditoría corrigió 4 defectos de la entrega Haiku: Select sin `items` (mostraba el uuid), errores de action descartados, redirect con `[id]` literal, clase `text-destructivo` inexistente |
-| 7.4 Alerta renovación receta <5 días (Opus) | ⬜ **PRÓXIMA TAREA AL RETOMAR.** OJO: el roadmap dice "Edge Function" pero la infraestructura real del Sprint 6 es pg_cron → pg_net → route handler `/api/push/procesar-recordatorios` con `x-cron-secret`. Reusar ESE patrón (nuevo endpoint o extender el existente), no Edge Functions. Insumos listos: `v_medicacion_estado.necesita_renovacion` ya calcula el umbral <5 días; destinatarios = perfil + familiares con `can_manage`; antidup 48h por medicación. Tras la 7.4: checkpoint del Sprint 7 (demo completa) y recién ahí Sprint 8 |
+| 7.4 Alerta renovación (Opus) | ✅ Auditado y pusheado (`6c590b9`) — cola `medication_renewal_alerts` con antidup 48h en dos capas, cron 09:10/18:10 Ushuaia, push real verificado en el Galaxy (sprint7-alerta-renovacion.png), deep link `/medicacion/enlace` |
+| **Checkpoint Sprint 7** | ✅ **APROBADO** (2026-08-14 ~02:20): demo alta→tomas→stock bajo→job→alerta demostrada por partes en las auditorías, circuito completo pg_cron→pg_net→endpoint→FCM→pantalla verificado |
+| 8.1 Billetera credenciales (Sonnet) | ✅ Auditado y pusheado (`8e1cdce`) — billetera + visor fullscreen rotable + signed URLs con auditoría granular (miniatura no audita), purga de storage verificada |
 | 8 Coberturas + SOS offline | ⬜ Pendiente |
 | 9 Signos vitales + alerta presión | ⬜ Pendiente |
 | 10 Directorio médicos + ficha resumen IA | ⬜ Pendiente |
