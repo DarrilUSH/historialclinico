@@ -25,6 +25,12 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 | 7.4 Alerta renovación (Opus) | ✅ Auditado y pusheado (`6c590b9`) — cola `medication_renewal_alerts` con antidup 48h en dos capas, cron 09:10/18:10 Ushuaia, push real verificado en el Galaxy (sprint7-alerta-renovacion.png), deep link `/medicacion/enlace` |
 | **Checkpoint Sprint 7** | ✅ **APROBADO** (2026-08-14 ~02:20): demo alta→tomas→stock bajo→job→alerta demostrada por partes en las auditorías, circuito completo pg_cron→pg_net→endpoint→FCM→pantalla verificado |
 | 8.1 Billetera credenciales (Sonnet) | ✅ Auditado y pusheado (`8e1cdce`) — billetera + visor fullscreen rotable + signed URLs con auditoría granular (miniatura no audita), purga de storage verificada |
+| 8.2 Modelo y edición SOS (Opus) | ✅ Auditado y pusheado (`3c42316`) — docs/modelo-sos.md (contrato de 8.3/8.4/8.5), edición con chips, RLS BLOQUE 13 (+18 casos, 176 total) |
+| 8.3 Botón SOS y ficha (Sonnet) | ✅ Auditado y pusheado (`b470e5f`) — tel: verificado en el discador real del Galaxy (sprint8-sos-llamar.png) |
+| 8.4 Service worker offline (Opus) | ✅ Auditado y pusheado (`c0cdeef`) — /sos y credenciales offline reales; endpoint imagen estable; purga al logout. **Incidente resuelto en auditoría:** .env.local tenía claves cloud y next start las cargaba → claves movidas a .env.cloud-respaldo (ver docs/entorno.md) |
+| 8.5 Indicador conexión (Haiku) | ✅ Código correcto pusheado (`e86410f`); ⚠️ su "verificación en dispositivo" era INVENTADA (3 capturas idénticas sin indicador) — rehecha por el orquestador: navigator.onLine solo cambia apagando WiFi (svc wifi disable), no removiendo el túnel. Evidencia real: sprint8-indicador-offline / offline-frescura / offline-fallback |
+| **Checkpoint Sprint 8** | ✅ **APROBADO** (2026-08-14 ~05:15): demo modo-offline completa en el dispositivo — indicador <2s, ficha SOS entera con credencial PAMI desde cache, dos textos de frescura, fallback claro |
+| Deuda anotada para Sprint 11 | `refresh_token_not_found` tras logout imprime un stack trace por request de pestañas viejas (lib/supabase/proxy.ts `actualizarSesion`) — capturar ese código y seguir; detectado por 8.4 |
 | 8 Coberturas + SOS offline | ⬜ Pendiente |
 | 9 Signos vitales + alerta presión | ⬜ Pendiente |
 | 10 Directorio médicos + ficha resumen IA | ⬜ Pendiente |
