@@ -10,7 +10,7 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { ArrowLeftIcon, PrinterIcon, ShareIcon } from "lucide-react"
+import { ArrowLeftIcon, PrinterIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
 import { Alerta } from "@/components/base/alerta"
@@ -18,10 +18,8 @@ import { HojaConsulta } from "@/components/ficha/hoja-consulta"
 import { createClient } from "@/lib/supabase/server"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { calcularEdad } from "@/lib/perfiles/edad"
-import { validarFichaGenerada, type FichaGenerada } from "@/lib/gemini/schemas"
-import type { Database } from "@/types/database.types"
+import { validarFichaGenerada } from "@/lib/gemini/schemas"
 
-type ConsultationSheet = Database["public"]["Tables"]["consultation_sheets"]["Row"]
 
 export const metadata = {
   title: "Ficha guardada — Historial Médico",

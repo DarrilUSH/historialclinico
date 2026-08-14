@@ -3409,28 +3409,31 @@ select pruebas_rls.registrar('14. umbrales y alertas de signos',
 
 -- Crear perfiles de prueba nuevos para este bloque (los anteriores fueron
 -- borrados en bloques anteriores: BLOQUE 5 borra :p_g, por ejemplo).
-\set p_f15a '''f1500000-0000-4000-8000-00000000f501'''
-\set p_f15b '''f1500000-0000-4000-8000-00000000f502'''
-\set p_f15c '''f1500000-0000-4000-8000-00000000f503'''
-\set u_f15a '''f1500aaa-1111-4111-8111-111111111111'''
-\set u_f15b '''f1500bbb-2222-4222-8222-222222222222'''
+-- (fix auditoria 10.5: variables psql reemplazadas por literales, no interpolan dentro de do $$..$$)
+
+-- Pre-limpieza defensiva (fix de auditoría 10.5): una corrida anterior abortada
+-- puede haber dejado estas filas y el INSERT de abajo chocaría contra
+-- users_pkey, tumbando el resto de la suite. Orden: gestionado primero (el
+-- trigger de no orfandad aborta si se van antes las cuentas que lo administran).
+delete from public.profiles where id = 'f1500000-0000-4000-8000-00000000f503';
+delete from auth.users      where id in ('f1500aaa-1111-4111-8111-111111111111', 'f1500bbb-2222-4222-8222-222222222222');
 
 insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
 values
-    (:u_f15a, 'usuario15a@test.local', '{}', '{}'),
-    (:u_f15b, 'usuario15b@test.local', '{}', '{}');
+    ('f1500aaa-1111-4111-8111-111111111111', 'usuario15a@test.local', '{}', '{}'),
+    ('f1500bbb-2222-4222-8222-222222222222', 'usuario15b@test.local', '{}', '{}');
 
 insert into public.profiles (id, user_id, full_name, role, blood_type)
 values
-    (:p_f15a, :u_f15a, 'Perfil Prueba 15A', 'admin', 'A+'),
-    (:p_f15b, :u_f15b, 'Perfil Prueba 15B', 'family_member', 'O-');
+    ('f1500000-0000-4000-8000-00000000f501', 'f1500aaa-1111-4111-8111-111111111111', 'Perfil Prueba 15A', 'admin', 'A+'),
+    ('f1500000-0000-4000-8000-00000000f502', 'f1500bbb-2222-4222-8222-222222222222', 'Perfil Prueba 15B', 'family_member', 'O-');
 
 insert into public.profiles (id, full_name, role, created_by_profile_id, blood_type)
 values
-    (:p_f15c, 'Perfil Gestionado 15C', 'elder', :p_f15a, 'B+');
+    ('f1500000-0000-4000-8000-00000000f503', 'Perfil Gestionado 15C', 'elder', 'f1500000-0000-4000-8000-00000000f501', 'B+');
 
 insert into public.family_permissions (owner_profile_id, granted_profile_id, can_view, can_upload, can_manage)
-values (:p_f15c, :p_f15a, true, true, true);
+values ('f1500000-0000-4000-8000-00000000f503', 'f1500000-0000-4000-8000-00000000f501', true, true, true);
 
 -- Helper: listar fichas de un perfil (para verificar lecturas).
 create function pruebas_rls.fichas_de(p_perfil uuid) returns text
@@ -3449,138 +3452,181 @@ grant execute on function pruebas_rls.fichas_de(uuid) to anon, authenticated;
 insert into public.consultation_sheets
     (id, profile_id, generated_by_profile_id, content, created_at)
 values
-    ('b1000000-0000-4000-8000-00000000b001', :p_f15c, :p_f15c, '{"motivoConsulta":{"titulo":"Motivo de consulta sugerido","contenido":"Test"},"antecedentesRelevantes":{"titulo":"Antecedentes relevantes","contenido":"Test"},"medicacionActual":{"titulo":"Medicación actual","contenido":"Test"},"estudiosRecientes":{"titulo":"Estudios recientes","contenido":"Test"},"valoresFueraDeRango":{"titulo":"Valores fuera de rango","contenido":"Test"},"preguntasSugeridas":{"titulo":"Preguntas sugeridas para el médico","preguntas":["P1","P2","P3"]},"aviso":"No sustituye el criterio médico"}'::jsonb, now()),
-    ('b1000000-0000-4000-8000-00000000b002', :p_f15c, :p_f15a, '{"motivoConsulta":{"titulo":"Motivo de consulta sugerido","contenido":"Test2"},"antecedentesRelevantes":{"titulo":"Antecedentes relevantes","contenido":"Test"},"medicacionActual":{"titulo":"Medicación actual","contenido":"Test"},"estudiosRecientes":{"titulo":"Estudios recientes","contenido":"Test"},"valoresFueraDeRango":{"titulo":"Valores fuera de rango","contenido":"Test"},"preguntasSugeridas":{"titulo":"Preguntas sugeridas para el médico","preguntas":["P1","P2","P3"]},"aviso":"No sustituye el criterio médico"}'::jsonb, now());
+    ('b1000000-0000-4000-8000-00000000b001', 'f1500000-0000-4000-8000-00000000f503', 'f1500000-0000-4000-8000-00000000f503', '{"motivoConsulta":{"titulo":"Motivo de consulta sugerido","contenido":"Test"},"antecedentesRelevantes":{"titulo":"Antecedentes relevantes","contenido":"Test"},"medicacionActual":{"titulo":"Medicación actual","contenido":"Test"},"estudiosRecientes":{"titulo":"Estudios recientes","contenido":"Test"},"valoresFueraDeRango":{"titulo":"Valores fuera de rango","contenido":"Test"},"preguntasSugeridas":{"titulo":"Preguntas sugeridas para el médico","preguntas":["P1","P2","P3"]},"aviso":"No sustituye el criterio médico"}'::jsonb, now()),
+    ('b1000000-0000-4000-8000-00000000b002', 'f1500000-0000-4000-8000-00000000f503', 'f1500000-0000-4000-8000-00000000f501', '{"motivoConsulta":{"titulo":"Motivo de consulta sugerido","contenido":"Test2"},"antecedentesRelevantes":{"titulo":"Antecedentes relevantes","contenido":"Test"},"medicacionActual":{"titulo":"Medicación actual","contenido":"Test"},"estudiosRecientes":{"titulo":"Estudios recientes","contenido":"Test"},"valoresFueraDeRango":{"titulo":"Valores fuera de rango","contenido":"Test"},"preguntasSugeridas":{"titulo":"Preguntas sugeridas para el médico","preguntas":["P1","P2","P3"]},"aviso":"No sustituye el criterio médico"}'::jsonb, now());
 
-\set jwt_f15a '''{"sub":"f1500aaa-1111-4111-8111-111111111111","role":"authenticated"}'''
-\set jwt_f15b '''{"sub":"f1500bbb-2222-4222-8222-222222222222","role":"authenticated"}'''
 
--- El titular (titular implícito de :p_f15c) lee sus fichas.
+-- El titular (titular implícito de 'f1500000-0000-4000-8000-00000000f503') lee sus fichas.
 begin;
-select set_config('request.jwt.claims', :jwt_f15a, true);
+select set_config('request.jwt.claims', '{"sub":"f1500aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
 set local role authenticated;
 
 select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
        'El titular lee sus fichas (SELECT con puede_ver_perfil)',
        '2',
-       (select count(*)::text from public.consultation_sheets where profile_id = :p_f15c));
+       (select count(*)::text from public.consultation_sheets where profile_id = 'f1500000-0000-4000-8000-00000000f503'));
 
--- Un can_view de :p_f15c lee sus fichas (ya está en family_permissions).
+-- Un can_view de 'f1500000-0000-4000-8000-00000000f503' lee sus fichas (ya está en family_permissions).
 select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
        'El can_manage lee las fichas del perfil (SELECT con puede_ver_perfil)',
        '2',
-       (select count(*)::text from public.consultation_sheets where profile_id = :p_f15c));
+       (select count(*)::text from public.consultation_sheets where profile_id = 'f1500000-0000-4000-8000-00000000f503'));
 
 commit;
 
--- authenticated :p_f15b intenta INSERT sin ser can_upload: rechazado.
+-- authenticated f502 intenta INSERT sin ser can_upload: rechazado.
+-- fix auditoría 10.5: los do-blocks originales corrían SIN simulación de
+-- sesión (como postgres, que saltea RLS), así que "insertaban" y los casos
+-- daban FAIL. La sesión tiene que ENVOLVER cada do-block.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f1500bbb-2222-4222-8222-222222222222","role":"authenticated"}', true);
+set local role authenticated;
+
 do $$
 declare v text;
 begin
     begin
         insert into public.consultation_sheets
             (profile_id, generated_by_profile_id, content)
-        values (:p_f15c, :p_f15b, '{"motivoConsulta":{"titulo":"Motivo de consulta sugerido","contenido":"Test"},"antecedentesRelevantes":{"titulo":"Antecedentes relevantes","contenido":"Test"},"medicacionActual":{"titulo":"Medicación actual","contenido":"Test"},"estudiosRecientes":{"titulo":"Estudios recientes","contenido":"Test"},"valoresFueraDeRango":{"titulo":"Valores fuera de rango","contenido":"Test"},"preguntasSugeridas":{"titulo":"Preguntas sugeridas para el médico","preguntas":["P1","P2","P3"]},"aviso":"No sustituye el criterio médico"}'::jsonb);
+        values ('f1500000-0000-4000-8000-00000000f503', 'f1500000-0000-4000-8000-00000000f502', '{"aviso":"x"}'::jsonb);
+        v := 'insertada';
     exception when insufficient_privilege or others then v := 'rechazado';
     end;
     perform pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
         'authenticated sin can_upload NO puede insertar ficha (INSERT denegado)',
-        'rechazado', coalesce(v, 'insertada'));
+        'rechazado', v);
 end $$;
 
-begin;
-select set_config('request.jwt.claims', :jwt_f15b, true);
-set local role authenticated;
 commit;
 
--- Cambiar :p_f15b a can_upload sobre :p_f15c.
+-- Cambiar f502 a can_upload sobre f503 (setup, como postgres a propósito).
 insert into public.family_permissions (owner_profile_id, granted_profile_id, can_view, can_upload)
-values (:p_f15c, :p_f15b, true, true);
+values ('f1500000-0000-4000-8000-00000000f503', 'f1500000-0000-4000-8000-00000000f502', true, true);
 
--- Reintentar INSERT con generated_by correcto (:p_f15b).
-do $$
-begin
-    insert into public.consultation_sheets
-        (profile_id, generated_by_profile_id, content)
-    values (:p_f15c, :p_f15b, '{"motivoConsulta":{"titulo":"Motivo de consulta sugerido","contenido":"Test"},"antecedentesRelevantes":{"titulo":"Antecedentes relevantes","contenido":"Test"},"medicacionActual":{"titulo":"Medicación actual","contenido":"Test"},"estudiosRecientes":{"titulo":"Estudios recientes","contenido":"Test"},"valoresFueraDeRango":{"titulo":"Valores fuera de rango","contenido":"Test"},"preguntasSugeridas":{"titulo":"Preguntas sugeridas para el médico","preguntas":["P1","P2","P3"]},"aviso":"No sustituye el criterio médico"}'::jsonb);
-    perform pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
-        'authenticated con can_upload e generated_by correcto inserta (INSERT permitido)',
-        '1',
-        '1');
-end $$;
-
+-- Reintentar INSERT con can_upload y generated_by correcto (f502): permitido.
 begin;
-select set_config('request.jwt.claims', :jwt_f15b, true);
+select set_config('request.jwt.claims', '{"sub":"f1500bbb-2222-4222-8222-222222222222","role":"authenticated"}', true);
 set local role authenticated;
-commit;
 
--- Intentar INSERT con generated_by ajeno (falso - intenta ser :p_f15a).
 do $$
 declare v text;
 begin
     begin
         insert into public.consultation_sheets
             (profile_id, generated_by_profile_id, content)
-        values (:p_f15c, :p_f15b, '{"motivoConsulta":{"titulo":"Motivo de consulta sugerido","contenido":"Test"},"antecedentesRelevantes":{"titulo":"Antecedentes relevantes","contenido":"Test"},"medicacionActual":{"titulo":"Medicación actual","contenido":"Test"},"estudiosRecientes":{"titulo":"Estudios recientes","contenido":"Test"},"valoresFueraDeRango":{"titulo":"Valores fuera de rango","contenido":"Test"},"preguntasSugeridas":{"titulo":"Preguntas sugeridas para el médico","preguntas":["P1","P2","P3"]},"aviso":"No sustituye el criterio médico"}'::jsonb);
+        values ('f1500000-0000-4000-8000-00000000f503', 'f1500000-0000-4000-8000-00000000f502', '{"motivoConsulta":{"titulo":"Motivo de consulta sugerido","contenido":"Test"},"antecedentesRelevantes":{"titulo":"Antecedentes relevantes","contenido":"Test"},"medicacionActual":{"titulo":"Medicación actual","contenido":"Test"},"estudiosRecientes":{"titulo":"Estudios recientes","contenido":"Test"},"valoresFueraDeRango":{"titulo":"Valores fuera de rango","contenido":"Test"},"preguntasSugeridas":{"titulo":"Preguntas sugeridas para el médico","preguntas":["P1","P2","P3"]},"aviso":"No sustituye el criterio médico"}'::jsonb);
+        v := 'insertada';
+    exception when others then v := 'rechazada (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
+        'authenticated con can_upload e generated_by correcto inserta (INSERT permitido)',
+        'insertada', v);
+end $$;
+
+commit;
+
+-- Intentar INSERT con generated_by AJENO (f502 firma como f501): WITH CHECK falla.
+-- fix auditoría 10.5: el dato de prueba original ponía generated_by = f502 (el
+-- propio actor), con lo cual el caso no probaba nada — ahora firma como f501.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f1500bbb-2222-4222-8222-222222222222","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consultation_sheets
+            (profile_id, generated_by_profile_id, content)
+        values ('f1500000-0000-4000-8000-00000000f503', 'f1500000-0000-4000-8000-00000000f501', '{"aviso":"x"}'::jsonb);
+        v := 'insertada';
     exception when insufficient_privilege or others then v := 'rechazado';
     end;
     perform pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
         'authenticated NO puede insertar con generated_by distinto de su id (WITH CHECK falla)',
-        'rechazado', coalesce(v, 'insertada'));
+        'rechazado', v);
 end $$;
 
-begin;
-select set_config('request.jwt.claims', :jwt_f15a, true);
-set local role authenticated;
 commit;
 
 -- Intentar UPDATE/DELETE como authenticated: denegado (sin políticas).
+-- fix auditoría 10.5: el `begin; set_config; set local role; commit;` original
+-- cerraba la transacción ANTES de los intentos, que entonces corrían como
+-- postgres (superusuario): el DELETE borraba la fila de verdad y el caso
+-- siguiente encontraba NULL. La simulación de sesión tiene que ENVOLVER los
+-- intentos, como hacen todos los demás bloques.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f1500aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
 delete from public.consultation_sheets where id = 'b1000000-0000-4000-8000-00000000b001';
 
 select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
        'authenticated NO puede DELETE fichas (sin política)',
-       '2',
-       (select count(*)::text from public.consultation_sheets where profile_id = :p_f15c));
+       -- fix auditoría 10.5: 3 = las 2 fichas del seed del bloque + la del caso
+       -- de INSERT permitido de arriba.
+       '3',
+       (select count(*)::text from public.consultation_sheets where profile_id = 'f1500000-0000-4000-8000-00000000f503'));
 
 update public.consultation_sheets set content = '{"test":true}'::jsonb
  where id = 'b1000000-0000-4000-8000-00000000b001';
 
 select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
        'authenticated NO puede UPDATE fichas (sin política)',
-       '"Motivo de consulta sugerido"',
-       (select content ->'motivoConsulta'->'titulo' ->> 0
+       'Motivo de consulta sugerido',
+       -- fix auditoría 10.5: `->'titulo' ->> 0` indexa un string como array y
+       -- devuelve NULL (y registrar exige NOT NULL, abortando la suite entera
+       -- porque el arnés corre con ON_ERROR_STOP). La navegación correcta es
+       -- `->> 'titulo'` sobre el objeto de la sección.
+       (select content ->'motivoConsulta' ->> 'titulo'
           from public.consultation_sheets
          where id = 'b1000000-0000-4000-8000-00000000b001'));
 
 commit;
 
--- anon intenta leer fichas: denegado.
+-- anon intenta leer fichas: denegado. (fix auditoría 10.5: sin GRANT SELECT,
+-- la consulta ERRA con 42501 en vez de devolver 0 filas — con ON_ERROR_STOP
+-- el caso original tumbaba la suite. Patrón do-block del resto del arnés.)
 begin;
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
 set local role anon;
 
-select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
-       'anon NO puede leer fichas (RLS SELECT denegado)',
-       '0',
-       (select count(*)::text from public.consultation_sheets));
+do $$
+declare v text;
+begin
+    begin
+        perform count(*) from public.consultation_sheets;
+        v := 'permitido';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+    end;
+    perform pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
+        'anon NO puede leer fichas (sin GRANT SELECT)',
+        'denegado (42501)', v);
+end $$;
 
 commit;
 
--- anon intenta INSERT: rechazado (REVOKE).
+-- anon intenta INSERT: rechazado (REVOKE). (mismo fix)
 begin;
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
 set local role anon;
 
-insert into public.consultation_sheets
-    (profile_id, generated_by_profile_id, content)
-values (:p_f15c, :p_f15c, '{"motivoConsulta":{"titulo":"Motivo de consulta sugerido","contenido":"Test"},"antecedentesRelevantes":{"titulo":"Antecedentes relevantes","contenido":"Test"},"medicacionActual":{"titulo":"Medicación actual","contenido":"Test"},"estudiosRecientes":{"titulo":"Estudios recientes","contenido":"Test"},"valoresFueraDeRango":{"titulo":"Valores fuera de rango","contenido":"Test"},"preguntasSugeridas":{"titulo":"Preguntas sugeridas para el médico","preguntas":["P1","P2","P3"]},"aviso":"No sustituye el criterio médico"}'::jsonb);
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consultation_sheets
+            (profile_id, generated_by_profile_id, content)
+        values ('f1500000-0000-4000-8000-00000000f503', 'f1500000-0000-4000-8000-00000000f503', '{"aviso":"x"}'::jsonb);
+        v := 'insertada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+    end;
+    perform pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
+        'anon NO tiene GRANT INSERT (REVOKE no concede nada)',
+        'denegado (42501)', v);
+end $$;
 
 commit;
-
-select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
-       'anon NO tiene GRANT INSERT (REVOKE no concede nada)',
-       '0',
-       (select count(*)::text from public.consultation_sheets where generated_by_profile_id = :p_f15c and created_at > now() - interval '1 second'));
 
 -- Verificar que consultation_sheets tiene RLS habilitada.
 select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
@@ -3640,6 +3686,10 @@ select count(*)                          as casos,
 
 delete from public.profiles  where id in (:p_g, :p_g2, :p_g3);
 delete from auth.users       where id in (:u_a, :u_b);
+-- Entidades propias del BLOQUE 15 (fix de auditoría 10.5: faltaban acá y el
+-- residuo rompía la corrida siguiente). Mismo orden: gestionado primero.
+delete from public.profiles  where id = 'f1500000-0000-4000-8000-00000000f503';
+delete from auth.users       where id in ('f1500aaa-1111-4111-8111-111111111111', 'f1500bbb-2222-4222-8222-222222222222');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 
 drop schema pruebas_rls cascade;

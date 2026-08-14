@@ -18,9 +18,7 @@ import { ArrowLeftIcon, ChevronRightIcon } from "lucide-react"
 import { Boton } from "@/components/base/boton"
 import { createClient } from "@/lib/supabase/server"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
-import type { Database } from "@/types/database.types"
 
-type ConsultationSheet = Database["public"]["Tables"]["consultation_sheets"]["Row"]
 
 export const metadata = {
   title: "Historial de fichas — Historial Médico",
