@@ -35,20 +35,31 @@ import {
 import { actualizarSesion } from "@/lib/supabase/proxy";
 
 /**
- * Redirige sin perder las cookies que acaba de escribir el refresco de
- * sesión. `NextResponse.redirect` crea una respuesta nueva y vacía: si no se
- * le copian las cookies, el token refrescado se pierde y la persona termina
- * rebotando entre `/login` y `/perfiles`.
+ * Copia a `destino` las cookies que escribió el refresco de sesión.
+ * `NextResponse.redirect` y `NextResponse.json` crean respuestas nuevas y
+ * vacías: si no se les copian las cookies, se pierde lo que `actualizarSesion`
+ * acaba de decidir sobre la sesión.
+ *
+ * Son DOS cosas distintas las que se pierden, y las dos importan:
+ *
+ * 1. El **token refrescado**. Sin esto la persona termina rebotando entre
+ *    `/login` y `/perfiles`.
+ * 2. El **borrado de una cookie inservible**. Cuando el refresh token ya no
+ *    existe (cerró sesión en otra pestaña), `@supabase/auth-js` borra la
+ *    cookie: es un `Set-Cookie` con `Max-Age=0` que viaja por el mismo canal.
  */
+function conCookiesDe(destino: NextResponse, respuestaConCookies: NextResponse): NextResponse {
+  for (const cookie of respuestaConCookies.cookies.getAll()) {
+    destino.cookies.set(cookie);
+  }
+  return destino;
+}
+
 function redirigirConservandoCookies(
   destino: URL,
   respuestaConCookies: NextResponse,
 ): NextResponse {
-  const redireccion = NextResponse.redirect(destino);
-  for (const cookie of respuestaConCookies.cookies.getAll()) {
-    redireccion.cookies.set(cookie);
-  }
-  return redireccion;
+  return conCookiesDe(NextResponse.redirect(destino), respuestaConCookies);
 }
 
 export async function proxy(request: NextRequest) {
@@ -61,9 +72,22 @@ export async function proxy(request: NextRequest) {
     // consume es código (fetch, curl, el service worker), y necesita un
     // estado HTTP que pueda interpretar.
     if (esRutaDeApi(pathname)) {
-      return NextResponse.json(
-        { error: "Necesitás iniciar sesión para acceder a este recurso." },
-        { status: 401 },
+      // `conCookiesDe` no es decorativo acá (auditoría de seguridad 11.4,
+      // hallazgo A-03): esta rama devolvía un `NextResponse` nuevo y tiraba
+      // las cookies de `respuesta`. Cuando la cookie que llegó ya no sirve
+      // —una pestaña abierta desde antes del logout—, `@supabase/auth-js` la
+      // borra y ese borrado viajaba solo en las redirecciones. Un cliente que
+      // pega contra `/api` (el service worker, un `fetch` en reintento)
+      // conservaba la cookie muerta y volvía a pedirle a GoTrue que la
+      // refrescara en CADA request, para siempre: tráfico al servidor de Auth
+      // sin ningún propósito y dos stack traces por request en el log,
+      // tapando errores de verdad.
+      return conCookiesDe(
+        NextResponse.json(
+          { error: "Necesitás iniciar sesión para acceder a este recurso." },
+          { status: 401 },
+        ),
+        respuesta,
       );
     }
 

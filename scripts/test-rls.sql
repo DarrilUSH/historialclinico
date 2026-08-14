@@ -3549,30 +3549,64 @@ end $$;
 
 commit;
 
--- Intentar UPDATE/DELETE como authenticated: denegado (sin políticas).
+-- Intentar UPDATE/DELETE como authenticated: denegado.
+--
 -- fix auditoría 10.5: el `begin; set_config; set local role; commit;` original
 -- cerraba la transacción ANTES de los intentos, que entonces corrían como
 -- postgres (superusuario): el DELETE borraba la fila de verdad y el caso
 -- siguiente encontraba NULL. La simulación de sesión tiene que ENVOLVER los
 -- intentos, como hacen todos los demás bloques.
+--
+-- fix auditoría 11.4 (hallazgo A-01): hasta la migración 20260814110000,
+-- `authenticated` TENÍA el privilegio de UPDATE y de DELETE sobre esta tabla y
+-- lo único que lo frenaba era la ausencia de política — los dos intentos
+-- afectaban 0 filas EN SILENCIO. Ahora el privilegio está revocado y los dos
+-- ERRAN con 42501, así que van en do-block (si no, con ON_ERROR_STOP la
+-- excepción tumbaría la suite entera). Se conservan además las dos
+-- comprobaciones de estado —la fila sigue ahí y su contenido no cambió—
+-- porque son las que demuestran el efecto, no la forma del rechazo.
 begin;
 select set_config('request.jwt.claims', '{"sub":"f1500aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
 set local role authenticated;
 
-delete from public.consultation_sheets where id = 'b1000000-0000-4000-8000-00000000b001';
+do $$
+declare v text;
+begin
+    begin
+        delete from public.consultation_sheets where id = 'b1000000-0000-4000-8000-00000000b001';
+        v := 'borrada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
+        'authenticated NO tiene GRANT DELETE sobre fichas  [auditoría 11.4]',
+        'denegado (42501)', v);
+end $$;
 
 select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
-       'authenticated NO puede DELETE fichas (sin política)',
+       'authenticated NO puede DELETE fichas (la fila sigue ahí)',
        -- fix auditoría 10.5: 3 = las 2 fichas del seed del bloque + la del caso
        -- de INSERT permitido de arriba.
        '3',
        (select count(*)::text from public.consultation_sheets where profile_id = 'f1500000-0000-4000-8000-00000000f503'));
 
-update public.consultation_sheets set content = '{"test":true}'::jsonb
- where id = 'b1000000-0000-4000-8000-00000000b001';
+do $$
+declare v text;
+begin
+    begin
+        update public.consultation_sheets set content = '{"test":true}'::jsonb
+         where id = 'b1000000-0000-4000-8000-00000000b001';
+        v := 'editada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
+        'authenticated NO tiene GRANT UPDATE sobre fichas  [auditoría 11.4]',
+        'denegado (42501)', v);
+end $$;
 
 select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
-       'authenticated NO puede UPDATE fichas (sin política)',
+       'authenticated NO puede UPDATE fichas (el contenido no cambió)',
        'Motivo de consulta sugerido',
        -- fix auditoría 10.5: `->'titulo' ->> 0` indexa un string como array y
        -- devuelve NULL (y registrar exige NOT NULL, abortando la suite entera
@@ -3642,6 +3676,249 @@ select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
        (select count(*)::text from information_schema.role_table_grants
          where table_schema = 'public' and table_name = 'consultation_sheets' and grantee = 'anon'));
 
+-- Auditoría 11.4, hallazgo A-01: el privilegio, no solo la política. Mismo
+-- centinela que el BLOQUE 7 tiene para access_logs desde el Sprint 1: si una
+-- migración futura vuelve a conceder UPDATE o DELETE, esto lo dice en la
+-- corrida siguiente aunque nadie escriba la política que lo aprovecha.
+select pruebas_rls.registrar('15. fichas generadas (consultation_sheets)',
+       'Privilegio de UPDATE/DELETE de authenticated en consultation_sheets  [auditoría 11.4]',
+       '0',
+       (select count(*)::text from information_schema.role_table_grants
+         where table_schema = 'public' and table_name = 'consultation_sheets'
+           and grantee = 'authenticated' and privilege_type in ('UPDATE', 'DELETE')));
+
+
+-- =============================================================================
+-- 16. ÁREA DE ESPERA DEL WEB SHARE TARGET (shared_uploads_temp + bucket
+--     `compartidos-temp`) — Sprint 11, tarea 11.2; bloque agregado por la
+--     auditoría de seguridad 11.4
+-- =============================================================================
+-- Es la única tabla del dominio cuyo dueño NO es un perfil sino una CUENTA
+-- (`user_id`, porque en ese momento del flujo todavía no se eligió perfil), y
+-- la única que nace de un INSERT hecho con `service_role` desde el receptor
+-- `/api/compartir`. Eso le da una matriz propia que ningún otro bloque cubre:
+--
+--   · SELECT y DELETE: solo las filas PROPIAS (`user_id = auth.uid()`).
+--   · INSERT y UPDATE: NINGUNO para `authenticated` — no hay privilegio, ni
+--     política. La fila la crea el receptor con service_role y nunca se edita.
+--   · TRUNCATE: revocado. RLS no protege de un TRUNCATE, y Supabase concede
+--     ALL sobre toda tabla nueva de `public` por default: sin el revoke,
+--     cualquier sesión podría vaciar los archivos en espera de TODAS las
+--     cuentas. Es la razón por la que la migración dice "el revoke no es
+--     decorativo", y acá se verifica que sigue siendo cierto.
+--   · anon: nada de nada.
+--   · Bucket `compartidos-temp`: privado y SIN NINGUNA política de
+--     `storage.objects` que lo mencione — negación por defecto para el
+--     cliente. La subida directa desde el navegador está denegada; la
+--     verificación por HTTP vive en `scripts/test-storage-rls.sh` BLOQUE 7.
+--
+-- Reusa las dos cuentas del BLOQUE 15 (`f1500aaa…` y `f1500bbb…`): siguen
+-- vivas porque la limpieza de todas las entidades es global y corre al final
+-- del script. Es la misma convención con la que el BLOQUE 9 reusa el perfil
+-- gestionado que crea el BLOQUE 5.
+-- =============================================================================
+
+-- Pre-limpieza defensiva (lección del fix de auditoría 10.5): una corrida
+-- anterior abortada a la mitad dejaría estas filas y el INSERT de abajo
+-- chocaría contra la primary key, tumbando el resto de la suite.
+delete from public.shared_uploads_temp
+ where id in ('f1600000-0000-4000-8000-00000000f601', 'f1600000-0000-4000-8000-00000000f602');
+
+-- Las dos filas de prueba las crea `postgres` a propósito: es exactamente lo
+-- que hace el receptor real, que corre con service_role.
+insert into public.shared_uploads_temp
+    (id, user_id, storage_path, mime_type, original_filename, file_size_bytes)
+values
+    ('f1600000-0000-4000-8000-00000000f601', 'f1500aaa-1111-4111-8111-111111111111',
+     'f1500aaa-1111-4111-8111-111111111111/estudio-de-a.pdf', 'application/pdf',
+     'estudio-de-a.pdf', 2048),
+    ('f1600000-0000-4000-8000-00000000f602', 'f1500bbb-2222-4222-8222-222222222222',
+     'f1500bbb-2222-4222-8222-222222222222/estudio-de-b.pdf', 'application/pdf',
+     'estudio-de-b.pdf', 4096);
+
+
+-- ── La cuenta A: ve la suya y SOLO la suya.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f1500aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+       'A lee su propio archivo en espera (SELECT propio)',
+       'estudio-de-a.pdf',
+       (select coalesce(string_agg(original_filename, ', ' order by original_filename), '(ninguno)')
+          from public.shared_uploads_temp));
+
+select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+       'A NO ve el archivo de B  [CRITERIO DE ACEPTACIÓN]', '0 filas',
+       (select count(*)::text || ' filas' from public.shared_uploads_temp
+         where id = 'f1600000-0000-4000-8000-00000000f602'));
+
+-- INSERT: no hay GRANT. Ni siquiera para una fila a nombre propio.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.shared_uploads_temp
+            (user_id, storage_path, mime_type, original_filename, file_size_bytes)
+        values ('f1500aaa-1111-4111-8111-111111111111',
+                'f1500aaa-1111-4111-8111-111111111111/inventado.pdf', 'application/pdf',
+                'inventado.pdf', 100);
+        v := 'insertado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+        'authenticated NO tiene GRANT INSERT (la fila la crea el receptor con service_role)',
+        'denegado (42501)', v);
+end $$;
+
+-- UPDATE: tampoco. La fila nace y se borra, nunca se edita.
+do $$
+declare v text;
+begin
+    begin
+        update public.shared_uploads_temp set original_filename = 'pisado.pdf'
+         where id = 'f1600000-0000-4000-8000-00000000f601';
+        v := 'editado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+        'authenticated NO tiene GRANT UPDATE (la fila no se edita, solo se borra)',
+        'denegado (42501)', v);
+end $$;
+
+-- TRUNCATE: el revoke que NO es decorativo. RLS no lo filtraría.
+do $$
+declare v text;
+begin
+    begin
+        truncate table public.shared_uploads_temp;
+        v := 'vaciada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+        'authenticated NO puede TRUNCATE la tabla (RLS no protege de un TRUNCATE)',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+
+-- ── La cuenta B: no toca nada de A.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f1500bbb-2222-4222-8222-222222222222","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+       'B NO ve el archivo de A  [CRITERIO DE ACEPTACIÓN]', '0 filas',
+       (select count(*)::text || ' filas' from public.shared_uploads_temp
+         where id = 'f1600000-0000-4000-8000-00000000f601'));
+
+-- DELETE ajeno: B SÍ tiene el privilegio de DELETE, así que esto no erra —
+-- RLS filtra y no toca ninguna fila. Es el caso que distingue "no tiene
+-- permiso" de "no tiene privilegio", y el que demuestra que un id adivinado
+-- no alcanza para borrarle a otro el archivo que está por guardar.
+do $$
+declare v integer;
+begin
+    delete from public.shared_uploads_temp where id = 'f1600000-0000-4000-8000-00000000f601';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+        'B BORRA el archivo de A por id adivinado (0 filas, no error)',
+        '0 filas', v || ' filas');
+end $$;
+
+-- DELETE propio: sí, es el botón "Descartar" de /compartir.
+do $$
+declare v integer;
+begin
+    delete from public.shared_uploads_temp where id = 'f1600000-0000-4000-8000-00000000f602';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+        'B descarta su PROPIO archivo (DELETE propio)',
+        '1 filas', v || ' filas');
+end $$;
+
+commit;
+
+-- El archivo de A sobrevivió al intento de B (se comprueba con postgres, que
+-- ve todo: si el DELETE ajeno hubiera pasado, acá saldría 0).
+select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+       'El archivo de A sigue existiendo después del intento de B', '1',
+       (select count(*)::text from public.shared_uploads_temp
+         where id = 'f1600000-0000-4000-8000-00000000f601'));
+
+
+-- ── anon: nada.
+begin;
+select set_config('request.jwt.claims', '{"role":"anon"}', true);
+set local role anon;
+
+do $$
+declare v text;
+begin
+    begin
+        perform count(*) from public.shared_uploads_temp;
+        v := 'permitido';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+    end;
+    perform pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+        'anon NO puede leer archivos en espera (sin GRANT SELECT)',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        delete from public.shared_uploads_temp where id = 'f1600000-0000-4000-8000-00000000f601';
+        v := 'borrado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+    end;
+    perform pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+        'anon NO puede borrar archivos en espera (sin GRANT DELETE)',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+
+-- ── Invariantes estructurales de la tabla y del bucket.
+select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+       'shared_uploads_temp tiene RLS habilitada', 'true',
+       (select rowsecurity::text from pg_tables
+         where schemaname = 'public' and tablename = 'shared_uploads_temp'));
+
+select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+       'Privilegios de anon sobre shared_uploads_temp', '0',
+       (select count(*)::text from information_schema.role_table_grants
+         where table_schema = 'public' and table_name = 'shared_uploads_temp' and grantee = 'anon'));
+
+select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+       'Privilegios de authenticated sobre shared_uploads_temp (exactamente los dos)',
+       'DELETE, SELECT',
+       (select coalesce(string_agg(distinct privilege_type, ', ' order by privilege_type), '(ninguno)')
+          from information_schema.role_table_grants
+         where table_schema = 'public' and table_name = 'shared_uploads_temp'
+           and grantee = 'authenticated'));
+
+select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+       'El bucket compartidos-temp existe y es PRIVADO', 'privado',
+       (select case when public then 'PÚBLICO' else 'privado' end
+          from storage.buckets where id = 'compartidos-temp'));
+
+-- La negación por defecto: todas las políticas de storage.objects filtran por
+-- `bucket_id in (...)` a los tres buckets del producto. Que ninguna nombre a
+-- `compartidos-temp` ES el mecanismo que deja al cliente afuera del bucket.
+select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
+       'Políticas de storage.objects que mencionan compartidos-temp (subida directa del cliente)',
+       '0',
+       (select count(*)::text from pg_policies
+         where schemaname = 'storage' and tablename = 'objects'
+           and (coalesce(qual, '') || coalesce(with_check, '')) like '%compartidos-temp%'));
+
 
 -- =============================================================================
 -- RESUMEN
@@ -3689,6 +3966,11 @@ delete from auth.users       where id in (:u_a, :u_b);
 -- Entidades propias del BLOQUE 15 (fix de auditoría 10.5: faltaban acá y el
 -- residuo rompía la corrida siguiente). Mismo orden: gestionado primero.
 delete from public.profiles  where id = 'f1500000-0000-4000-8000-00000000f503';
+-- Filas del BLOQUE 16 (auditoría 11.4). Van ANTES del delete de auth.users:
+-- el `on delete cascade` de shared_uploads_temp.user_id igual las llevaría,
+-- pero explícito es más fácil de auditar y no depende del orden de los FK.
+delete from public.shared_uploads_temp
+ where id in ('f1600000-0000-4000-8000-00000000f601', 'f1600000-0000-4000-8000-00000000f602');
 delete from auth.users       where id in ('f1500aaa-1111-4111-8111-111111111111', 'f1500bbb-2222-4222-8222-222222222222');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 

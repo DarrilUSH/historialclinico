@@ -133,12 +133,34 @@ check "anon descarga el estudio de A"                 '^(400|401|403|404)$' "$(c
 check "anon sube al prefijo de A"                     '^(400|401|403)$' "$(code_post documentos-medicos "$P_A/2026/anon.pdf" "$ANON" application/pdf)"
 
 echo ""
+echo "=== BLOQUE 7 — compartidos-temp: bucket SIN politicas (auditoria 11.4) ==="
+# El area de espera del Web Share Target (Sprint 11, tarea 11.2). No tiene NI
+# UNA politica de storage.objects: todas las existentes filtran por bucket_id
+# a los tres buckets del producto, asi que este queda en negacion por defecto.
+# Solo lo toca service_role desde /api/compartir. Con can_manage puesto (el
+# permiso mas amplio que existe) B sigue sin poder entrar: si alguna vez
+# alguien agrega una politica amplia por descuido, estos casos lo cantan.
+permiso true true true
+# El objeto lo crea el servidor, igual que en produccion: si el cliente ni
+# siquiera puede subir, hace falta un objeto real para probar la descarga.
+curl -s -o /dev/null -X POST "$ST/object/compartidos-temp/$U_A/compartido.pdf" \
+  -H "Authorization: Bearer $SERVICE_KEY" -H "Content-Type: application/pdf" --data-binary "@$ARCH"
+check "A sube DIRECTO a compartidos-temp (su cuenta)"  '^(400|403)$' "$(code_post compartidos-temp "$U_A/subida-directa.pdf" "$JWT_A" application/pdf)"
+check "B sube DIRECTO a compartidos-temp (cuenta de A)" '^(400|403)$' "$(code_post compartidos-temp "$U_A/intruso.pdf" "$JWT_B" application/pdf)"
+check "A descarga de compartidos-temp (su cuenta)"     '^(400|403|404)$' "$(code_get compartidos-temp "$U_A/compartido.pdf" "$JWT_A")"
+check "B descarga de compartidos-temp (cuenta de A)"   '^(400|403|404)$' "$(code_get compartidos-temp "$U_A/compartido.pdf" "$JWT_B")"
+check "A borra de compartidos-temp (su cuenta)"        '^(400|403|404)$' "$(code_del compartidos-temp "$U_A/compartido.pdf" "$JWT_A")"
+check "anon sube a compartidos-temp"                   '^(400|401|403)$' "$(code_post compartidos-temp "$U_A/anon.pdf" "$ANON" application/pdf)"
+check "service_role SI descarga (es quien lo usa)"     '^200$' "$(code_get compartidos-temp "$U_A/compartido.pdf" "$SERVICE_KEY")"
+
+echo ""
 printf '=== TOTAL: %s PASS / %s FAIL ===\n' "$OK" "$FAIL"
 
 # limpieza
 for o in "$P_A/2026/subido-por-b.pdf" "$P_A/2026/estudio.pdf"; do
   curl -s -o /dev/null -X DELETE "$ST/object/documentos-medicos/$o" -H "Authorization: Bearer $SERVICE_KEY"
 done
+curl -s -o /dev/null -X DELETE "$ST/object/compartidos-temp/$U_A/compartido.pdf" -H "Authorization: Bearer $SERVICE_KEY"
 curl -s -o /dev/null -X DELETE "$ST/object/credenciales-cobertura/$P_A/tarjeta/front.jpg" -H "Authorization: Bearer $SERVICE_KEY"
 curl -s -o /dev/null -X DELETE "$ST/object/avatares/$OBJ_AVA" -H "Authorization: Bearer $SERVICE_KEY"
 $PSQL -c "delete from public.profiles where id in ('$P_A','$P_B'); delete from auth.users where id in ('$U_A','$U_B');" >/dev/null

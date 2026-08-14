@@ -5,8 +5,9 @@
 > **El contrato sigue siendo [`modelo-permisos.md`](./modelo-permisos.md).** Acá no se decide nada: se muestra dónde quedó cada decisión.
 
 - **Motor verificado:** PostgreSQL 17.6 (Supabase local, contenedor `supabase_db_historialclinico`).
-- **Cobertura:** 13 tablas con RLS habilitada, 49 políticas de tabla, 3 buckets privados con 5 políticas de `storage.objects`, 10 funciones auxiliares, 5 funciones de trigger (14 triggers) que cubren lo que RLS no puede expresar.
-- **Estado de las pruebas:** `scripts/test-rls.sql` — **66 casos, 66 PASS, 0 FAIL** (incluye BLOQUE 8 y 8b, la confirmación acotada del documento y el parámetro `metricas` del RPC, Sprint 4); `scripts/test-storage-rls.sh` — **20 casos, 20 PASS, 0 FAIL**.
+- **Cobertura (verificada contra el catálogo el 2026-08-14, Sprint 11):** **19 tablas** con RLS habilitada, **60 políticas** de tabla, **4 buckets privados** con 5 políticas de `storage.objects`, **39 funciones** en `public` (todas con `search_path` fijado) y **28 triggers** que cubren lo que RLS no puede expresar. Una sola vista, `v_medicacion_estado`, en `security_invoker`.
+- **Estado de las pruebas:** `scripts/test-rls.sql` — **253 casos, 253 PASS, 0 FAIL**; `scripts/test-storage-rls.sh` — **27 casos, 27 PASS, 0 FAIL**.
+- **Auditoría:** [`auditoria-seguridad.md`](./auditoria-seguridad.md) (Sprint 11, tarea 11.4) es el informe completo, objeto por objeto, con los hallazgos y su estado. Los números de arriba salieron de ahí. **Este resumen quedó tres sprints atrás una vez** (hallazgo A-04): si volvés a tocar el esquema, actualizalo o volvé a dejar un mapa que miente sobre cuánto hay que auditar.
 
 ---
 
@@ -31,9 +32,13 @@
 
 Las tres capas dicen lo mismo a propósito. Que `anon` no tenga privilegio de tabla no es redundante con RLS: es la garantía de que un error futuro al escribir una política no se traduzca en una fuga para un visitante sin sesión.
 
-### Las 13 tablas con RLS habilitada
+### Las 19 tablas con RLS habilitada
 
-`profiles` · `family_permissions` · `doctors` · `documents` · `lab_metrics` · `appointments` · `medications` · `medication_intakes` · `vital_signs` · `insurance_cards` · `access_logs` · `push_subscriptions` · `storage_purge_queue`
+**Del Sprint 1:** `profiles` · `family_permissions` · `doctors` · `documents` · `lab_metrics` · `appointments` · `medications` · `medication_intakes` · `vital_signs` · `insurance_cards` · `access_logs` · `push_subscriptions` · `storage_purge_queue`
+
+**Agregadas después:** `appointment_reminders` (6.4) · `medication_renewal_alerts` (7.4) · `vital_sign_thresholds` y `vital_sign_alerts` (9.2) · `consultation_sheets` (10.5) · `shared_uploads_temp` (11.2)
+
+Dos de las 19 tienen RLS habilitada y **cero políticas**, a propósito: `appointment_reminders` y `storage_purge_queue` son infraestructura que solo tocan los triggers `SECURITY DEFINER`, `pg_cron` y los barridos con `service_role`; ninguna sesión de la aplicación tiene privilegio sobre ellas. El BLOQUE 7 del arnés verifica que sigan siendo **exactamente esas dos**: una tercera en la lista es un olvido de políticas, no una tabla de infraestructura nueva.
 
 ```sql
 select tablename from pg_tables where schemaname = 'public' and rowsecurity = false;
@@ -42,7 +47,7 @@ select tablename from pg_tables where schemaname = 'public' and rowsecurity = fa
 
 ### Por qué NO se usó `FORCE ROW LEVEL SECURITY`
 
-Las 13 tablas son propiedad de `postgres`, y en Supabase tanto `postgres` como `service_role` tienen el atributo de rol **`BYPASSRLS`**, que se evalúa **antes** que `FORCE`. Activarlo no cambiaría el comportamiento de ningún rol real: sería seguridad decorativa.
+Las 19 tablas son propiedad de `postgres`, y en Supabase tanto `postgres` como `service_role` tienen el atributo de rol **`BYPASSRLS`**, que se evalúa **antes** que `FORCE`. Activarlo no cambiaría el comportamiento de ningún rol real: sería seguridad decorativa.
 
 Lo que sí haría, si alguna vez se quitara ese atributo, es someter a RLS a las funciones `SECURITY DEFINER` de la sección 2 — reintroduciendo exactamente la recursión `42P17` que vienen a evitar — y romper el seed y las migraciones. La protección efectiva contra el uso indebido de `service_role` no es `FORCE`: es que la `SERVICE_ROLE_KEY` nunca salga del servidor, y eso se audita en el Sprint 11.
 
@@ -60,7 +65,7 @@ ERROR:  42P17: infinite recursion detected in policy for relation "profiles"
 
 ### 2.2 Por qué estas funciones lo cortan
 
-Todas son **`SECURITY DEFINER`** y su dueño es `postgres`, que es a la vez **dueño de las 13 tablas** y portador de **`BYPASSRLS`**. Cuando una política invoca a una de estas funciones, las consultas de adentro **no evalúan ninguna política**: el motor no vuelve a entrar en `profiles` ni en `family_permissions` como sujeto de RLS. El ciclo se corta en la frontera de la función.
+Todas son **`SECURITY DEFINER`** y su dueño es `postgres`, que es a la vez **dueño de las 19 tablas** y portador de **`BYPASSRLS`**. Cuando una política invoca a una de estas funciones, las consultas de adentro **no evalúan ninguna política**: el motor no vuelve a entrar en `profiles` ni en `family_permissions` como sujeto de RLS. El ciclo se corta en la frontera de la función.
 
 ```
    política de profiles          ┌───────────────────────────────┐
@@ -284,13 +289,13 @@ La política `profiles_select_visible` implementa la matriz literalmente: se ve 
 # En Git Bash sobre Windows, agregar Docker al PATH primero:
 export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 
-# 1. Aplicar las tres migraciones desde cero
+# 1. Aplicar las 16 migraciones desde cero
 npx supabase db reset
 
-# 2. Correr la suite de aislamiento de las TABLAS (66 casos)
+# 2. Correr la suite de aislamiento de las TABLAS (253 casos)
 docker exec -i supabase_db_historialclinico psql -U postgres -d postgres < scripts/test-rls.sql
 
-# 3. Correr la suite de aislamiento de STORAGE (20 casos, por HTTP)
+# 3. Correr la suite de aislamiento de STORAGE (27 casos, por HTTP)
 bash scripts/test-storage-rls.sh
 ```
 
@@ -436,7 +441,7 @@ Verificado contra el stack local con `curl` y JWT de usuario firmados con el sec
 | `GET` con la anon key al endpoint autenticado | `HTTP 400` — `NoSuchKey` (RLS filtra: indistinguible de inexistente) |
 | Signed URL de 60 s | `HTTP 200`, contenido byte-a-byte idéntico al subido |
 | La misma signed URL con `expiresIn: 1`, pasados ~4 s | `HTTP 400` — `InvalidJWT`, `"exp" claim timestamp check failed` |
-| `scripts/test-storage-rls.sh` (20 casos con usuarios reales) | **20 PASS / 0 FAIL** |
+| `scripts/test-storage-rls.sh` (27 casos con usuarios reales) | **27 PASS / 0 FAIL** |
 
 ---
 
@@ -444,6 +449,6 @@ Verificado contra el stack local con `curl` y JWT de usuario firmados con el sec
 
 RLS filtra filas de Postgres. Tres cosas quedan afuera **por construcción** y necesitan su propia capa:
 
-1. ~~**Los archivos.**~~ **Ya cubierto:** ver [§7, Storage](#7-storage-buckets-privados-y-políticas-de-objetos). Los tres buckets son privados y `storage.objects` invoca las mismas funciones auxiliares que las tablas.
+1. ~~**Los archivos.**~~ **Ya cubierto:** ver [§7, Storage](#7-storage-buckets-privados-y-políticas-de-objetos). Los cuatro buckets son privados. Tres de ellos tienen políticas de `storage.objects` que invocan las mismas funciones auxiliares que las tablas; el cuarto, `compartidos-temp` (11.2), no tiene ninguna a propósito: sin una política que lo nombre, el cliente no puede leerlo ni escribirlo.
 2. **La ventana post-revocación.** Borrar la fila de `family_permissions` corta el acceso **de inmediato** para toda consulta nueva, pero las signed URLs ya emitidas siguen sirviendo el archivo hasta que expiren, y el cache del service worker sigue en el dispositivo. De ahí el TTL corto (60–300 s) y la purga de cache al perder el permiso ([§8.1](./modelo-permisos.md#81-revocación)).
-3. **`service_role`.** Tiene `BYPASSRLS`: para él estas políticas no existen. Toda la protección es que la `SERVICE_ROLE_KEY` no salga del servidor. Se audita en el Sprint 11.
+3. **`service_role`.** Tiene `BYPASSRLS`: para él estas políticas no existen. Toda la protección es que la `SERVICE_ROLE_KEY` no salga del servidor. **Auditado** en el Sprint 11 (tarea 11.4): ver [`auditoria-seguridad.md`](./auditoria-seguridad.md) §5 — cero apariciones en `components/`, cero en el bundle del cliente, y una guarda que lanza en los seis módulos que la usan si se los carga en el navegador.
