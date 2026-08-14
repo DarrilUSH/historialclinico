@@ -9,10 +9,11 @@
  * Si no hay turno futuro, devuelve `null`.
  */
 
+import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
 import type { TurnoParaTarjeta } from "@/components/turnos/tarjeta-turno"
 
 export async function obtenerProximoTurno(
-  supabase: any,
+  supabase: ClienteSupabaseServidor,
   perfilId: string,
 ): Promise<TurnoParaTarjeta | null> {
   const ahora = new Date().toISOString()
