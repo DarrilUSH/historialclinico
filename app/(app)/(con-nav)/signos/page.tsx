@@ -77,8 +77,8 @@ export default async function PaginaSignos() {
   const sinMediciones = TIPOS_SIGNO.every((tipo) => porTipo[tipo].length === 0)
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
-      <div className="flex items-center justify-between gap-3">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
+      <div className="flex items-center justify-between gap-3 chica:gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">Signos vitales</h1>
         <Link
           href="/signos/historial"
@@ -91,8 +91,13 @@ export default async function PaginaSignos() {
 
       <BannerAlertasSignos alertas={alertasSinVer} />
 
+      {/* Chica (Sprint 13, tarea 13.4): los tres botones de carga -"Cargar
+          tensión"/"Cargar glucemia"/"Cargar peso"- ya eran fila de 3 desde
+          `sm:` (pantallas anchas); en chica pasan a fila de 3 SIEMPRE, mismo
+          patrón que las tres tarjetas de `cargador-documento.tsx` (Tanda 2):
+          la fila compacta no depende del ancho de viewport sino del modo. */}
       {activo.permisos.canUpload && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 chica:grid-cols-3 chica:gap-2">
           {TIPOS_SIGNO.map((tipo) => (
             <BotonCargar key={tipo} tipo={tipo} />
           ))}
@@ -102,7 +107,7 @@ export default async function PaginaSignos() {
       {sinMediciones ? (
         <EstadoVacio puedeCargar={activo.permisos.canUpload} />
       ) : (
-        <div className="flex flex-col gap-6">
+        <div className="flex flex-col gap-6 chica:gap-4">
           {TIPOS_SIGNO.map((tipo) =>
             porTipo[tipo].length > 0 ? (
               <SeccionTipo key={tipo} tipo={tipo} mediciones={porTipo[tipo]} />
@@ -116,11 +121,19 @@ export default async function PaginaSignos() {
 
 function BotonCargar({ tipo }: { tipo: SignoTipo }) {
   return (
+    // Chica: el botón de `size="lg"` trae `whitespace-nowrap` de fábrica
+    // (`components/ui/button.tsx`) -correcto en grande, donde entra en una
+    // sola línea a ancho completo-, pero en la fila de 3 columnas "Cargar
+    // glucemia" no entra en un tercio del ancho sin envolver. Se pasa a
+    // layout vertical -ícono arriba, etiqueta abajo, `chica:whitespace-normal`
+    // para permitir el salto de línea- en vez de recortar el texto: el ícono
+    // ya se achica solo (`[&_svg:not([class*='size-'])]:size-6` de
+    // `buttonVariants` ya deriva de `--spacing`, sin tocarlo acá).
     <Boton
       render={<Link href={`/signos/nuevo?tipo=${tipo}`} />}
       nativeButton={false}
       size="lg"
-      className="w-full"
+      className="w-full chica:h-auto chica:min-h-tactil chica:flex-col chica:gap-1 chica:px-2 chica:py-2.5 chica:text-xs chica:whitespace-normal chica:text-center"
     >
       <PlusIcon aria-hidden="true" />
       {ETIQUETA_CARGAR[tipo]}
@@ -130,21 +143,36 @@ function BotonCargar({ tipo }: { tipo: SignoTipo }) {
 
 function SeccionTipo({ tipo, mediciones }: { tipo: SignoTipo; mediciones: MedicionSigno[] }) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 chica:gap-2">
       <h2 className="text-lg font-semibold text-foreground">{ETIQUETA_TIPO[tipo]}</h2>
-      <ul className="flex flex-col gap-2">
+      <ul className="flex flex-col gap-2 chica:gap-1.5">
         {mediciones.map((medicion, indice) => (
           <li key={medicion.id}>
-            <Tarjeta className={cn("gap-1 px-(--card-spacing)", indice === 0 && "ring-primary/40")}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            <Tarjeta className={cn("gap-1 px-(--card-spacing) chica:gap-0.5", indice === 0 && "ring-primary/40")}>
+              {/* Grande: sin cambios. */}
+              <div className="flex flex-wrap items-center justify-between gap-2 chica:hidden">
                 <p className="numeros-clinicos text-xl font-bold text-foreground">
                   {formatearValorSigno(medicion)}
                 </p>
                 <p className="text-sm text-muted-foreground">{tiempoRelativo(medicion.measuredAt)}</p>
               </div>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground chica:hidden">
                 {formatearFechaLargaTurno(medicion.measuredAt)} · {formatearHoraTurno(medicion.measuredAt)} hs
               </p>
+
+              {/* Chica (Sprint 13, tarea 13.4): valor y fecha en una sola
+                  fila -mismos datos que en grande (tiempo relativo, fecha
+                  larga y hora), sin sacar nada, envolviendo si no entra en
+                  vez de truncar (docs/densidad.md §4 regla 5)-. */}
+              <div className="hidden flex-wrap items-center justify-between gap-2 chica:flex">
+                <p className="numeros-clinicos text-lg font-bold text-foreground">
+                  {formatearValorSigno(medicion)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {tiempoRelativo(medicion.measuredAt)} · {formatearFechaLargaTurno(medicion.measuredAt)} ·{" "}
+                  {formatearHoraTurno(medicion.measuredAt)} hs
+                </p>
+              </div>
             </Tarjeta>
           </li>
         ))}
@@ -155,7 +183,7 @@ function SeccionTipo({ tipo, mediciones }: { tipo: SignoTipo; mediciones: Medici
 
 function EstadoVacio({ puedeCargar }: { puedeCargar: boolean }) {
   return (
-    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center">
+    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center chica:gap-3 chica:py-8">
       <h2 className="text-xl font-semibold text-balance text-foreground">
         Todavía no hay mediciones cargadas
       </h2>

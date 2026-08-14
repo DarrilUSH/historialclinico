@@ -38,7 +38,7 @@ export function SelectorPeriodoSigno({ periodo, onCambiar }: SelectorPeriodoSign
             aria-pressed={seleccionado}
             onClick={() => onCambiar(opcion)}
             className={cn(
-              "min-h-tactil flex-1 rounded-md px-4 text-base font-medium transition-colors sm:flex-none",
+              "min-h-tactil flex-1 rounded-md px-4 text-base font-medium transition-colors sm:flex-none chica:px-3",
               seleccionado
                 ? "bg-card text-foreground shadow-suave"
                 : "text-muted-foreground hover:text-foreground",

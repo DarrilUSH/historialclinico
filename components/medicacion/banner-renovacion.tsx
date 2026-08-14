@@ -84,7 +84,7 @@ export function BannerRenovacion({
           ? "Esta medicación tiene menos de 5 días de stock:"
           : `Estas ${medicaciones.length} medicaciones tienen menos de 5 días de stock:`}
       </p>
-      <ul className="mt-2 flex flex-col gap-1.5">
+      <ul className="mt-2 flex flex-col gap-1.5 chica:gap-1">
         {medicaciones.map((medicacion) => (
           <li key={medicacion.medicationId}>
             <Link

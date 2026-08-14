@@ -30,6 +30,7 @@ import { BotonExportar } from "@/components/signos/boton-exportar"
 import { EsqueletoGrafico } from "@/components/graficos/esqueleto-grafico"
 import { SelectorPeriodoSigno } from "@/components/signos/selector-periodo-signo"
 import { SelectorSignoTipo } from "@/components/signos/selector-signo-tipo"
+import type { Tamano } from "@/lib/densidad/tamano"
 import { parsearPeriodoSignos, type PeriodoSignos } from "@/lib/signos/periodo"
 import {
   construirSerieSigno,
@@ -50,9 +51,17 @@ export interface PanelHistorialSignosProps {
   umbrales: UmbralesSignos
   /** `?tipo=` inicial, para el deep link de una notificación (`/signos/enlace`) o de un favorito -si no viene o no es válido, arranca en "tension". */
   tipoInicial?: string
+  /** Modo de letra de la cuenta (Sprint 13), resuelto server-side en `page.tsx` y bajado hasta `GraficoSigno` para elegir el alto del gráfico sin detección en el cliente. */
+  tamano: Tamano
 }
 
-export function PanelHistorialSignos({ historial, alertas, umbrales, tipoInicial }: PanelHistorialSignosProps) {
+export function PanelHistorialSignos({
+  historial,
+  alertas,
+  umbrales,
+  tipoInicial,
+  tamano,
+}: PanelHistorialSignosProps) {
   const [tipo, setTipo] = React.useState<SignoTipo>(
     tipoInicial && (TIPOS_SIGNO as readonly string[]).includes(tipoInicial) ? (tipoInicial as SignoTipo) : "tension",
   )
@@ -75,16 +84,16 @@ export function PanelHistorialSignos({ historial, alertas, umbrales, tipoInicial
   )
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 chica:gap-3">
       <SelectorSignoTipo tipoSeleccionado={tipo} onSeleccionar={setTipo} tiposConDatos={tiposConDatos} />
 
-      <div className="flex flex-col gap-4 border-t border-borde-sutil pt-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 border-t border-borde-sutil pt-4 chica:gap-3 chica:pt-1.5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between chica:gap-2">
           <SelectorPeriodoSigno periodo={periodo} onCambiar={setPeriodo} />
           <BotonExportar tipo={tipo} periodo={periodo} />
         </div>
 
-        <GraficoSigno key={`${tipo}-${periodo}`} serie={serie} />
+        <GraficoSigno key={`${tipo}-${periodo}`} serie={serie} tamano={tamano} />
       </div>
     </div>
   )

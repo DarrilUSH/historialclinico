@@ -113,12 +113,12 @@ export default async function PaginaTurnos({
   const sinTurnos = listaProximos.length === 0 && listaPasados.length === 0
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <Suspense fallback={null}>
         <AvisoTurno />
       </Suspense>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 chica:gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">Turnos</h1>
         {activo.permisos.canUpload && <BotonNuevoTurno />}
       </div>
@@ -127,16 +127,16 @@ export default async function PaginaTurnos({
         <EstadoVacio puedeCargar={activo.permisos.canUpload} />
       ) : (
         <>
-          <section className="flex flex-col gap-3">
+          <section className="flex flex-col gap-3 chica:gap-2">
             <h2 className="text-sm font-semibold tracking-wide text-muted-foreground uppercase">
               Próximos
             </h2>
             {listaProximos.length === 0 ? (
-              <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground">
+              <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground chica:p-4">
                 No tenés turnos próximos.
               </p>
             ) : (
-              <ul className="flex flex-col gap-3">
+              <ul className="flex flex-col gap-3 chica:gap-2">
                 {listaProximos.map((turno) => (
                   <li key={turno.id}>
                     <TarjetaTurno turno={turno} puedeEditar={activo.permisos.canManage} ahora={ahora} />
@@ -148,7 +148,7 @@ export default async function PaginaTurnos({
 
           {listaPasados.length > 0 && (
             <SeccionPasados cantidad={listaPasados.length}>
-              <ul className="flex flex-col gap-3">
+              <ul className="flex flex-col gap-3 chica:gap-2">
                 {listaPasados.map((turno) => (
                   <li key={turno.id}>
                     <TarjetaTurno turno={turno} puedeEditar={activo.permisos.canManage} ahora={ahora} />
@@ -174,12 +174,12 @@ function BotonNuevoTurno() {
 
 function EstadoVacio({ puedeCargar }: { puedeCargar: boolean }) {
   return (
-    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center">
+    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center chica:gap-3 chica:py-8">
       <span
-        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-12"
         aria-hidden="true"
       >
-        <CalendarDaysIcon className="size-8" />
+        <CalendarDaysIcon className="size-8 chica:size-6" />
       </span>
       <h2 className="text-xl font-semibold text-balance text-foreground">
         Todavía no tenés turnos cargados

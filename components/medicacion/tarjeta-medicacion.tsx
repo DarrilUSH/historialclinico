@@ -28,6 +28,7 @@ import { Alerta } from "@/components/base/alerta"
 import { Tarjeta } from "@/components/base/tarjeta"
 import { AccionesMedicacionActiva, BotonReactivar } from "@/components/medicacion/acciones-medicacion"
 import { textoCantidadConUnidad } from "@/lib/medicacion/unidades"
+import { cn } from "@/lib/utils"
 import type { Database } from "@/types/database.types"
 
 type FilaVistaMedicacion = Database["public"]["Views"]["v_medicacion_estado"]["Row"]
@@ -67,11 +68,11 @@ function textoFrecuencia(
 function ChipsHorarios({ horarios }: { horarios: string[] | null }) {
   if (!horarios || horarios.length === 0) return null
   return (
-    <ul className="flex flex-wrap gap-1.5">
+    <ul className="flex flex-wrap gap-1.5 chica:gap-1">
       {horarios.map((hora) => (
         <li
           key={hora}
-          className="rounded-full bg-muted px-2.5 py-1 text-sm font-medium text-foreground"
+          className="rounded-full bg-muted px-2.5 py-1 text-sm font-medium text-foreground chica:px-2 chica:py-0.5 chica:text-xs"
         >
           {hora.slice(0, 5)}
         </li>
@@ -90,8 +91,8 @@ export function TarjetaMedicacionActiva({
   const dias = medicacion.dias_restantes
 
   return (
-    <Tarjeta className="gap-4 px-(--card-spacing)">
-      <div className="flex flex-col gap-1">
+    <Tarjeta className="gap-4 px-(--card-spacing) chica:gap-3">
+      <div className="flex flex-col gap-1 chica:gap-0.5">
         <div className="flex items-start justify-between gap-3">
           {/* h2 y no h3 (Sprint 11, auditoría a11y): el único h2 de
               `/medicacion` es "Tomas de hoy", que `SeccionTomasDeHoy` no
@@ -100,22 +101,34 @@ export function TarjetaMedicacionActiva({
               1.3.1). Como h2 la jerarquía cierra en los dos casos. */}
           <h2 className="text-lg font-semibold text-balance text-foreground">{medicacion.name}</h2>
           {!medicacion.vigente_hoy && (
-            <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
+            <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground chica:px-2 chica:py-0.5">
               No vigente hoy
             </span>
           )}
         </div>
+
+        {/* Droga + presentación: DOS líneas en grande. Chica (Sprint 13,
+            tarea 13.4) las combina en UNA sola separadas por " · " -mismo
+            patrón que `tarjeta-estudio.tsx` (Tanda 2): la versión larga se
+            oculta con `chica:hidden`, la combinada con `hidden chica:block`,
+            así que el dato aparece una sola vez por modo, nunca duplicado ni
+            perdido (docs/densidad.md §4 regla 5). */}
         {medicacion.active_ingredient && (
-          <p className="text-sm text-muted-foreground">{medicacion.active_ingredient}</p>
+          <p className="text-sm text-muted-foreground chica:hidden">{medicacion.active_ingredient}</p>
         )}
         {medicacion.presentation && (
-          <p className="text-sm text-muted-foreground">{medicacion.presentation}</p>
+          <p className="text-sm text-muted-foreground chica:hidden">{medicacion.presentation}</p>
+        )}
+        {(medicacion.active_ingredient || medicacion.presentation) && (
+          <p className="hidden text-sm text-muted-foreground chica:block">
+            {[medicacion.active_ingredient, medicacion.presentation].filter(Boolean).join(" · ")}
+          </p>
         )}
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2 chica:gap-1.5">
         <div className="flex items-center gap-2 text-base text-foreground">
-          <PillIcon className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <PillIcon className="size-5 shrink-0 text-muted-foreground chica:size-4" aria-hidden="true" />
           <span>
             {textoDosis(medicacion.dose_amount, medicacion.dose_unit)} —{" "}
             {textoFrecuencia(medicacion.frequency, medicacion.interval_hours)}
@@ -123,23 +136,28 @@ export function TarjetaMedicacionActiva({
         </div>
         {medicacion.frequency === "daily" && (
           <div className="flex items-center gap-2">
-            <AlarmClockIcon className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <AlarmClockIcon className="size-5 shrink-0 text-muted-foreground chica:size-4" aria-hidden="true" />
             <ChipsHorarios horarios={medicacion.schedule_times} />
           </div>
         )}
       </div>
 
       {/* Stock y días restantes: el dato prominente de la tarjeta (criterio de
-          aceptación del ROADMAP). */}
+          aceptación del ROADMAP). Chica combina el bloque de 2-3 líneas de
+          grande en UNA línea -ícono, cantidad disponible + fecha, badge de
+          "N días" al final-, sin sacar el aviso de renovación (dato clínico
+          accionable, no ayuda contextual: sigue visible entero en los dos
+          modos, regla 5 de docs/densidad.md §4). */}
       {medicacion.stock_units !== null ? (
         <div
-          className={
+          className={cn(
+            "flex flex-col gap-1 rounded-lg border px-4 py-3 chica:gap-1.5 chica:px-3 chica:py-2",
             medicacion.necesita_renovacion
-              ? "flex flex-col gap-1 rounded-lg border border-advertencia/40 bg-advertencia-suave px-4 py-3"
-              : "flex flex-col gap-1 rounded-lg border border-border bg-muted px-4 py-3"
-          }
+              ? "border-advertencia/40 bg-advertencia-suave"
+              : "border-border bg-muted",
+          )}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 chica:hidden">
             <PackageIcon
               className={
                 medicacion.necesita_renovacion
@@ -166,7 +184,7 @@ export function TarjetaMedicacionActiva({
               />
             )}
           </div>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground chica:hidden">
             {/* El adjetivo concuerda con la cantidad, igual que la unidad:
                 "1 comprimido disponible", "90 comprimidos disponibles". */}
             {textoDosis(medicacion.stock_units, medicacion.dose_unit)}{" "}
@@ -175,8 +193,39 @@ export function TarjetaMedicacionActiva({
               <> · se acaba el {formatearFecha(medicacion.fecha_estimada_fin)}</>
             )}
           </p>
+
+          {/* Chica: ícono + disponible/fecha + badge de días, en una sola fila. */}
+          <div className="hidden items-center gap-2 chica:flex">
+            <PackageIcon
+              className={cn(
+                "size-4 shrink-0",
+                medicacion.necesita_renovacion ? "text-advertencia-fuerte" : "text-muted-foreground",
+              )}
+              aria-hidden="true"
+            />
+            <span className="min-w-0 flex-1 text-sm text-foreground">
+              {textoDosis(medicacion.stock_units, medicacion.dose_unit)}{" "}
+              {medicacion.stock_units === 1 ? "disponible" : "disponibles"}
+              {medicacion.fecha_estimada_fin && (
+                <> · vence {formatearFecha(medicacion.fecha_estimada_fin)}</>
+              )}
+            </span>
+            {dias !== null && (
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold",
+                  medicacion.necesita_renovacion
+                    ? "bg-advertencia text-advertencia-foreground"
+                    : "bg-background text-foreground",
+                )}
+              >
+                {dias} {dias === 1 ? "día" : "días"}
+              </span>
+            )}
+          </div>
+
           {medicacion.necesita_renovacion && (
-            <p className="text-sm font-medium text-advertencia-fuerte">
+            <p className="text-sm font-medium text-advertencia-fuerte chica:text-xs">
               Quedan pocos días — conviene pedir la renovación de la receta.
             </p>
           )}
@@ -190,7 +239,7 @@ export function TarjetaMedicacionActiva({
       {medicacion.prescription_document_id && (
         <Link
           href={`/estudios/${medicacion.prescription_document_id}`}
-          className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm font-medium text-foreground transition-colors hover:bg-muted chica:px-3 chica:py-2"
         >
           <FileTextIcon className="size-4 shrink-0" aria-hidden="true" />
           Ver receta
@@ -212,8 +261,8 @@ export function TarjetaMedicacionSuspendida({
   puedeEditar: boolean
 }) {
   return (
-    <Tarjeta className="gap-3 px-(--card-spacing) opacity-80">
-      <div className="flex flex-col gap-1">
+    <Tarjeta className="gap-3 px-(--card-spacing) opacity-80 chica:gap-2">
+      <div className="flex flex-col gap-1 chica:gap-0.5">
         {/* Misma corrección de nivel que la tarjeta activa, para la sección
             colapsable "Suspendidas" (que es un <button>, no un encabezado). */}
         <h2 className="text-base font-semibold text-balance text-foreground">{medicacion.name}</h2>

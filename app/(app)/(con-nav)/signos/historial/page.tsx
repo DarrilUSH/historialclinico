@@ -32,6 +32,7 @@ import { ArrowLeftIcon } from "lucide-react"
 
 import { PanelHistorialSignos } from "@/components/signos/panel-historial-signos"
 import { requerirSesion } from "@/lib/auth/guardas"
+import { obtenerTamano } from "@/lib/densidad/servidor"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { obtenerAlertasDeSignos } from "@/lib/signos/alertas-historial"
 import { obtenerHistorialSigno, obtenerUmbralesDelPerfil } from "@/lib/signos/consultas"
@@ -58,18 +59,23 @@ export default async function PaginaHistorialSignos({
 
   const { supabase } = await requerirSesion({ desde: "/signos/historial" })
 
-  const [tension, glucemia, peso, alertas, umbrales] = await Promise.all([
+  const [tension, glucemia, peso, alertas, umbrales, tamano] = await Promise.all([
     obtenerHistorialSigno(supabase, activo.perfil.id, "tension"),
     obtenerHistorialSigno(supabase, activo.perfil.id, "glucemia"),
     obtenerHistorialSigno(supabase, activo.perfil.id, "peso"),
     obtenerAlertasDeSignos(supabase, activo.perfil.id),
     obtenerUmbralesDelPerfil(supabase, activo.perfil.id),
+    // Resuelto server-side (Sprint 13, tarea 13.4), mismo patrón que
+    // `estudios/tendencias/page.tsx` (Tanda 2): `GraficoSigno` necesita
+    // saber de entrada qué alto de gráfico pintar -260px en grande, 200px en
+    // chica- sin detección en el cliente ni salto de layout al montar.
+    obtenerTamano(),
   ])
 
   const historial: Record<SignoTipo, FilaVitalSignParaSerie[]> = { tension, glucemia, peso }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <Link
         href="/signos"
         className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -85,7 +91,13 @@ export default async function PaginaHistorialSignos({
         </p>
       </div>
 
-      <PanelHistorialSignos historial={historial} alertas={alertas} umbrales={umbrales} tipoInicial={tipoInicial} />
+      <PanelHistorialSignos
+        historial={historial}
+        alertas={alertas}
+        umbrales={umbrales}
+        tipoInicial={tipoInicial}
+        tamano={tamano}
+      />
     </div>
   )
 }

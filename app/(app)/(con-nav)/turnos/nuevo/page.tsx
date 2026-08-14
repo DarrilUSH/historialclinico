@@ -44,7 +44,7 @@ export default async function PaginaNuevoTurno() {
     .order("full_name", { ascending: true })
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <Link
         href="/turnos"
         className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"

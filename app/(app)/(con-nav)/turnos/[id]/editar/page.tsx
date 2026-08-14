@@ -95,7 +95,7 @@ export default async function PaginaEditarTurno({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <Link
         href="/turnos"
         className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -104,7 +104,7 @@ export default async function PaginaEditarTurno({
         Volver a turnos
       </Link>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 chica:gap-2">
         <div className="flex flex-col gap-1">
           <h1 className="text-2xl font-semibold tracking-tight text-balance">Editar turno</h1>
           <p className="text-base text-muted-foreground">{turno.specialty}</p>
@@ -112,7 +112,7 @@ export default async function PaginaEditarTurno({
         <BadgeEstadoTurno estado={turno.status} />
       </div>
 
-      <Tarjeta className="gap-3 px-(--card-spacing)">
+      <Tarjeta className="gap-3 px-(--card-spacing) chica:gap-2">
         <h2 className="text-base font-semibold text-foreground">Estado del turno</h2>
         <AccionesEstadoTurno turnoId={turno.id} estado={turno.status} />
       </Tarjeta>

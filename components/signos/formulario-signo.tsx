@@ -70,7 +70,7 @@ export function FormularioSigno({
 
       {tipo === "tension" ? (
         <>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
             <CampoNumero
               id="sistolica"
               label="Sistólica"
@@ -109,7 +109,7 @@ export function FormularioSigno({
         />
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
         <CampoTexto id="fecha" label="Fecha" type="date" required defaultValue={fechaInicial} max={fechaInicial} />
         <CampoTexto id="hora" label="Hora" type="time" required defaultValue={horaInicial} />
       </div>

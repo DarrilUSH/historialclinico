@@ -31,7 +31,7 @@ export function SeccionPasados({ cantidad, children }: SeccionPasadosProps) {
   const idContenido = "turnos-pasados-contenido"
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 chica:gap-2">
       <Boton
         type="button"
         variant="outline"
@@ -49,7 +49,7 @@ export function SeccionPasados({ cantidad, children }: SeccionPasadosProps) {
       </Boton>
 
       {abierto && (
-        <div id={idContenido} className="flex flex-col gap-3">
+        <div id={idContenido} className="flex flex-col gap-3 chica:gap-2">
           {children}
         </div>
       )}

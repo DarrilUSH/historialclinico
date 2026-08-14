@@ -120,8 +120,8 @@ export default async function PaginaMedicacion({
     }))
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 chica:gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">Medicación</h1>
         {activo.permisos.canUpload && <BotonAgregarMedicacion />}
       </div>
@@ -135,11 +135,11 @@ export default async function PaginaMedicacion({
           <SeccionTomasDeHoy tomas={tomasDeHoy} puedeRegistrar={activo.permisos.canUpload} />
 
           {listaActivas.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground">
+            <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground chica:p-4">
               No tenés medicación activa cargada.
             </p>
           ) : (
-            <ul className="flex flex-col gap-3">
+            <ul className="flex flex-col gap-3 chica:gap-2">
               {listaActivas.map((medicacion) => (
                 // El `id` es el destino de los links del banner; `scroll-mt`
                 // deja aire arriba para que la tarjeta no quede pegada al borde
@@ -160,7 +160,7 @@ export default async function PaginaMedicacion({
 
           {listaSuspendidas.length > 0 && (
             <SeccionSuspendidas cantidad={listaSuspendidas.length}>
-              <ul className="flex flex-col gap-3">
+              <ul className="flex flex-col gap-3 chica:gap-2">
                 {listaSuspendidas.map((medicacion) => (
                   <li key={medicacion.id}>
                     <TarjetaMedicacionSuspendida
@@ -189,12 +189,12 @@ function BotonAgregarMedicacion() {
 
 function EstadoVacio({ puedeCargar }: { puedeCargar: boolean }) {
   return (
-    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center">
+    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center chica:gap-3 chica:py-8">
       <span
-        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-12"
         aria-hidden="true"
       >
-        <PillBottleIcon className="size-8" />
+        <PillBottleIcon className="size-8 chica:size-6" />
       </span>
       <h2 className="text-xl font-semibold text-balance text-foreground">
         Todavía no hay medicación cargada

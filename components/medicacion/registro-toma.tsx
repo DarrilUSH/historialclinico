@@ -69,11 +69,11 @@ export function SeccionTomasDeHoy({
   if (tomas.length === 0) return null
 
   return (
-    <section className="flex flex-col gap-3" aria-labelledby="tomas-de-hoy-titulo">
+    <section className="flex flex-col gap-3 chica:gap-2" aria-labelledby="tomas-de-hoy-titulo">
       <h2 id="tomas-de-hoy-titulo" className="text-lg font-semibold tracking-tight text-foreground">
         Tomas de hoy
       </h2>
-      <ul className="flex flex-col gap-3">
+      <ul className="flex flex-col gap-3 chica:gap-2">
         {tomas.map((toma) => (
           <li key={toma.id}>
             <FilaToma toma={toma} puedeRegistrar={puedeRegistrar} />
@@ -89,16 +89,16 @@ function EstadoBadge({ toma }: { toma: TomaDeHoyVista }) {
 
   if (toma.status === "taken") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-exito-suave px-2.5 py-1 text-sm font-medium text-exito-fuerte">
-        <CheckIcon className="size-4 shrink-0" aria-hidden="true" />
+      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-exito-suave px-2.5 py-1 text-sm font-medium text-exito-fuerte chica:gap-1 chica:px-2 chica:py-0.5 chica:text-xs">
+        <CheckIcon className="size-4 shrink-0 chica:size-3.5" aria-hidden="true" />
         {texto}
       </span>
     )
   }
 
   return (
-    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-sm font-medium text-muted-foreground">
-      {toma.status === "pending" && <ClockIcon className="size-4 shrink-0" aria-hidden="true" />}
+    <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-sm font-medium text-muted-foreground chica:gap-1 chica:px-2 chica:py-0.5 chica:text-xs">
+      {toma.status === "pending" && <ClockIcon className="size-4 shrink-0 chica:size-3.5" aria-hidden="true" />}
       {texto}
     </span>
   )
@@ -112,14 +112,14 @@ function FilaToma({ toma, puedeRegistrar }: { toma: TomaDeHoyVista; puedeRegistr
   const [estadoRevertir, enviarRevertir] = useActionState(revertirToma, ESTADO_INICIAL)
 
   return (
-    <Tarjeta className="gap-3 px-(--card-spacing)">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2.5">
+    <Tarjeta className="gap-3 px-(--card-spacing) chica:gap-2">
+      <div className="flex items-start justify-between gap-3 chica:gap-2">
+        <div className="flex items-center gap-2.5 chica:gap-2">
           <span
-            className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+            className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-8"
             aria-hidden="true"
           >
-            <PillIcon className="size-4.5" />
+            <PillIcon className="size-4.5 chica:size-4" />
           </span>
           <div className="flex flex-col">
             <span className="text-base font-semibold text-foreground">{toma.medicationName}</span>

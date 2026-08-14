@@ -35,7 +35,7 @@ export interface SelectorSignoTipoProps {
 
 export function SelectorSignoTipo({ tipoSeleccionado, onSeleccionar, tiposConDatos }: SelectorSignoTipoProps) {
   return (
-    <div role="group" aria-label="Elegir signo vital" className="grid grid-cols-3 gap-2">
+    <div role="group" aria-label="Elegir signo vital" className="grid grid-cols-3 gap-2 chica:gap-1.5">
       {TIPOS_SIGNO.map((tipo) => {
         const seleccionado = tipo === tipoSeleccionado
         const Icono = ICONO_TIPO[tipo]
@@ -48,14 +48,14 @@ export function SelectorSignoTipo({ tipoSeleccionado, onSeleccionar, tiposConDat
             aria-label={tieneDatos ? undefined : `${ETIQUETA_TIPO[tipo]}, sin mediciones cargadas`}
             onClick={() => onSeleccionar(tipo)}
             className={cn(
-              "flex min-h-tactil flex-col items-center justify-center gap-1 rounded-xl border px-2 py-3 text-center text-sm font-medium transition-colors",
+              "flex min-h-tactil flex-col items-center justify-center gap-1 rounded-xl border px-2 py-3 text-center text-sm font-medium transition-colors chica:gap-0.5 chica:py-2 chica:text-xs",
               seleccionado
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-card text-foreground hover:bg-muted",
               !tieneDatos && !seleccionado && "opacity-60",
             )}
           >
-            <Icono className="size-5 shrink-0" aria-hidden="true" />
+            <Icono className="size-5 shrink-0 chica:size-4" aria-hidden="true" />
             {ETIQUETA_TIPO[tipo]}
           </button>
         )

@@ -78,6 +78,7 @@ import {
   camposAutocompletadosDesdeMedico,
   type MedicoParaAutocompletar,
 } from "@/lib/turnos/autocompletar-medico"
+import { cn } from "@/lib/utils"
 
 export type { MedicoParaAutocompletar }
 
@@ -184,46 +185,67 @@ export function FormularioTurno({
       {modo === "editar" && turnoId && <input type="hidden" name="turnoId" value={turnoId} />}
       <input type="hidden" name="doctorId" value={doctorId} />
 
-      <CampoTexto
-        id="especialidad"
-        label="Especialidad"
-        required
-        maxLength={100}
-        value={especialidad}
-        onChange={(evento) => setEspecialidad(evento.target.value)}
-        ayuda="Ej: Cardiología, Clínica médica, Oftalmología."
-      />
+      {/*
+        Chica (Sprint 13, tarea 13.4): "Especialidad" y el `<Select>` de
+        "Médico (opcional)" -cuando hay directorio cargado- pasan a una
+        grilla de 2 columnas. Son DOS elementos consecutivos en el DOM (el
+        `<Select>` ya venía justo después de "Especialidad"), así que
+        ponerlos lado a lado con CSS Grid no reordena nada: el orden de
+        lectura de un lector de pantalla sigue siendo el mismo que el orden
+        visual (fila 1: especialidad, médico). El grid solo se activa cuando
+        existe el `<Select>` -sin directorio, "Especialidad" sigue sola a
+        ancho completo, en los dos modos-, y el campo "Médico" de texto
+        libre (más abajo, para carga manual) se queda fuera de esta grilla:
+        pairarlo también exigiría mover el `<Select>` de lugar, cosa que
+        cambiaría el orden en TODOS los modos, no solo en chica.
+      */}
+      <div
+        className={cn(
+          "flex flex-col gap-5",
+          medicos.length > 0 && "chica:grid chica:grid-cols-2 chica:items-start chica:gap-3",
+        )}
+      >
+        <CampoTexto
+          id="especialidad"
+          label="Especialidad"
+          required
+          maxLength={100}
+          value={especialidad}
+          onChange={(evento) => setEspecialidad(evento.target.value)}
+          ayuda="Ej: Cardiología, Clínica médica, Oftalmología."
+        />
 
-      {medicos.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="medico-directorio-trigger">Médico (opcional)</Label>
-          <Select
-            items={[
-              { value: SENTINEL_NINGUN_MEDICO, label: "Ninguno" },
-              ...medicos.map((doctor) => ({ value: doctor.id, label: doctor.full_name })),
-            ]}
-            value={doctorId || SENTINEL_NINGUN_MEDICO}
-            onValueChange={elegirMedicoDelDirectorio}
-          >
-            <SelectTrigger id="medico-directorio-trigger" className="w-full">
-              <SelectValue placeholder="Elegir un médico de tu directorio" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={SENTINEL_NINGUN_MEDICO}>Ninguno</SelectItem>
-              {medicos.map((doctor) => (
-                <SelectItem key={doctor.id} value={doctor.id}>
-                  {doctor.full_name}
-                  {doctor.specialty ? ` — ${doctor.specialty}` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-sm text-muted-foreground">
-            Completa lo que esté vacío (nombre, especialidad, lugar y coordenadas si el médico las
-            tiene cargadas). No pisa lo que ya escribiste.
-          </p>
-        </div>
-      )}
+        {medicos.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="medico-directorio-trigger">Médico (opcional)</Label>
+            <Select
+              items={[
+                { value: SENTINEL_NINGUN_MEDICO, label: "Ninguno" },
+                ...medicos.map((doctor) => ({ value: doctor.id, label: doctor.full_name })),
+              ]}
+              value={doctorId || SENTINEL_NINGUN_MEDICO}
+              onValueChange={elegirMedicoDelDirectorio}
+            >
+              <SelectTrigger id="medico-directorio-trigger" className="w-full">
+                <SelectValue placeholder="Elegir un médico de tu directorio" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SENTINEL_NINGUN_MEDICO}>Ninguno</SelectItem>
+                {medicos.map((doctor) => (
+                  <SelectItem key={doctor.id} value={doctor.id}>
+                    {doctor.full_name}
+                    {doctor.specialty ? ` — ${doctor.specialty}` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground chica:hidden">
+              Completa lo que esté vacío (nombre, especialidad, lugar y coordenadas si el médico las
+              tiene cargadas). No pisa lo que ya escribiste.
+            </p>
+          </div>
+        )}
+      </div>
 
       <CampoTexto
         id="medico"
@@ -234,7 +256,7 @@ export function FormularioTurno({
         ayuda="Opcional. Podés elegirlo de tu directorio arriba o escribirlo directo."
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
         <CampoTexto
           id="fecha"
           label="Fecha"
@@ -277,7 +299,7 @@ export function FormularioTurno({
         </Boton>
 
         {mostrarCoordenadas && (
-          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-4">
+          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-4 chica:gap-2 chica:p-3">
             <a
               href={urlMaps}
               target="_blank"
@@ -287,11 +309,11 @@ export function FormularioTurno({
               <MapPinnedIcon className="size-4 shrink-0" aria-hidden="true" />
               Abrir en Google Maps para copiarlas
             </a>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground chica:hidden">
               Buscá el lugar, mantené el dedo (o el clic) sobre el punto en el mapa y copiá los
               números que aparecen. Pegalos acá abajo.
             </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
               <CampoNumero
                 id="latitud"
                 label="Latitud"

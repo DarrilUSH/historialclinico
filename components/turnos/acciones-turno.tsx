@@ -68,8 +68,19 @@ export function AccionesTurno({
     return null
   }
 
+  // Chica (Sprint 13, tarea 13.4): las tres acciones de arriba -Cómo llegar,
+  // Pedir viaje, Al calendario- pasan de columna completa a una FILA
+  // compacta (`chica:flex-row chica:flex-wrap`, cada una `chica:flex-1` para
+  // repartirse el ancho por partes iguales, según cuántas de las tres estén
+  // presentes). El DOM no se reordena -mismo criterio que
+  // `tarjeta-turno.tsx`-: es la MISMA lista de hijos, solo que en chica se
+  // acomodan en fila en vez de en columna. Los paneles expandibles (Uber/
+  // DiDi/Cabify, Google Calendar/.ics) siguen colgando debajo de su propio
+  // botón disparador, ahora dentro de una columna más angosta -texto corto,
+  // sin truncar-, y el aviso "Sin coordenadas" se fuerza a su propia línea
+  // completa (`chica:basis-full`) para no competir por ancho con los botones.
   return (
-    <div className="space-y-2 pt-2 border-t border-border">
+    <div className="flex flex-col gap-2 pt-2 border-t border-border chica:flex-row chica:flex-wrap chica:items-start">
       {/* Cómo llegar */}
       {tieneMapas && (
         <Boton
@@ -77,28 +88,28 @@ export function AccionesTurno({
           nativeButton={false}
           variant="secondary"
           size="sm"
-          className="w-full justify-start"
+          className="w-full justify-start chica:min-w-[30%] chica:flex-1 chica:justify-center chica:px-2 chica:text-xs"
         >
-          <MapPinIcon className="size-4 mr-2" aria-hidden="true" />
+          <MapPinIcon className="size-4 mr-2 chica:mr-1.5 chica:size-4" aria-hidden="true" />
           Cómo llegar
         </Boton>
       )}
 
       {/* Pedir viaje: expandible con opciones */}
       {tieneViajes && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2 chica:min-w-[30%] chica:flex-1">
           <Boton
             onClick={() => setExpandidoViaje(!expandidoViaje)}
             variant="secondary"
             size="sm"
-            className="w-full justify-between"
+            className="w-full justify-between chica:justify-center chica:gap-1 chica:px-2 chica:text-xs"
           >
             <span className="flex items-center">
-              <CarIcon className="size-4 mr-2" aria-hidden="true" />
+              <CarIcon className="size-4 mr-2 chica:mr-1.5 chica:size-4" aria-hidden="true" />
               Pedir viaje
             </span>
             <ChevronDownIcon
-              className={`size-4 transition-transform ${expandidoViaje ? "rotate-180" : ""}`}
+              className={`size-4 transition-transform chica:size-3.5 ${expandidoViaje ? "rotate-180" : ""}`}
               aria-hidden="true"
             />
           </Boton>
@@ -150,26 +161,26 @@ export function AccionesTurno({
 
       {/* Sin coordenadas: explicación */}
       {!tieneViajes && !latitude && !longitude && (
-        <p className="text-xs text-muted-foreground px-2 py-1">
+        <p className="text-xs text-muted-foreground px-2 py-1 chica:basis-full">
           Cargá las coordenadas del lugar para pedir un viaje
         </p>
       )}
 
       {/* Agregar al calendario: expandible */}
       {tieneCalendario && (
-        <div className="space-y-2">
+        <div className="flex flex-col gap-2 chica:min-w-[30%] chica:flex-1">
           <Boton
             onClick={() => setExpandidoCalendario(!expandidoCalendario)}
             variant="secondary"
             size="sm"
-            className="w-full justify-between"
+            className="w-full justify-between chica:justify-center chica:gap-1 chica:px-2 chica:text-xs"
           >
             <span className="flex items-center">
-              <CalendarIcon className="size-4 mr-2" aria-hidden="true" />
+              <CalendarIcon className="size-4 mr-2 chica:mr-1.5 chica:size-4" aria-hidden="true" />
               Al calendario
             </span>
             <ChevronDownIcon
-              className={`size-4 transition-transform ${expandidoCalendario ? "rotate-180" : ""}`}
+              className={`size-4 transition-transform chica:size-3.5 ${expandidoCalendario ? "rotate-180" : ""}`}
               aria-hidden="true"
             />
           </Boton>

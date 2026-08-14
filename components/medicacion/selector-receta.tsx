@@ -62,7 +62,7 @@ export function SelectorReceta({
   const error = estadoAsociar.error ?? estadoDesasociar.error
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4">
+    <div className="flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-4 chica:gap-2 chica:p-3">
       <Label className="text-base font-semibold">Receta asociada</Label>
 
       {error && <Alerta variante="error">{error}</Alerta>}
@@ -70,7 +70,7 @@ export function SelectorReceta({
       {recetaActualId ? (
         /* Receta ya asociada: muestra título + botón "Quitar" */
         <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between rounded-lg bg-background p-3">
+          <div className="flex items-center justify-between rounded-lg bg-background p-3 chica:p-2.5">
             <div className="flex flex-col gap-1">
               <p className="text-sm font-medium text-foreground">{recetaActualTitulo}</p>
               <Link

@@ -61,6 +61,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
 
 export type FrecuenciaMedicacion = "daily" | "interval_hours" | "as_needed"
 
@@ -138,7 +139,7 @@ export function FormularioMedicacion({
         ayuda='Opcional. Ej: "Comprimidos 850 mg", "Solución 100 mg/ml".'
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
         <CampoNumero
           id="dosisCantidad"
           label="Dosis por toma"
@@ -157,41 +158,58 @@ export function FormularioMedicacion({
         />
       </div>
 
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="frecuencia-trigger">Frecuencia</Label>
-        <Select
-          items={OPCIONES_FRECUENCIA}
-          value={frecuencia}
-          onValueChange={(valor) => setFrecuencia(valor as FrecuenciaMedicacion)}
-        >
-          <SelectTrigger id="frecuencia-trigger" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {OPCIONES_FRECUENCIA.map((opcion) => (
-              <SelectItem key={opcion.value} value={opcion.value}>
-                {opcion.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {/* El valor real que lee `crearMedicacion`/`actualizarMedicacion`: el `<Select>` de arriba es pura UI. */}
-        <input type="hidden" name="frecuencia" value={frecuencia} />
+      {/*
+        Chica (Sprint 13, tarea 13.4): "Frecuencia" y "Cada cuántas horas"
+        pasan a una grilla de 2 columnas SOLO cuando ese es el campo que
+        sigue (`frecuencia === "interval_hours"`) -son dos elementos
+        consecutivos en el DOM en ese caso, así que no hay reordenamiento-.
+        Con "Todos los días" el campo siguiente es `CampoHorarios` (una UI
+        compuesta de input+chips que necesita el ancho completo) y con
+        "Cuando lo necesite" es una `<Alerta>`: en esos dos casos el
+        `<Select>` se queda solo, a ancho completo, en los dos modos.
+      */}
+      <div
+        className={cn(
+          "flex flex-col gap-5",
+          frecuencia === "interval_hours" && "chica:grid chica:grid-cols-2 chica:items-start chica:gap-3",
+        )}
+      >
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="frecuencia-trigger">Frecuencia</Label>
+          <Select
+            items={OPCIONES_FRECUENCIA}
+            value={frecuencia}
+            onValueChange={(valor) => setFrecuencia(valor as FrecuenciaMedicacion)}
+          >
+            <SelectTrigger id="frecuencia-trigger" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {OPCIONES_FRECUENCIA.map((opcion) => (
+                <SelectItem key={opcion.value} value={opcion.value}>
+                  {opcion.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {/* El valor real que lee `crearMedicacion`/`actualizarMedicacion`: el `<Select>` de arriba es pura UI. */}
+          <input type="hidden" name="frecuencia" value={frecuencia} />
+        </div>
+
+        {frecuencia === "interval_hours" && (
+          <CampoNumero
+            id="intervaloHoras"
+            label="Cada cuántas horas"
+            required
+            defaultValue={valoresIniciales?.intervaloHoras}
+            sufijo="hs"
+            ayuda="De 1 a 24."
+          />
+        )}
       </div>
 
       {frecuencia === "daily" && (
         <CampoHorarios horarios={horarios} onCambiar={setHorarios} />
-      )}
-
-      {frecuencia === "interval_hours" && (
-        <CampoNumero
-          id="intervaloHoras"
-          label="Cada cuántas horas"
-          required
-          defaultValue={valoresIniciales?.intervaloHoras}
-          sufijo="hs"
-          ayuda="De 1 a 24."
-        />
       )}
 
       {frecuencia === "as_needed" && (
@@ -201,7 +219,7 @@ export function FormularioMedicacion({
         </Alerta>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
         <CampoTexto
           id="fechaInicio"
           label="Fecha de inicio"
@@ -320,7 +338,7 @@ function CampoHorarios({
     <div className="flex flex-col gap-2">
       <Label htmlFor="horario-nuevo">Horarios</Label>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 chica:gap-1.5">
         <input
           id="horario-nuevo"
           ref={campoHoraRef}
@@ -346,23 +364,26 @@ function CampoHorarios({
       </div>
 
       {horarios.length > 0 ? (
-        <ul className="flex flex-wrap gap-2">
+        <ul className="flex flex-wrap gap-2 chica:gap-1.5">
           {horarios.map((hora) => (
             <li key={hora}>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 py-1.5 pr-1.5 pl-3.5 text-base font-medium text-primary">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 py-1.5 pr-1.5 pl-3.5 text-base font-medium text-primary chica:py-1 chica:pl-3 chica:text-sm">
                 {hora}
                 <input type="hidden" name="horarios" value={hora} />
-                {/* `size-9` (40px) en vez de `size-6` (27px): el aspa medía
-                    menos que el mínimo táctil y es el control que más se falla
-                    con temblor o dedo grueso. El chip crece apenas porque el
-                    padding derecho baja de `pr-2` a `pr-1.5`. */}
+                {/* `size-9` (40px en grande) en vez de `size-6` (27px): el
+                    aspa medía menos que el mínimo táctil y es el control que
+                    más se falla con temblor o dedo grueso. El chip crece
+                    apenas porque el padding derecho baja de `pr-2` a
+                    `pr-1.5`. Chica: `size-9` computa a 36px con la escala de
+                    espaciado compacta (Sprint 13) -por debajo del piso-, así
+                    que se fija en `chica:size-10` (40px exacto, el piso). */}
                 <button
                   type="button"
                   onClick={() => quitar(hora)}
                   aria-label={`Quitar el horario ${hora}`}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/20 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/20 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none chica:size-10"
                 >
-                  <XIcon className="size-4.5" aria-hidden="true" />
+                  <XIcon className="size-4.5 chica:size-4" aria-hidden="true" />
                 </button>
               </span>
             </li>

@@ -60,6 +60,7 @@ import {
 
 import { Tarjeta } from "@/components/base/tarjeta"
 import { puntosRombo, puntosTriangulo } from "@/components/graficos/formas-punto"
+import type { Tamano } from "@/lib/densidad/tamano"
 import { ZONA_HORARIA_TURNOS } from "@/lib/turnos/fecha"
 import { formatearFechaLargaTurno, formatearHoraTurno } from "@/lib/turnos/formato"
 import type { PuntoSerieSigno, SerieSigno } from "@/lib/signos/series"
@@ -68,10 +69,19 @@ import { cn } from "@/lib/utils"
 
 export interface GraficoSignoProps {
   serie: SerieSigno
+  /**
+   * Modo de letra de la cuenta (Sprint 13, tarea 13.4), resuelto server-side
+   * en `signos/historial/page.tsx` y bajado por props hasta acá -Recharts
+   * pide un alto NUMÉRICO en píxeles, así que no hay un token CSS que lo
+   * resuelva solo-. Mismo patrón que `components/estudios/grafico-metrica.tsx`
+   * (Tanda 2). Default `"grande"` para los consumidores de test que no lo pasan.
+   */
+  tamano?: Tamano
   className?: string
 }
 
-const ALTURA_GRAFICO = 260
+/** Alto del gráfico por densidad. `260` es el valor original (grande, sin cambios); `200` es la reducción de la tarea 13.4 -el contenedor se achica, Recharts se adapta solo vía `ResponsiveContainer`/`width`/`height` explícitos-. */
+const ALTURA_GRAFICO_POR_TAMANO: Record<Tamano, number> = { grande: 260, chica: 200 }
 /** Mismo umbral y proporciones que `grafico-metrica.tsx`: por encima de esta cantidad de puntos el gráfico scrollea horizontalmente ADENTRO de su propio contenedor, nunca la página. */
 const UMBRAL_SCROLL_PUNTOS = 8
 const ANCHO_POR_PUNTO_PX = 64
@@ -173,7 +183,8 @@ function construirAriaLabelSigno(serie: SerieSigno): string {
   return `Evolución de ${etiqueta}: ${textoMediciones}${textoFuera}.`
 }
 
-export function GraficoSigno({ serie, className }: GraficoSignoProps) {
+export function GraficoSigno({ serie, tamano = "grande", className }: GraficoSignoProps) {
+  const alturaGrafico = ALTURA_GRAFICO_POR_TAMANO[tamano]
   const cantidadPuntos = serie.tipo === "tension" ? serie.sistolica.length : serie.puntos.length
 
   const [indiceSeleccionado, setIndiceSeleccionado] = React.useState(Math.max(0, cantidadPuntos - 1))
@@ -198,7 +209,12 @@ export function GraficoSigno({ serie, className }: GraficoSignoProps) {
 
         <div role="img" aria-label={construirAriaLabelSigno(serie)}>
           <div aria-hidden="true">
-            <CuerpoGrafico serie={serie} indiceSeleccionado={indice} onSeleccionar={setIndiceSeleccionado} />
+            <CuerpoGrafico
+              serie={serie}
+              indiceSeleccionado={indice}
+              onSeleccionar={setIndiceSeleccionado}
+              alturaGrafico={alturaGrafico}
+            />
           </div>
         </div>
 
@@ -241,10 +257,12 @@ function CuerpoGrafico({
   serie,
   indiceSeleccionado,
   onSeleccionar,
+  alturaGrafico,
 }: {
   serie: SerieSigno
   indiceSeleccionado: number
   onSeleccionar: (indice: number) => void
+  alturaGrafico: number
 }) {
   if (serie.tipo === "tension") {
     const datos: RegistroTension[] = serie.sistolica.map((puntoSistolica, i) => ({
@@ -316,7 +334,7 @@ function CuerpoGrafico({
     )
 
     return (
-      <ContenedorGrafico necesitaScroll={necesitaScroll} anchoPx={anchoPx} datos={datos}>
+      <ContenedorGrafico necesitaScroll={necesitaScroll} anchoPx={anchoPx} datos={datos} alturaGrafico={alturaGrafico}>
         {contenido}
       </ContenedorGrafico>
     )
@@ -364,7 +382,7 @@ function CuerpoGrafico({
   )
 
   return (
-    <ContenedorGrafico necesitaScroll={necesitaScroll} anchoPx={anchoPx} datos={datos}>
+    <ContenedorGrafico necesitaScroll={necesitaScroll} anchoPx={anchoPx} datos={datos} alturaGrafico={alturaGrafico}>
       {contenido}
     </ContenedorGrafico>
   )
@@ -374,24 +392,26 @@ function ContenedorGrafico({
   necesitaScroll,
   anchoPx,
   datos,
+  alturaGrafico,
   children,
 }: {
   necesitaScroll: boolean
   anchoPx: number
   datos: readonly unknown[]
+  alturaGrafico: number
   children: React.ReactNode
 }) {
   if (necesitaScroll) {
     return (
       <div className="overflow-x-auto overscroll-x-contain rounded-lg" data-testid="grafico-scroll">
-        <LineChart width={anchoPx} height={ALTURA_GRAFICO} data={datos as object[]} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
+        <LineChart width={anchoPx} height={alturaGrafico} data={datos as object[]} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
           {children}
         </LineChart>
       </div>
     )
   }
   return (
-    <ResponsiveContainer width="100%" height={ALTURA_GRAFICO}>
+    <ResponsiveContainer width="100%" height={alturaGrafico}>
       <LineChart data={datos as object[]} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
         {children}
       </LineChart>

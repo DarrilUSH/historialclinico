@@ -22,13 +22,13 @@ export function BadgeEstadoTurno({
   return (
     <span
       className={cn(
-        "inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold",
+        "inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1 text-sm font-semibold chica:gap-1 chica:px-2 chica:py-0.5 chica:text-xs",
         info.claseFondo,
         info.claseTexto,
         className,
       )}
     >
-      <Icono className="size-4 shrink-0" aria-hidden="true" />
+      <Icono className="size-4 shrink-0 chica:size-3.5" aria-hidden="true" />
       {info.etiqueta}
     </span>
   )
