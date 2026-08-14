@@ -87,8 +87,8 @@ export default async function PaginaHistorialFichas() {
   const filasSin = fichas ?? []
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6">
-      <div className="flex items-center gap-3">
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:px-3 chica:py-4">
+      <div className="flex items-center gap-3 chica:gap-2">
         <Boton
           render={<Link href="/ficha" aria-label="Volver a la ficha" />}
           nativeButton={false}
@@ -101,7 +101,7 @@ export default async function PaginaHistorialFichas() {
       </div>
 
       {filasSin.length === 0 ? (
-        <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-6">
+        <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-6 chica:gap-3 chica:p-4">
           <p className="text-base text-muted-foreground">
             Todavía no generaste ninguna ficha. Generá una para llevar a tus consultas médicas.
           </p>
@@ -110,7 +110,7 @@ export default async function PaginaHistorialFichas() {
           </Boton>
         </div>
       ) : (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 chica:gap-1.5">
           {filasSin.map((fila) => {
             // Quién generó la ficha: "vos" si es el actor actual, o el nombre.
             const generadoPor =
@@ -122,15 +122,27 @@ export default async function PaginaHistorialFichas() {
               <Link
                 key={fila.id}
                 href={`/ficha/historial/${fila.id}`}
-                className="group flex items-center justify-between gap-4 rounded-lg border border-border bg-card p-4 transition-colors hover:bg-accent"
+                className="group flex items-center justify-between gap-4 rounded-lg border border-border bg-card p-4 transition-colors hover:bg-accent chica:gap-3 chica:p-3"
               >
-                <div className="flex flex-1 flex-col gap-1">
-                  <p className="text-sm font-medium text-muted-foreground">{formatearFecha(fila.created_at)}</p>
-                  <p className="text-sm text-muted-foreground">Generada por {generadoPor}</p>
+                {/* Fecha + quién: DOS líneas en grande. Chica (Sprint 13,
+                    tarea 13.6) las combina en UNA con " · " -mismo patrón que
+                    `components/medicos/tarjeta-medico.tsx` (Tanda 4): las
+                    líneas separadas se ocultan con `chica:hidden`, la
+                    combinada aparece con `hidden chica:block`. */}
+                <div className="flex flex-1 flex-col gap-1 chica:gap-0.5">
+                  <p className="text-sm font-medium text-muted-foreground chica:hidden">
+                    {formatearFecha(fila.created_at)}
+                  </p>
+                  <p className="text-sm text-muted-foreground chica:hidden">Generada por {generadoPor}</p>
+                  <p className="hidden text-sm text-muted-foreground chica:block">
+                    <span className="font-medium">{formatearFecha(fila.created_at)}</span>
+                    {" · Generada por "}
+                    {generadoPor}
+                  </p>
                 </div>
                 <ChevronRightIcon
                   aria-hidden="true"
-                  className="h-5 w-5 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                  className="h-5 w-5 chica:shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
                 />
               </Link>
             )

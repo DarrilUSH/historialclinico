@@ -146,8 +146,8 @@ export default async function PaginaCompartir({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8">
-      <div className="flex flex-col gap-2">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8 chica:gap-4 chica:px-3 chica:py-5">
+      <div className="flex flex-col gap-2 chica:gap-1">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">Recibimos un archivo</h1>
         <p className="text-base text-muted-foreground">
           Elegí a quién le corresponde este documento. Después de elegir, lo vamos a leer
@@ -159,24 +159,28 @@ export default async function PaginaCompartir({
         <Alerta variante="error">{mensajeErrorCompartido(errorParam)}</Alerta>
       )}
 
-      <Tarjeta className="flex-row items-center gap-4">
+      <Tarjeta className="flex-row items-center gap-4 chica:gap-3">
         {previewUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- signed URL de vida corta, no un asset que next/image pueda optimizar
           <img
             src={previewUrl}
             alt={`Vista previa de ${fila.original_filename}`}
-            className="size-20 shrink-0 rounded-lg border border-border object-cover"
+            className="size-20 shrink-0 rounded-lg border border-border object-cover chica:size-14"
           />
         ) : (
           <span
-            className="flex size-20 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground"
+            className="flex size-20 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground chica:size-14"
             aria-hidden="true"
           >
-            {esImagen(fila.mime_type) ? <ImageIcon className="size-8" /> : <FileTextIcon className="size-8" />}
+            {esImagen(fila.mime_type) ? (
+              <ImageIcon className="size-8 chica:size-6" />
+            ) : (
+              <FileTextIcon className="size-8 chica:size-6" />
+            )}
           </span>
         )}
 
-        <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex min-w-0 flex-col gap-1 chica:gap-0.5">
           <p className="truncate text-base font-semibold text-foreground">{fila.original_filename}</p>
           <p className="text-base text-muted-foreground numeros-clinicos">
             {etiquetaMime(fila.mime_type)} · {formatearBytes(fila.file_size_bytes)}
@@ -184,7 +188,7 @@ export default async function PaginaCompartir({
         </div>
       </Tarjeta>
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 chica:gap-2">
         <h2 className="text-lg font-semibold text-foreground">¿A quién le corresponde?</h2>
         <SelectorDestino archivoId={fila.id} perfiles={perfilesDestino} />
       </div>
@@ -198,12 +202,12 @@ export default async function PaginaCompartir({
 
 function PantallaSinArchivo({ mensajeError }: { mensajeError: string | null }) {
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-4 px-4 py-12 text-center chica:gap-3 chica:py-8">
       <span
-        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground chica:size-12"
         aria-hidden="true"
       >
-        {mensajeError ? <InboxIcon className="size-8" /> : <ShareIcon className="size-8" />}
+        {mensajeError ? <InboxIcon className="size-8 chica:size-6" /> : <ShareIcon className="size-8 chica:size-6" />}
       </span>
 
       <h1 className="text-2xl font-semibold tracking-tight text-balance">

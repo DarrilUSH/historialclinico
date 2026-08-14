@@ -24,7 +24,7 @@ export default async function PaginaLogin({
   const destino = destinoSeguro(parametros.desde)
 
   return (
-    <div className="flex w-full max-w-md flex-col gap-4">
+    <div className="flex w-full max-w-md flex-col gap-4 chica:gap-3">
       {/* Llegar acá significa que este dispositivo no tiene sesión —por logout
           o porque venció—, así que la copia offline de la ficha de salud que
           haya quedado guardada se borra. No pinta nada. Ver
@@ -34,18 +34,23 @@ export default async function PaginaLogin({
       {contrasenaRecuperada && (
         <p
           role="status"
-          className="rounded-lg border border-exito/40 bg-exito-suave px-4 py-3 text-base font-medium text-exito-fuerte"
+          className="rounded-lg border border-exito/40 bg-exito-suave px-4 py-3 text-base font-medium text-exito-fuerte chica:px-3 chica:py-2"
         >
-          Tu contraseña se actualizó correctamente. Iniciá sesión con la nueva contraseña.
+          Tu contraseña se actualizó correctamente.{" "}
+          {/* Chica (Sprint 13, tarea 13.6): la instrucción es redundante en
+              esta pantalla -ya estás en el login, no hace falta decírtelo-,
+              así que queda como ayuda contextual que se oculta en compacto. */}
+          <span className="chica:hidden">Iniciá sesión con la nueva contraseña.</span>
         </p>
       )}
 
       {destino && !contrasenaRecuperada && (
         <p
           role="status"
-          className="rounded-lg border border-border bg-muted px-4 py-3 text-base font-medium"
+          className="rounded-lg border border-border bg-muted px-4 py-3 text-base font-medium chica:px-3 chica:py-2"
         >
-          Para ver esa página necesitás iniciar sesión. Después te llevamos ahí.
+          Para ver esa página necesitás iniciar sesión.{" "}
+          <span className="chica:hidden">Después te llevamos ahí.</span>
         </p>
       )}
 
@@ -70,7 +75,7 @@ export default async function PaginaLogin({
           },
         ]}
         pie={
-          <div className="flex flex-col items-center gap-3 text-base">
+          <div className="flex flex-col items-center gap-3 text-base chica:gap-2">
             <Link
               href="/recuperar"
               className="font-medium text-primary underline-offset-4 hover:underline"

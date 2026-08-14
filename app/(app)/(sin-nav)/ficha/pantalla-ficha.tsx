@@ -123,8 +123,14 @@ export function PantallaFicha({ nombreCompleto, edadAnios }: PantallaFichaProps)
 
   if (estado === "lista" && ficha && fechaGeneracion) {
     return (
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col gap-3 sm:flex-row print:hidden">
+      // `not-print:chica:` en el wrapper (Sprint 13, tarea 13.6): comparte
+      // árbol con el PDF -ver el comentario de cabecera de
+      // `components/ficha/hoja-consulta.tsx`-. Los tres bloques con
+      // `print:hidden` de acá abajo (botones, avisos) ya quedan completamente
+      // afuera del PDF por esa clase sola, así que ahí sí alcanza con
+      // `chica:` a secas.
+      <div className="flex flex-col gap-6 not-print:chica:gap-4">
+        <div className="flex flex-col gap-3 chica:gap-2 sm:flex-row print:hidden">
           <Boton onClick={imprimir} size="lg" className="sm:flex-1">
             <PrinterIcon aria-hidden="true" />
             Imprimir
@@ -153,7 +159,7 @@ export function PantallaFicha({ nombreCompleto, edadAnios }: PantallaFichaProps)
           fechaGeneracion={fechaGeneracion}
         />
 
-        <div className="flex flex-col gap-2 print:hidden">
+        <div className="flex flex-col gap-2 chica:gap-1.5 print:hidden">
           <Boton
             onClick={() => {
               setEstado("inicial")
@@ -179,7 +185,7 @@ export function PantallaFicha({ nombreCompleto, edadAnios }: PantallaFichaProps)
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5 chica:gap-4">
       <p className="text-base text-muted-foreground">
         Armamos una hoja de una página con tus antecedentes, medicación y estudios recientes, lista
         para llevar o mostrar en la consulta. La redacta una inteligencia artificial a partir de tus
@@ -195,11 +201,22 @@ export function PantallaFicha({ nombreCompleto, edadAnios }: PantallaFichaProps)
         que documenta §5 es justamente esta: avisar ANTES de generar, no
         sanitizar después con heurísticas que romperían contenido clínico
         legítimo.
+
+        Chica (Sprint 13, tarea 13.6): la frase de advertencia en sí queda
+        siempre entera -es la que importa para tomar la decisión de generar o
+        no-, y solo el ejemplo entre paréntesis y la explicación técnica de
+        "por qué" se ocultan con `chica:hidden`. Nada clínico se pierde: es
+        ayuda contextual, el mismo criterio que ya usa
+        `components/documentos/cargador-documento.tsx` con las bajadas de las
+        tarjetas de "Sacar foto"/"Elegir de la galería".
       */}
       <Alerta variante="advertencia">
         Antes de generar, revisá que los títulos de tus estudios y tus notas no tengan datos que no
-        quieras compartir con un servicio externo (por ejemplo, un nombre escrito adentro del título
-        de un estudio): ese texto viaja tal cual para redactar el resumen.
+        quieras compartir con un servicio externo.{" "}
+        <span className="chica:hidden">
+          (Por ejemplo, un nombre escrito adentro del título de un estudio): ese texto viaja tal
+          cual para redactar el resumen.
+        </span>
       </Alerta>
 
       {estado === "error" && error && <Alerta variante="error">{error}</Alerta>}
@@ -207,7 +224,7 @@ export function PantallaFicha({ nombreCompleto, edadAnios }: PantallaFichaProps)
       {estado === "generando" ? (
         <div
           role="status"
-          className="flex flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card px-4 py-10 text-center"
+          className="flex flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card px-4 py-10 text-center chica:gap-2 chica:py-6"
         >
           <Loader2Icon className="size-8 animate-spin text-primary" aria-hidden="true" />
           <p className="text-lg font-semibold text-foreground">Generando tu ficha…</p>

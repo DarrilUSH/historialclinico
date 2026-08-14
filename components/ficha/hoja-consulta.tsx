@@ -22,11 +22,35 @@
  * Este componente no importa ningún CSS: la clase raíz `hoja-consulta` (y las
  * clases hijas `hoja-consulta-titulo`, `hoja-consulta-aviso`,
  * `hoja-consulta-notas-linea`) son el selector que usa
- * `app/(app)/(sin-nav)/ficha/ficha.print.css` -que importa `page.tsx`- para
- * las reglas de impresión (tamaño de fuente compacto, colores forzados a
- * negro sobre blanco). Server Component puro, sin estado ni efectos: puede
- * vivir sin problema dentro del árbol de un Client Component
- * (`pantalla-ficha.tsx`) sin forzar un límite de hidratación nuevo.
+ * `app/(app)/(sin-nav)/ficha/ficha.print.css` -que importan tanto `page.tsx`
+ * como `historial/[id]/page.tsx`, las dos pantallas que renderizan esta hoja
+ * con su propio botón "Imprimir"- para las reglas de impresión (tamaño de
+ * fuente compacto, colores forzados a negro sobre blanco). Server Component
+ * puro, sin estado ni efectos: puede vivir sin problema dentro del árbol de
+ * un Client Component (`pantalla-ficha.tsx`) sin forzar un límite de
+ * hidratación nuevo.
+ *
+ * ## Modo chica (Sprint 13, tarea 13.6): `not-print:chica:`, nunca `chica:` a secas
+ *
+ * Esta hoja se renderiza en pantalla Y en el PDF con exactamente el mismo
+ * árbol -no hay dos componentes-, así que cualquier clase `chica:` que se le
+ * agregara acá aplicaría TAMBIÉN al imprimir (el atributo
+ * `data-tamano="chica"` del `<html>` sigue puesto, `window.print()` no lo
+ * borra). Eso rompería el criterio "el PDF sale igual desde grande y desde
+ * chica" (`ficha.print.css` fuerza los TOKENS de vuelta a los valores de
+ * grande, pero un `gap-3` explícito en vez de `gap-5` seguiría siendo un
+ * multiplicador distinto sobre ese mismo token, y print no tiene forma de
+ * saber que "en realidad" quería decir `gap-5`).
+ *
+ * La salida: `not-print:chica:*` en vez de `chica:*`. Tailwind 4 envuelve
+ * `not-print:` en `@media not print`, que sencillamente no matchea cuando el
+ * navegador imprime -sin pelear por especificidad con nada, a diferencia de
+ * intentarlo con `print:` a secas (ver el comentario de `ficha.print.css`
+ * sobre por qué esa combinación necesitaría `!important` para ganar)-. Las
+ * pocas secciones que si se aprietan en pantalla (gaps del artículo, padding
+ * de la cabecera y del bloque de notas) usan ese prefijo. El resto de la
+ * densidad -tamaños de texto, el resto del espaciado- ya sale gratis de los
+ * tokens (`docs/densidad.md` §5) y por eso no necesita ninguna clase acá.
  */
 
 import type { FichaGenerada } from "@/lib/gemini/schemas"
@@ -42,8 +66,8 @@ export interface HojaConsultaProps {
 
 export function HojaConsulta({ ficha, nombreCompleto, edadAnios, fechaGeneracion }: HojaConsultaProps) {
   return (
-    <article className="hoja-consulta mx-auto flex w-full max-w-[210mm] flex-col gap-5 rounded-2xl bg-card p-6 text-card-foreground shadow-suave ring-1 ring-border sm:p-8">
-      <header className="flex flex-col gap-1 border-b border-borde-sutil pb-4 text-center">
+    <article className="hoja-consulta mx-auto flex w-full max-w-[210mm] flex-col gap-5 rounded-2xl bg-card p-6 text-card-foreground shadow-suave ring-1 ring-border not-print:chica:gap-3 not-print:chica:p-4 sm:p-8 not-print:chica:sm:p-5">
+      <header className="flex flex-col gap-1 border-b border-borde-sutil pb-4 text-center not-print:chica:pb-3">
         <h1 className="hoja-consulta-titulo text-2xl font-bold tracking-tight text-balance sm:text-3xl">
           {nombreCompleto}
         </h1>
@@ -82,7 +106,7 @@ export function HojaConsulta({ ficha, nombreCompleto, edadAnios, fechaGeneracion
         {ficha.aviso}
       </p>
 
-      <section className="flex flex-col gap-3 pt-2">
+      <section className="flex flex-col gap-3 pt-2 not-print:chica:gap-2 not-print:chica:pt-1.5">
         <h2 className="hoja-consulta-titulo text-sm font-semibold text-muted-foreground">
           Notas del médico
         </h2>

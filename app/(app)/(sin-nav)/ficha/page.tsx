@@ -82,8 +82,12 @@ export default async function PaginaFicha() {
   const { perfil } = activo
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 print:max-w-none print:gap-0 print:p-0">
-      <div className="flex items-center gap-3 print:hidden">
+    // `not-print:chica:` y no `chica:` (Sprint 13, tarea 13.6): este árbol es
+    // el mismo que ve `window.print()` -ver el comentario de
+    // `components/ficha/hoja-consulta.tsx`-, así que cualquier ajuste de
+    // densidad que no deba filtrarse al PDF necesita ese prefijo.
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 not-print:chica:gap-4 not-print:chica:px-3 not-print:chica:py-4 print:max-w-none print:gap-0 print:p-0">
+      <div className="flex items-center gap-3 not-print:chica:gap-2 print:hidden">
         <Boton
           render={<Link href="/inicio" aria-label="Volver a Inicio" />}
           nativeButton={false}

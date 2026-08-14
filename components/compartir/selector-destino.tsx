@@ -18,6 +18,12 @@
  * Server Component puro: no hace falta estado de cliente, cada tarjeta ya es
  * un formulario nativo con su propia Server Action bindeada
  * (`elegirPerfilParaCompartido.bind(null, archivoId, perfil.id)`).
+ *
+ * ## Modo chica (Sprint 13, tarea 13.6)
+ *
+ * Mismo patrón que `components/perfiles/selector-perfiles.tsx` (Tanda 1):
+ * tarjetas más chicas -menos padding, avatar más chico- sin sacar el nombre
+ * ni el badge de relación, que siguen completos.
  */
 
 import type { ReactNode } from "react"
@@ -53,7 +59,7 @@ export function SelectorDestino({ archivoId, perfiles }: SelectorDestinoProps) {
   }
 
   return (
-    <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2">
+    <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 chica:gap-3">
       {perfiles.map(({ perfil, esPropio, canManage }) => (
         <form key={perfil.id} action={elegirPerfilParaCompartido.bind(null, archivoId, perfil.id)}>
           <TarjetaDestino perfil={perfil} esPropio={esPropio} canManage={canManage} />
@@ -73,11 +79,16 @@ function TarjetaDestino({ perfil, esPropio, canManage }: PerfilDestino) {
         "hover:-translate-y-0.5 hover:border-primary hover:shadow-elevada",
         "active:translate-y-0 active:scale-[0.99]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        // Modo chica (Sprint 13, tarea 13.6): mismo criterio que
+        // `components/perfiles/selector-perfiles.tsx` -menos padding, avatar
+        // más chico-, para que el selector de destino entre más compacto.
+        "chica:gap-3 chica:p-3",
       )}
     >
       <span
         className={cn(
           "flex size-14 shrink-0 items-center justify-center rounded-full text-xl font-semibold text-avatar-foreground",
+          "chica:size-11 chica:text-base",
           colorAvatarPara(perfil.id),
         )}
         aria-hidden="true"
@@ -85,8 +96,10 @@ function TarjetaDestino({ perfil, esPropio, canManage }: PerfilDestino) {
         {inicialesDe(perfil.full_name)}
       </span>
 
-      <div className="flex min-w-0 flex-col gap-1">
-        <span className="truncate text-lg font-semibold text-foreground">{perfil.full_name}</span>
+      <div className="flex min-w-0 flex-col gap-1 chica:gap-0.5">
+        <span className="truncate text-lg font-semibold text-foreground chica:text-base">
+          {perfil.full_name}
+        </span>
         <BadgeRelacion esPropio={esPropio} canManage={canManage} />
       </div>
     </button>

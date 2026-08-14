@@ -5,12 +5,27 @@
  *
  * Si el content no pasa la validación (ficha vieja con schema antiguo),
  * muestra un mensaje claro pero no la desecha: es historia.
+ *
+ * ## El import de `ficha.print.css` faltaba (encontrado en la tarea 13.6)
+ *
+ * Esta pantalla tiene su propio botón "Imprimir" (`./boton-imprimir.tsx`)
+ * desde que se escribió, pero nunca importó
+ * `app/(app)/(sin-nav)/ficha/ficha.print.css` -ese import es local al módulo
+ * de `../../page.tsx` (`/ficha`), y Next.js no lo arrastra a una ruta
+ * hermana solo porque comparten el componente `HojaConsulta`-. El resultado:
+ * imprimir una ficha GUARDADA sacaba la tarjeta tal cual se ve en pantalla
+ * -bordes redondeados, sombra, colores del tema activo, sin el tamaño de
+ * fuente A4- en vez de la hoja print-safe que sí produce `/ficha`. Se
+ * encontró recién ahora porque abrir una ficha guardada requiere haber
+ * generado una antes (cuota de Gemini), así que nadie había ejercitado este
+ * botón en un dispositivo real todavía. Import agregado, mismo criterio que
+ * `page.tsx`.
  */
 
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { ArrowLeftIcon, PrinterIcon } from "lucide-react"
+import { ArrowLeftIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
 import { Alerta } from "@/components/base/alerta"
@@ -19,6 +34,9 @@ import { createClient } from "@/lib/supabase/server"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { calcularEdad } from "@/lib/perfiles/edad"
 import { validarFichaGenerada } from "@/lib/gemini/schemas"
+
+import { BotonImprimir } from "./boton-imprimir"
+import "../../ficha.print.css"
 
 
 export const metadata = {
@@ -113,13 +131,12 @@ export default async function PaginaFichaHistorial({ params }: PaginaFichaHistor
   const fichaValidada = validacion.datos
   const fechaFormateada = formatearFechaDetalle(ficha.created_at)
 
-  function imprimir() {
-    window.print()
-  }
-
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 print:max-w-none print:gap-0 print:p-0">
-      <div className="flex items-center gap-3 print:hidden">
+    // `not-print:chica:` en vez de `chica:` (Sprint 13, tarea 13.6): mismo
+    // motivo que `app/(app)/(sin-nav)/ficha/page.tsx` -este árbol también
+    // contiene la `HojaConsulta` que se imprime-.
+    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6 not-print:chica:gap-4 not-print:chica:px-3 not-print:chica:py-4 print:max-w-none print:gap-0 print:p-0">
+      <div className="flex items-center gap-3 not-print:chica:gap-2 print:hidden">
         <Boton
           render={<Link href="/ficha/historial" aria-label="Volver al historial" />}
           nativeButton={false}
@@ -132,10 +149,7 @@ export default async function PaginaFichaHistorial({ params }: PaginaFichaHistor
       </div>
 
       <div className="flex gap-3 sm:flex-row print:hidden">
-        <Boton onClick={imprimir} size="lg" className="sm:flex-1">
-          <PrinterIcon aria-hidden="true" />
-          Imprimir
-        </Boton>
+        <BotonImprimir />
       </div>
 
       <HojaConsulta

@@ -7,6 +7,14 @@
  * (`useActionState`), el estado de carga del botón (`useFormStatus`) y las
  * reglas de Senior UX (labels siempre visibles, campos grandes, error en
  * texto además de color).
+ *
+ * ## Modo chica (Sprint 13, tarea 13.6)
+ *
+ * La tarjeta en sí ya se achica sola -`Card` (`components/ui/card.tsx`) arma
+ * su padding con `--card-spacing`, un múltiplo del token `--spacing` que
+ * `app/globals.css` §5 redefine en compacta-, así que acá solo hace falta
+ * apretar los gaps EXPLÍCITOS entre campos y entre el botón y el pie, que
+ * son estructura y no salen gratis de ningún token.
  */
 
 import * as React from "react"
@@ -87,7 +95,7 @@ export function FormularioAuth({
         </CardContent>
       ) : (
         <form action={enviarAccion} noValidate>
-          <CardContent className="flex flex-col gap-5">
+          <CardContent className="flex flex-col gap-5 chica:gap-3">
             {camposOcultos &&
               Object.entries(camposOcultos).map(([nombre, valor]) => (
                 <input key={nombre} type="hidden" name={nombre} value={valor} />
@@ -114,7 +122,7 @@ export function FormularioAuth({
             )}
           </CardContent>
 
-          <CardFooter className="flex flex-col items-stretch gap-4">
+          <CardFooter className="flex flex-col items-stretch gap-4 chica:gap-3">
             <BotonEnviar>{textoBoton}</BotonEnviar>
             {pie}
           </CardFooter>
@@ -122,7 +130,7 @@ export function FormularioAuth({
       )}
 
       {huboExito && pie && (
-        <CardFooter className="flex flex-col items-stretch gap-4">{pie}</CardFooter>
+        <CardFooter className="flex flex-col items-stretch gap-4 chica:gap-3">{pie}</CardFooter>
       )}
     </Card>
   )

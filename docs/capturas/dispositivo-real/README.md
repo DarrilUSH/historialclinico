@@ -44,8 +44,35 @@ Samsung Galaxy A71 (SM-A715F), Android 13, Chrome — 2026-08-13, vía ADB (`adb
 | sprint13-t4-chica-coberturas.png | `/coberturas` (tarea 13.5) en CHICA, dispositivo real: la tarjeta de PAMI — Pensionados combina plan + N.º de afiliado en una sola línea ("Cobertura integral · Afiliado 2890154780", antes 2 líneas separadas), con el badge "Principal" y las miniaturas de credencial más chicas lado a lado |
 | sprint13-t4-chica-medicos.png | `/medicos` en CHICA, dispositivo real: las dos tarjetas del directorio combinan especialidad + matrícula + institución en una sola línea, con "Llamar"/"Cómo llegar" en fila compacta (medidos 49,5px de alto por CDP, ver más abajo) |
 | sprint13-t4-chica-sos.png | `/sos` (ficha de emergencia) en CHICA, dispositivo real: el grupo sanguíneo "O+" sigue siendo, por lejos, el texto más grande de la pantalla (44px medidos, contra 26px del nombre) pese a la tarjeta más compacta (`py-6` → `py-4`) |
+| sprint13-t5-chica-ficha.png | `/ficha` (tarea 13.6, Tanda 5 — LA ÚLTIMA) en CHICA, dispositivo real: el aviso de minimización quedó recortado a la frase esencial ("...no quieras compartir con un servicio externo.", sin el ejemplo entre paréntesis ni la explicación técnica, ocultos con `chica:hidden`) y "Generar ficha" sigue siendo un botón grande y de un solo toque |
+| sprint13-t5-chica-login.png | `/login` en CHICA, dispositivo real, **sin sesión** (logout real por CDP y re-login por CDP para no arriesgar el password manager del dueño del equipo): confirma que las pantallas pre-sesión sí heredan el modo compacto de la cookie `tamano` -sin necesitar `profiles.display_density`, que no existe todavía para quien no inició sesión- tal como predice `curl -b tamano=chica http://localhost:3000/login` (`data-tamano="chica"` en el HTML) |
 
 Flujo verificado con toques e ingreso de texto reales por ADB: login de María → selección del perfil gestionado de Roberto → inicio. El camino de error (submit vacío) también se verificó en pantalla física.
+
+## Sprint 13 · tarea 13.6 — Tanda 5 (LA ÚLTIMA): ficha, compartir, offline y auth compactos — verificación completa
+
+**2026-08-14.** Cierra el rediseño del modo de letra chica: ficha de consulta (pantalla + hoja imprimible), historial de fichas, recepción de Web Share Target, `/offline` y las cuatro pantallas de autenticación.
+
+**Regla de oro** verificada por auditoría de diff (no por stash, para no interrumpir el dev server con capturas en curso): cada línea agregada en los doce archivos tocados se revisó una por una, y las únicas que NO llevan `chica:` o `not-print:chica:` son comentarios, imports, o la extracción del botón "Imprimir" a un Client Component (mismo JSX, mismas clases, cero cambio visual). Un `shrink-0` sin prefijo que se había colado en `ficha/historial/page.tsx` se corrigió a `chica:shrink-0` antes de cerrar la tanda.
+
+**CRÍTICO — el PDF de la hoja de consulta sale igual desde grande y desde chica.** Se encontró un bug real preexistente en el camino: `html[data-tamano="chica"]` (`app/globals.css` §5) redefine `--spacing` y `--text-*`, y esos tokens siguen activos al imprimir porque `window.print()` no borra el atributo del `<html>`. Sin corrección, el mismo PDF salía con OTRA tipografía según el modo de quien lo generaba. Se agregó un bloque en `ficha.print.css` que fuerza esos tokens (más `--radius`) de vuelta a los valores de grande, con `!important`, dentro de `@media print`. Verificado con Playwright real (Chromium 1.62.1, instalado ad hoc para esta tanda) contra `/ficha/historial/[id]` con una ficha de PRUEBA insertada por SQL directo (el fixture válido de `tests/unit/ficha-schema.test.ts`, **sin tocar Gemini**), sesión real (login + selección de perfil), cookie `tamano` alternada entre corridas:
+
+```
+grande: 75528 bytes, 1 página — chica: 75525 bytes, 1 página
+grep -a -o "/Count [0-9]*" hoja-consulta-grande.pdf  →  /Count 1
+grep -a -o "/Count [0-9]*" hoja-consulta-chica.pdf   →  /Count 1
+```
+
+Los dos PDF quedaron a 3 bytes de diferencia (metadata interna, no contenido) y las capturas rasterizadas bajo `emulateMedia('print')` de las dos corridas son visualmente indistinguibles. `components/ficha/hoja-consulta.tsx` en sí no lleva ninguna clase `chica:` -la densidad en pantalla sale de los tokens gratis, más unos pocos `not-print:chica:` en el `<article>` y sus dos secciones internas, que Tailwind 4 envuelve en `@media not print` y por lo tanto no compiten en especificidad con nada del PDF-.
+
+**Dos bugs preexistentes encontrados y corregidos al verificar** (ninguno tocaba densidad, los dos bloqueaban la verificación de esta tanda en `/ficha/historial/[id]`, así que se arreglaron para poder cerrar el criterio de aceptación):
+
+1. `imprimir()` estaba declarada DENTRO del Server Component y pasada como `onClick` a un `<Boton>` (Client Component) → "Event handlers cannot be passed to Client Components", 500 en dev. Nunca se había ejercitado porque abrir una ficha guardada exige haber generado una antes (cuota de Gemini). Se extrajo a `./boton-imprimir.tsx`, mismo patrón que `components/compartir/boton-descartar.tsx`.
+2. La pantalla nunca importaba `ficha.print.css` -ese import es local al módulo de `../../page.tsx`, Next no lo arrastra a una ruta hermana-, así que su botón "Imprimir" sacaba la tarjeta tal cual se ve en pantalla (bordes redondeados, sombra, colores del tema) en vez de la hoja print-safe. Import agregado.
+
+**Capturas en el dispositivo real** (Samsung Galaxy A71, `adb reverse tcp:3000 tcp:3000`): `sprint13-t5-chica-ficha.png` y `sprint13-t5-chica-login.png` (fila de la tabla de arriba). El logout/login de `/login` se hizo por CDP (`adb forward tcp:9222 localabstract:chrome_devtools_remote` + `Runtime.evaluate` disparando `form.requestSubmit()`) en vez de tocar la pantalla a mano, para no repetir la lucha contra la hoja del password manager de Chrome documentada más abajo en este archivo -y con éxito: apareció igual al reloguear, y se descartó con BACK, nunca con "Guardar", tal como exige la receta-.
+
+**Suites completas, sprint cerrado:** `node scripts/verificar-contraste.mjs` → **196/196 PASS, 0 fallas** (4 combinaciones tema × densidad); `npx tsc --noEmit` limpio; `npm run test` → **733/733 tests**; `npm run build` → build de producción exitoso, 44 rutas; `npx eslint .` sobre el proyecto completo, limpio; `scripts/test-rls.sql` → **266/266 PASS, 0 FAIL**; `scripts/test-storage-rls.sh` → **27/27 PASS**. Ninguna de las dos últimas dependía de código tocado en esta tanda, pero se corrieron igual por ser el cierre del sprint -la primera corrida dio 265/266 por una fila de `profiles` que había quedado en `chica` de una sesión manual de prueba anterior, sin relación con el código; se restauró el default `grande` y volvió a dar 266/266-. Toda la ficha de prueba y la fila de `shared_uploads_temp` sembradas para las capturas de esta tanda se borraron al cerrar; ninguna quedó en la base.
 
 ## Sprint 13 · tarea 13.2 — Tanda 1: shell, inicio y navegación compactos — verificación completa
 

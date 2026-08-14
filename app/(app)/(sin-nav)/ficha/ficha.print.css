@@ -1,11 +1,14 @@
 /**
  * Estilos de impresión de la hoja de consulta (Sprint 10, tarea 10.4).
  *
- * CSS global importado por `page.tsx` (ver el comentario de ese archivo sobre
- * por qué un import "global" acá es seguro): todo selector va calificado bajo
- * `.hoja-consulta` -la raíz de `components/ficha/hoja-consulta.tsx`- para no
- * filtrar ninguna regla a otra pantalla de la app, aunque Next.js empaquete
- * este archivo junto con el resto de los estilos.
+ * CSS global importado por `page.tsx` y, desde la tarea 13.6, también por
+ * `historial/[id]/page.tsx` -las DOS rutas que renderizan
+ * `components/ficha/hoja-consulta.tsx` y tienen su propio botón "Imprimir"-
+ * (ver el comentario de `page.tsx` sobre por qué un import "global" acá es
+ * seguro): todo selector va calificado bajo `.hoja-consulta` -la raíz de
+ * `components/ficha/hoja-consulta.tsx`- para no filtrar ninguna regla a otra
+ * pantalla de la app, aunque Next.js empaquete este archivo junto con el
+ * resto de los estilos.
  *
  * ## Por qué acá SÍ hay colores literales (`#000`, `#fff`)
  *
@@ -40,6 +43,38 @@
  * obra social, la letra de cualquier receta médica de papel), y es lo que
  * permite que el contenido típico del seed -seis secciones, preguntas y
  * aviso- entre en una sola hoja A4 sin recortar nada.
+ *
+ * ## Neutralización de la densidad (Sprint 13, tarea 13.6)
+ *
+ * `components/ficha/hoja-consulta.tsx` usa utilidades de Tailwind
+ * (`gap-5`, `text-2xl`, `h-6`...) que resuelven contra los tokens de
+ * `app/globals.css` §5 -`--spacing`, `--text-*`, `--radius`-, y esos tokens
+ * cambian de valor según `html[data-tamano="chica"]` esté presente o no. Ese
+ * atributo NO se borra al imprimir -imprimir no toca el DOM-, así que sin
+ * este bloque la hoja impresa desde el modo chico saldría con OTRA
+ * tipografía y OTRO espaciado que la impresa desde el modo grande (por
+ * ejemplo, `text-2xl` son 28px en grande contra 23px en chica: el título
+ * cambiaría de tamaño en el PDF según el modo de quien lo generó, algo que
+ * no tiene ningún sentido en una hoja pensada para el médico, no para quien
+ * imprime).
+ *
+ * Se fuerzan acá, con `!important`, los valores del modo GRANDE -los únicos
+ * que se afinaron para entrar en una sola A4 (tarea 10.4)- para los DOS
+ * modos. Especificidad, no alcanza: `html[data-tamano="chica"]` (0-1-1) le
+ * gana a un `html` sin atributo (0-1-0) aunque este bloque esté después en el
+ * archivo, exactamente la misma trampa que documenta `docs/densidad.md` §6.
+ * `!important` es la salida que ya usa este archivo un poco más abajo
+ * (`background: #fff !important`) por el mismo motivo.
+ *
+ * `components/ficha/hoja-consulta.tsx` en sí NO lleva ninguna clase `chica:`
+ * -ver el comentario de su encabezado-, así que ya imprime igual en los dos
+ * modos con solo este bloque. Los pocos ajustes de densidad que sí tocan esa
+ * pantalla (`app/(app)/(sin-nav)/ficha/page.tsx`,
+ * `app/(app)/(sin-nav)/ficha/pantalla-ficha.tsx`) usan `not-print:chica:` en
+ * vez de `chica:` a secas, así que quedan afuera incluso de esta hoja: la
+ * variante `not-print` de Tailwind 4 envuelve la regla en
+ * `@media not print`, que directamente no aplica al imprimir, sin competir
+ * en especificidad con nada.
  */
 
 @media print {
@@ -51,6 +86,27 @@
   html,
   body {
     background: #fff !important;
+  }
+
+  html {
+    --spacing: 0.25rem !important;
+    --text-xs: 0.8889rem !important;
+    --text-xs--line-height: 1.5 !important;
+    --text-sm: 0.9444rem !important;
+    --text-sm--line-height: 1.55 !important;
+    --text-base: 1rem !important;
+    --text-base--line-height: 1.6 !important;
+    --text-lg: 1.1667rem !important;
+    --text-lg--line-height: 1.55 !important;
+    --text-xl: 1.3333rem !important;
+    --text-xl--line-height: 1.4 !important;
+    --text-2xl: 1.5556rem !important;
+    --text-2xl--line-height: 1.3 !important;
+    --text-3xl: 1.7778rem !important;
+    --text-3xl--line-height: 1.22 !important;
+    --text-4xl: 2.1667rem !important;
+    --text-4xl--line-height: 1.15 !important;
+    --radius: 0.75rem !important;
   }
 
   /* Ver el bloque de arriba: escala TODA la tipografía y el espaciado de la
