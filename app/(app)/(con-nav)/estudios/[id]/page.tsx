@@ -131,20 +131,20 @@ export default async function PaginaDetalleEstudio({
   const Icono = info.Icono
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <BotonVolverEstudios />
 
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col gap-2 chica:gap-1.5">
+        <div className="flex items-center gap-2 chica:gap-1.5">
           <span
             className={cn(
-              "flex size-8 shrink-0 items-center justify-center rounded-full",
+              "flex size-8 shrink-0 items-center justify-center rounded-full chica:size-7",
               info.claseFondo,
               info.claseTexto,
             )}
             aria-hidden="true"
           >
-            <Icono className="size-4" />
+            <Icono className="size-4 chica:size-3.5" />
           </span>
           <span className={cn("text-sm font-semibold", info.claseTexto)}>{info.etiqueta}</span>
         </div>
@@ -164,7 +164,11 @@ export default async function PaginaDetalleEstudio({
 
       <Tarjeta className="gap-3 px-(--card-spacing)">
         <h2 className="text-base font-semibold text-foreground">Datos del estudio</h2>
-        <dl className="flex flex-col gap-2">
+        {/* Chica (Sprint 13, tarea 13.3): grilla compacta de 2 columnas -cada
+            `FilaDato` pasa de fila "etiqueta ... valor" a columna "etiqueta
+            / valor", que es lo que entra sin apretar un dato largo
+            (institución, médico) contra su etiqueta en una columna de ~170px-. */}
+        <dl className="flex flex-col gap-2 chica:grid chica:grid-cols-2 chica:gap-x-4 chica:gap-y-3">
           <FilaDato etiqueta="Institución" valor={documento.institution} />
           <FilaDato etiqueta="Especialidad" valor={documento.specialty} />
           <FilaDato etiqueta="Médico" valor={documento.doctor_name} />
@@ -258,9 +262,9 @@ export default async function PaginaDetalleEstudio({
 function FilaDato({ etiqueta, valor }: { etiqueta: string; valor: string | null }) {
   if (!valor) return null
   return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-border pb-2 text-base last:border-0 last:pb-0">
-      <dt className="text-muted-foreground">{etiqueta}</dt>
-      <dd className="text-right font-medium text-balance text-foreground">{valor}</dd>
+    <div className="flex items-baseline justify-between gap-3 border-b border-border pb-2 text-base last:border-0 last:pb-0 chica:flex-col chica:items-start chica:gap-0.5 chica:border-0 chica:pb-0">
+      <dt className="text-muted-foreground chica:text-sm">{etiqueta}</dt>
+      <dd className="text-right font-medium text-balance text-foreground chica:text-left">{valor}</dd>
     </div>
   )
 }

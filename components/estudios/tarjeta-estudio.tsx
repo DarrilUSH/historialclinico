@@ -52,32 +52,57 @@ export function TarjetaEstudio({ documento }: { documento: DocumentoDeGaleria })
       href={`/estudios/${documento.id}`}
       className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "px-(--card-spacing)")}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-3 chica:gap-2">
         <span
           className={cn(
-            "flex size-11 shrink-0 items-center justify-center rounded-full",
+            "flex size-11 shrink-0 items-center justify-center rounded-full chica:size-9",
             info.claseFondo,
             info.claseTexto,
           )}
           aria-hidden="true"
         >
-          <Icono className="size-5" />
+          <Icono className="size-5 chica:size-4" />
         </span>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className={cn("text-sm font-medium", info.claseTexto)}>{info.etiqueta}</span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1 chica:gap-0.5">
+          {/* Grande: 4 líneas -categoría, título, fecha+institución, resumen-.
+              Chica (Sprint 13, tarea 13.3): la categoría y la fecha+institución
+              se combinan en UNA línea para que la tarjeta ocupe menos alto
+              -título + metadatos + resumen, tres líneas en vez de cuatro-. Es
+              una segunda representación de los MISMOS tres datos (categoría,
+              fecha, institución), no un truco de `order` que reordenaría el
+              árbol para lectores de pantalla: la versión larga se oculta en
+              chica (`chica:hidden`) y la combinada se oculta en grande
+              (`hidden chica:block`), así que en cualquier modo dado la
+              información completa aparece una sola vez, nunca duplicada ni
+              perdida (docs/densidad.md §4 regla 5). */}
+          <span className={cn("text-sm font-medium chica:hidden", info.claseTexto)}>
+            {info.etiqueta}
+          </span>
 
           <span className="text-lg font-semibold text-balance text-foreground">
             {documento.title}
           </span>
 
-          <span className="text-base text-muted-foreground numeros-clinicos">
+          <span className="text-base text-muted-foreground numeros-clinicos chica:hidden">
+            {formatearFechaCorta(documento.document_date)}
+            {documento.institution ? ` · ${documento.institution}` : ""}
+          </span>
+
+          {/* `chica:block` a propósito, no `chica:flex`: como flujo de texto
+              normal, si "· fecha · institución" no entra en una línea se
+              recorta a la izquierda del bloque completo (como cualquier
+              párrafo), en vez del sangrado colgante que deja un `flex-row`
+              cuando uno de los dos ítems envuelve a dos líneas. */}
+          <span className="hidden chica:block chica:text-sm text-muted-foreground chica:numeros-clinicos">
+            <span className={cn("font-medium", info.claseTexto)}>{info.etiqueta}</span>
+            {" · "}
             {formatearFechaCorta(documento.document_date)}
             {documento.institution ? ` · ${documento.institution}` : ""}
           </span>
 
           {documento.ai_summary && (
-            <span className="line-clamp-2 text-base text-muted-foreground">
+            <span className="line-clamp-2 text-base text-muted-foreground chica:line-clamp-1">
               {documento.ai_summary}
             </span>
           )}

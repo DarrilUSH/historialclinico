@@ -27,6 +27,8 @@ import { PanelTendencias } from "@/components/estudios/panel-tendencias"
 import { SelectorPeriodo } from "@/components/estudios/selector-periodo"
 import { Skeleton } from "@/components/ui/skeleton"
 import { requerirSesion } from "@/lib/auth/guardas"
+import { obtenerTamano } from "@/lib/densidad/servidor"
+import type { Tamano } from "@/lib/densidad/tamano"
 import { parsearPeriodo } from "@/lib/laboratorio/periodo"
 import { obtenerSeries } from "@/lib/laboratorio/series"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
@@ -48,9 +50,14 @@ export default async function PaginaTendencias({
 
   const { periodo: periodoCrudo } = await searchParams
   const periodo = parsearPeriodo(periodoCrudo)
+  // Resuelto server-side (mismo helper que ya usa el layout raíz para
+  // `data-tamano`) para que `GraficoMetrica` sepa qué alto de gráfico pintar
+  // -260px en grande, 200px en chica- desde el primer render, sin detección
+  // en el cliente ni salto de layout al montar.
+  const tamano = await obtenerTamano()
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <BotonVolverEstudios />
 
       <div className="flex flex-col gap-1">
@@ -63,7 +70,7 @@ export default async function PaginaTendencias({
       <SelectorPeriodo />
 
       <Suspense key={periodo} fallback={<EsqueletoTendencias />}>
-        <ContenidoTendencias perfilId={activo.perfil.id} periodo={periodo} />
+        <ContenidoTendencias perfilId={activo.perfil.id} periodo={periodo} tamano={tamano} />
       </Suspense>
     </div>
   )
@@ -72,9 +79,11 @@ export default async function PaginaTendencias({
 async function ContenidoTendencias({
   perfilId,
   periodo,
+  tamano,
 }: {
   perfilId: string
   periodo: ReturnType<typeof parsearPeriodo>
+  tamano: Tamano
 }) {
   const { supabase } = await requerirSesion({ desde: "/estudios/tendencias" })
   const { series, metricasDisponibles } = await obtenerSeries(supabase, perfilId, periodo)
@@ -83,7 +92,7 @@ async function ContenidoTendencias({
     return <EstadoVacioTendencias periodo={periodo} />
   }
 
-  return <PanelTendencias series={series} metricasDisponibles={metricasDisponibles} />
+  return <PanelTendencias series={series} metricasDisponibles={metricasDisponibles} tamano={tamano} />
 }
 
 function EstadoVacioTendencias({ periodo }: { periodo: ReturnType<typeof parsearPeriodo> }) {

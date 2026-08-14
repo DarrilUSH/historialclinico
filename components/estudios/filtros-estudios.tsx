@@ -199,8 +199,12 @@ export function FiltrosEstudios({ instituciones }: FiltrosEstudiosProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+    <div className="flex flex-col gap-3 chica:gap-2">
+      {/* Chica (Sprint 13, tarea 13.3): buscador + micrófono + "Filtrar" en
+          una sola línea apretada, reutilizando el mismo layout de fila que ya
+          usa `sm:` -acá disparado por el modo compacto en vez de por el
+          ancho de pantalla, así que ya viene probado-. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end chica:flex-row chica:items-end chica:gap-2">
         <CampoTexto
           id="buscador-estudios"
           label="Buscar"
@@ -222,10 +226,10 @@ export function FiltrosEstudios({ instituciones }: FiltrosEstudiosProps) {
               ? `Filtrar (${cantidadPanel} ${cantidadPanel === 1 ? "filtro activo" : "filtros activos"})`
               : "Filtrar"
           }
-          className="inline-flex min-h-tactil shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-base font-medium text-foreground transition-colors hover:bg-muted sm:hidden"
+          className="inline-flex min-h-tactil shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-base font-medium text-foreground transition-colors hover:bg-muted sm:hidden chica:px-3"
         >
           <FilterIcon className="size-5" aria-hidden="true" />
-          Filtrar
+          <span className="chica:hidden">Filtrar</span>
           {cantidadPanel > 0 && (
             <span
               aria-hidden="true"
@@ -240,7 +244,7 @@ export function FiltrosEstudios({ instituciones }: FiltrosEstudiosProps) {
       <div
         id="panel-filtros-estudios"
         className={cn(
-          "flex-col gap-3 sm:flex sm:flex-row sm:flex-wrap sm:items-end",
+          "flex-col gap-3 sm:flex sm:flex-row sm:flex-wrap sm:items-end chica:gap-2",
           abierto ? "flex" : "hidden",
         )}
       >

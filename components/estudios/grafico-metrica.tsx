@@ -81,6 +81,7 @@ import {
 import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
 import { puntosRombo, puntosTriangulo } from "@/components/graficos/formas-punto"
+import type { Tamano } from "@/lib/densidad/tamano"
 import type { PuntoSerie, SerieMetrica } from "@/lib/laboratorio/series"
 import { cn } from "@/lib/utils"
 
@@ -88,11 +89,21 @@ export interface GraficoMetricaProps {
   serie: SerieMetrica
   /** Índice 0-4 dentro de `metricasDisponibles`, para asignar `--chart-{n}` de forma estable entre métricas. */
   colorIndice?: number
+  /**
+   * Modo de letra de la cuenta (Sprint 13, tarea 13.3), resuelto server-side
+   * en `tendencias/page.tsx` y bajado por props hasta acá -Recharts pide un
+   * alto NUMÉRICO en píxeles, así que no hay un token CSS que lo resuelva
+   * solo-. Sin esto el gráfico quedaría con el mismo alto en los dos modos:
+   * sería el único elemento de la pantalla que no participa de la densidad.
+   * Default `"grande"` para los pocos consumidores de test que no lo pasan.
+   */
+  tamano?: Tamano
   className?: string
 }
 
 const DIA_MS = 24 * 60 * 60 * 1000
-const ALTURA_GRAFICO = 260
+/** Alto del gráfico por densidad. `260` es el valor original (grande, sin cambios); `200` es la reducción de la tarea 13.3 -el contenedor se achica, Recharts se adapta solo vía `ResponsiveContainer`/`width`/`height` explícitos-. */
+const ALTURA_GRAFICO_POR_TAMANO: Record<Tamano, number> = { grande: 260, chica: 200 }
 /** Más de esta cantidad de puntos activa el modo de scroll interno (requisito 4 de la tarea: nunca scroll horizontal de PÁGINA, pero el gráfico puede scrollear el suyo propio). */
 const UMBRAL_SCROLL_PUNTOS = 8
 const ANCHO_POR_PUNTO_PX = 64
@@ -241,12 +252,13 @@ function renderPuntoInteractivo(
   )
 }
 
-export function GraficoMetrica({ serie, colorIndice = 0, className }: GraficoMetricaProps) {
+export function GraficoMetrica({ serie, colorIndice = 0, tamano = "grande", className }: GraficoMetricaProps) {
   const [indiceSeleccionado, setIndiceSeleccionado] = React.useState(
     Math.max(0, serie.puntos.length - 1),
   )
 
   const color = COLORES_CHART[colorIndice % COLORES_CHART.length]
+  const alturaGrafico = ALTURA_GRAFICO_POR_TAMANO[tamano]
 
   const datos: PuntoGrafico[] = React.useMemo(
     () =>
@@ -355,7 +367,7 @@ export function GraficoMetrica({ serie, colorIndice = 0, className }: GraficoMet
               <div className="overflow-x-auto overscroll-x-contain rounded-lg" data-testid="grafico-scroll">
                 <LineChart
                   width={anchoPx}
-                  height={ALTURA_GRAFICO}
+                  height={alturaGrafico}
                   data={datos}
                   margin={{ top: 8, right: 16, left: 0, bottom: 4 }}
                 >
@@ -363,7 +375,7 @@ export function GraficoMetrica({ serie, colorIndice = 0, className }: GraficoMet
                 </LineChart>
               </div>
             ) : (
-              <ResponsiveContainer width="100%" height={ALTURA_GRAFICO}>
+              <ResponsiveContainer width="100%" height={alturaGrafico}>
                 <LineChart data={datos} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
                   {contenidoEjesYSeries}
                 </LineChart>

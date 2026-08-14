@@ -30,6 +30,7 @@ import dynamic from "next/dynamic"
 import { EsqueletoGrafico } from "@/components/graficos/esqueleto-grafico"
 import { SelectorMetrica } from "@/components/estudios/selector-metrica"
 import { TarjetaUltimoValor } from "@/components/estudios/tarjeta-ultimo-valor"
+import type { Tamano } from "@/lib/densidad/tamano"
 import type { MetricaDisponible, SerieMetrica } from "@/lib/laboratorio/series"
 import { resumenUltimoValor } from "@/lib/laboratorio/ultimo-valor"
 
@@ -41,9 +42,11 @@ const GraficoMetrica = dynamic(
 export interface PanelTendenciasProps {
   series: SerieMetrica[]
   metricasDisponibles: MetricaDisponible[]
+  /** Modo de letra de la cuenta (Sprint 13), resuelto server-side en `page.tsx` y bajado hasta `GraficoMetrica` para elegir el alto del gráfico sin detección en el cliente. */
+  tamano: Tamano
 }
 
-export function PanelTendencias({ series, metricasDisponibles }: PanelTendenciasProps) {
+export function PanelTendencias({ series, metricasDisponibles, tamano }: PanelTendenciasProps) {
   const [claveSeleccionada, setClaveSeleccionada] = React.useState<string>(
     metricasDisponibles[0]?.clave ?? "",
   )
@@ -65,9 +68,11 @@ export function PanelTendencias({ series, metricasDisponibles }: PanelTendencias
   const serieSeleccionada = series.find((s) => s.clave === claveSeleccionada)
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Tarjetas de último valor: grilla responsiva */}
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 lg:gap-3">
+    <div className="flex flex-col gap-4 chica:gap-3">
+      {/* Tarjetas de último valor: grilla responsiva. En chica ya son 2
+          columnas por default (`grid-cols-2`, sin cambios); lo que se aprieta
+          es el espacio entre tarjetas. */}
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 lg:gap-3 chica:gap-1.5">
         {series.map((serie) => {
           const resumen = resumenUltimoValor(serie.puntos)
           return (
@@ -82,7 +87,7 @@ export function PanelTendencias({ series, metricasDisponibles }: PanelTendencias
       </div>
 
       {/* Selector de métrica + gráfico */}
-      <div className="flex flex-col gap-4 pt-2 border-t border-borde-sutil">
+      <div className="flex flex-col gap-4 pt-2 border-t border-borde-sutil chica:gap-3 chica:pt-1.5">
         <SelectorMetrica
           metricas={metricasDisponibles}
           claveSeleccionada={claveSeleccionada}
@@ -94,6 +99,7 @@ export function PanelTendencias({ series, metricasDisponibles }: PanelTendencias
             key={serieSeleccionada.clave}
             serie={serieSeleccionada}
             colorIndice={Math.max(0, indiceColor)}
+            tamano={tamano}
           />
         )}
       </div>

@@ -41,7 +41,7 @@ export function SelectorMetrica({ metricas, claveSeleccionada, onSeleccionar }: 
     <div
       role="group"
       aria-label="Elegir métrica"
-      className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1"
+      className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 chica:gap-1.5"
     >
       {metricas.map((metrica, indice) => {
         const seleccionada = metrica.clave === claveSeleccionada
@@ -56,7 +56,7 @@ export function SelectorMetrica({ metricas, claveSeleccionada, onSeleccionar }: 
             }
             onClick={() => onSeleccionar(metrica.clave)}
             className={cn(
-              "flex min-h-tactil shrink-0 items-center gap-2 rounded-full border px-4 text-base font-medium whitespace-nowrap transition-colors",
+              "flex min-h-tactil shrink-0 items-center gap-2 rounded-full border px-4 text-base font-medium whitespace-nowrap transition-colors chica:gap-1.5 chica:px-3 chica:text-sm",
               seleccionada
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-card text-foreground hover:bg-muted",
@@ -64,14 +64,14 @@ export function SelectorMetrica({ metricas, claveSeleccionada, onSeleccionar }: 
           >
             <span
               aria-hidden="true"
-              className="size-2.5 shrink-0 rounded-full"
+              className="size-2.5 shrink-0 rounded-full chica:size-2"
               style={{ backgroundColor: seleccionada ? "currentColor" : color }}
             />
             {metrica.etiqueta}
             {metrica.fueraDeRango && (
               <TriangleAlertIcon
                 aria-hidden="true"
-                className={cn("size-4 shrink-0", seleccionada ? "text-primary-foreground" : "text-advertencia")}
+                className={cn("size-4 shrink-0 chica:size-3.5", seleccionada ? "text-primary-foreground" : "text-advertencia")}
               />
             )}
           </button>

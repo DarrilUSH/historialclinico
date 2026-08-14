@@ -66,7 +66,7 @@ export function TarjetaUltimoValor({
   return (
     <TarjetaInteractiva
       onClick={onSeleccionar}
-      className="flex flex-col gap-3 px-4 py-3"
+      className="flex flex-col gap-3 px-4 py-3 chica:gap-2 chica:px-3 chica:py-2.5"
     >
       {/* Encabezado: etiqueta de la métrica */}
       <div className="flex items-start justify-between gap-2">

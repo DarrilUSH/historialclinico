@@ -101,13 +101,13 @@ export async function ListaEstudios({ perfilId, hasta, puedeSubir, filtros }: Li
   const restantes = Math.max(0, total - filas.length)
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 chica:gap-4">
       <p className="text-base text-muted-foreground">
         {total === 1 ? "1 estudio" : `${total} estudios`}
       </p>
 
       {grupos.map((grupo) => (
-        <section key={grupo.clave} className="flex flex-col gap-3">
+        <section key={grupo.clave} className="flex flex-col gap-3 chica:gap-2">
           {/* `top-[73px]`: alto real de `EncabezadoPerfil` (medido en el
               navegador, `getBoundingClientRect().height` ≈ 72.8px), el
               header sticky del shell -ver su comentario en
@@ -116,12 +116,20 @@ export async function ListaEstudios({ perfilId, hasta, puedeSubir, filtros }: Li
               detrás en vez de superponerse cuando ambos coinciden en pantalla.
               Fondo sólido (`bg-background`), sin blur ni translucidez -esta
               app no hace glassmorphism en ningún lado, docs/design-system.md
-              §5-. */}
-          <h2 className="sticky top-[73px] z-20 -mx-4 border-b border-borde-sutil bg-background px-4 py-2 text-sm font-semibold tracking-wide text-muted-foreground uppercase sm:mx-0 sm:rounded-t-lg sm:px-1">
+              §5-.
+
+              Chica (Sprint 13, tarea 13.3): `EncabezadoPerfil` baja de alto
+              -menos padding vertical (`chica:py-2` contra `py-2.5`), sin
+              cambiar el tamaño del avatar-, así que el offset sticky también
+              baja (`chica:top-[57px]`, medido en el navegador contra el header
+              compacto real) y el propio encabezado de mes se aprieta
+              (`chica:py-1.5`) para no comerse más alto del que el modo
+              compacto está pensado para ahorrar. */}
+          <h2 className="sticky top-[73px] z-20 -mx-4 border-b border-borde-sutil bg-background px-4 py-2 text-sm font-semibold tracking-wide text-muted-foreground uppercase sm:mx-0 sm:rounded-t-lg sm:px-1 chica:top-[57px] chica:py-1.5">
             {grupo.etiqueta}
           </h2>
 
-          <ul className="flex flex-col gap-3">
+          <ul className="flex flex-col gap-3 chica:gap-2">
             {grupo.documentos.map((documento) => (
               <li key={documento.id}>
                 <TarjetaEstudio documento={documento} />

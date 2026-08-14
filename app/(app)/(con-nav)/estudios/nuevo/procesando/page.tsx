@@ -74,7 +74,7 @@ export default async function PaginaProcesando({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8">
+    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 chica:gap-4 chica:py-5">
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">
           Revisá y confirmá

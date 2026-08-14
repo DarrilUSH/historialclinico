@@ -253,18 +253,21 @@ export function VisorDocumento({ documentoId, mimeType, titulo }: VisorDocumento
         </p>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row">
+      {/* Chica (Sprint 13, tarea 13.3): los dos botones de acción pasan a
+          fila -mismo layout que ya usa `sm:flex-row` para pantallas anchas,
+          acá disparado por el modo compacto en vez del ancho-. */}
+      <div className="flex flex-col gap-3 sm:flex-row chica:flex-row chica:gap-2">
         <Boton
           render={<a href={url ?? undefined} target="_blank" rel="noopener noreferrer" />}
           nativeButton={false}
           variant="outline"
           size="lg"
-          className="sm:flex-1"
+          className="sm:flex-1 chica:flex-1"
         >
           <ExternalLinkIcon aria-hidden="true" />
           Abrir el documento
         </Boton>
-        <Boton size="lg" cargando={descargando} onClick={manejarDescarga} className="sm:flex-1">
+        <Boton size="lg" cargando={descargando} onClick={manejarDescarga} className="sm:flex-1 chica:flex-1">
           <DownloadIcon aria-hidden="true" />
           Descargar
         </Boton>

@@ -182,7 +182,16 @@ export function CargadorDocumento({ onArchivoListo, className }: CargadorDocumen
       )}
 
       {paso === "elegir" && (
-        <div className="grid gap-4 sm:grid-cols-3">
+        // Chica (Sprint 13, tarea 13.3): las tres tarjetas pasan a fila de 3
+        // -ícono arriba, título abajo, sin la bajada explicativa (ayuda
+        // contextual, `chica:hidden`)- en vez de apiladas en una columna. Se
+        // verificó con los tres títulos reales ("Sacar foto", "Elegir de la
+        // galería", "Elegir un PDF") en el ancho real de un celular que
+        // entran sin truncarse -el más largo envuelve a dos líneas, nunca se
+        // corta-, y que cada tarjeta completa sigue muy por encima del piso
+        // táctil de 40px (es la tarjeta entera la que es clickeable, no solo
+        // el ícono).
+        <div className="grid gap-4 sm:grid-cols-3 chica:grid-cols-3 chica:gap-2">
           <input
             ref={inputCamaraRef}
             type="file"
@@ -193,16 +202,16 @@ export function CargadorDocumento({ onArchivoListo, className }: CargadorDocumen
           />
           <TarjetaInteractiva
             onClick={() => inputCamaraRef.current?.click()}
-            className="flex flex-col items-center gap-3 px-6 py-8 text-center"
+            className="flex flex-col items-center gap-3 px-6 py-8 text-center chica:gap-1.5 chica:px-2 chica:py-4"
           >
             <span
-              className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+              className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-10"
               aria-hidden="true"
             >
-              <CameraIcon className="size-7" />
+              <CameraIcon className="size-7 chica:size-5" />
             </span>
-            <span className="text-lg font-semibold text-foreground">Sacar foto</span>
-            <span className="text-base text-muted-foreground">
+            <span className="text-lg font-semibold text-foreground chica:text-sm">Sacar foto</span>
+            <span className="text-base text-muted-foreground chica:hidden">
               Usá la cámara para fotografiar el estudio o la receta
             </span>
           </TarjetaInteractiva>
@@ -220,16 +229,18 @@ export function CargadorDocumento({ onArchivoListo, className }: CargadorDocumen
           />
           <TarjetaInteractiva
             onClick={() => inputGaleriaRef.current?.click()}
-            className="flex flex-col items-center gap-3 px-6 py-8 text-center"
+            className="flex flex-col items-center gap-3 px-6 py-8 text-center chica:gap-1.5 chica:px-2 chica:py-4"
           >
             <span
-              className="flex size-14 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+              className="flex size-14 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground chica:size-10"
               aria-hidden="true"
             >
-              <ImagesIcon className="size-7" />
+              <ImagesIcon className="size-7 chica:size-5" />
             </span>
-            <span className="text-lg font-semibold text-foreground">Elegir de la galería</span>
-            <span className="text-base text-muted-foreground">
+            <span className="text-lg font-semibold text-foreground chica:text-sm">
+              Elegir de la galería
+            </span>
+            <span className="text-base text-muted-foreground chica:hidden">
               Buscá una foto o imagen ya guardada en el dispositivo
             </span>
           </TarjetaInteractiva>
@@ -245,16 +256,16 @@ export function CargadorDocumento({ onArchivoListo, className }: CargadorDocumen
           />
           <TarjetaInteractiva
             onClick={() => inputPdfRef.current?.click()}
-            className="flex flex-col items-center gap-3 px-6 py-8 text-center"
+            className="flex flex-col items-center gap-3 px-6 py-8 text-center chica:gap-1.5 chica:px-2 chica:py-4"
           >
             <span
-              className="flex size-14 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground"
+              className="flex size-14 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground chica:size-10"
               aria-hidden="true"
             >
-              <FileTextIcon className="size-7" />
+              <FileTextIcon className="size-7 chica:size-5" />
             </span>
-            <span className="text-lg font-semibold text-foreground">Elegir un PDF</span>
-            <span className="text-base text-muted-foreground">
+            <span className="text-lg font-semibold text-foreground chica:text-sm">Elegir un PDF</span>
+            <span className="text-base text-muted-foreground chica:hidden">
               Buscá un PDF ya guardado en el dispositivo
             </span>
           </TarjetaInteractiva>
@@ -262,21 +273,21 @@ export function CargadorDocumento({ onArchivoListo, className }: CargadorDocumen
       )}
 
       {paso === "vista-previa" && archivo && (
-        <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-4">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col gap-5 rounded-xl border border-border bg-card p-4 chica:gap-3 chica:p-3">
+          <div className="flex items-center gap-4 chica:gap-3">
             {archivo.previewUrl ? (
               // eslint-disable-next-line @next/next/no-img-element -- object URL local (blob en memoria), no un asset que next/image pueda optimizar
               <img
                 src={archivo.previewUrl}
                 alt={`Vista previa de ${archivo.nombre}`}
-                className="size-24 shrink-0 rounded-lg border border-border object-cover"
+                className="size-24 shrink-0 rounded-lg border border-border object-cover chica:size-16"
               />
             ) : (
               <span
-                className="flex size-24 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground"
+                className="flex size-24 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground chica:size-16"
                 aria-hidden="true"
               >
-                <FileTextIcon className="size-10" />
+                <FileTextIcon className="size-10 chica:size-7" />
               </span>
             )}
 

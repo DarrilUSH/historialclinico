@@ -87,7 +87,7 @@ export function PantallaNuevoEstudio() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <div className="flex items-center gap-3">
         {/* `nativeButton={false}`: ver el comentario equivalente en
             `app/(app)/(con-nav)/estudios/page.tsx` -el `render` acá también

@@ -188,59 +188,75 @@ export function FormularioRevision({
           ayuda={tituloDetectado ? "Sugerido a partir de lo que detectamos. Podés cambiarlo." : AYUDA_NO_DETECTADO}
         />
 
-        <CampoTexto
-          id="fecha"
-          label="Fecha del estudio"
-          type="date"
-          defaultValue={fechaInicial}
-          required
-          max={fechaMaximaIso}
-          min={FECHA_MINIMA_ISO}
-          ayuda={fechaDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
-        />
+        {/* Chica (Sprint 13, tarea 13.3): fecha+categoría se agrupan en una
+            grilla de 2 columnas -el mismo gap-5 que ya separaba estos campos
+            como elementos sueltos del formulario ahora vive DENTRO del
+            wrapper, así que el espaciado en grande queda pixel-a-pixel
+            idéntico: el wrapper es un elemento más de la columna del
+            formulario, no cambia cuántos "huecos" hay entre título, este par
+            y el resto-. Título y resumen (los campos más largos) siguen a
+            ancho completo en los dos modos. */}
+        <div className="flex flex-col gap-5 chica:grid chica:grid-cols-2 chica:items-start chica:gap-3">
+          <CampoTexto
+            id="fecha"
+            label="Fecha del estudio"
+            type="date"
+            defaultValue={fechaInicial}
+            required
+            max={fechaMaximaIso}
+            min={FECHA_MINIMA_ISO}
+            ayuda={fechaDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
+          />
 
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="categoria-trigger">Categoría</Label>
-          <Select name="categoria" items={ITEMS_CATEGORIA} defaultValue={categoriaInicial} required>
-            <SelectTrigger id="categoria-trigger" className="w-full">
-              <SelectValue placeholder="Elegí una categoría" />
-            </SelectTrigger>
-            <SelectContent>
-              {CATEGORIAS.map((categoria) => (
-                <SelectItem key={categoria.valor} value={categoria.valor}>
-                  {categoria.etiqueta}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-sm text-muted-foreground">
-            {categoriaDetectada ? AYUDA_DETECTADO : "Elegí la categoría que corresponda."}
-          </p>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="categoria-trigger">Categoría</Label>
+            <Select name="categoria" items={ITEMS_CATEGORIA} defaultValue={categoriaInicial} required>
+              <SelectTrigger id="categoria-trigger" className="w-full">
+                <SelectValue placeholder="Elegí una categoría" />
+              </SelectTrigger>
+              <SelectContent>
+                {CATEGORIAS.map((categoria) => (
+                  <SelectItem key={categoria.valor} value={categoria.valor}>
+                    {categoria.etiqueta}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-sm text-muted-foreground">
+              {categoriaDetectada ? AYUDA_DETECTADO : "Elegí la categoría que corresponda."}
+            </p>
+          </div>
         </div>
 
-        <CampoTexto
-          id="institucion"
-          label="Institución"
-          defaultValue={institucionInicial}
-          maxLength={150}
-          ayuda={institucionDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
-        />
+        {/* Institución + especialidad + médico: misma idea, en una grilla de
+            2 columnas que se completa en el orden de lectura de siempre
+            -institución y especialidad en la primera fila, médico solo en la
+            segunda-, sin reordenar el DOM. */}
+        <div className="flex flex-col gap-5 chica:grid chica:grid-cols-2 chica:gap-3">
+          <CampoTexto
+            id="institucion"
+            label="Institución"
+            defaultValue={institucionInicial}
+            maxLength={150}
+            ayuda={institucionDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
+          />
 
-        <CampoTexto
-          id="especialidad"
-          label="Especialidad"
-          defaultValue={especialidadInicial}
-          maxLength={100}
-          ayuda={especialidadDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
-        />
+          <CampoTexto
+            id="especialidad"
+            label="Especialidad"
+            defaultValue={especialidadInicial}
+            maxLength={100}
+            ayuda={especialidadDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
+          />
 
-        <CampoTexto
-          id="medico"
-          label="Médico"
-          defaultValue={medicoInicial}
-          maxLength={100}
-          ayuda={medicoDetectado ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
-        />
+          <CampoTexto
+            id="medico"
+            label="Médico"
+            defaultValue={medicoInicial}
+            maxLength={100}
+            ayuda={medicoDetectado ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
+          />
+        </div>
 
         <CampoTextarea
           id="resumen"

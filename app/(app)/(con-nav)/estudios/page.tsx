@@ -100,12 +100,12 @@ export default async function PaginaEstudios({
   const claveSuspense = JSON.stringify({ hasta, ...filtros })
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <Suspense fallback={null}>
         <AvisoConfirmacion />
       </Suspense>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 chica:gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">Estudios</h1>
         {activo.permisos.canUpload && <BotonSubir />}
       </div>
