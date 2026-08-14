@@ -32,12 +32,28 @@
  * perfil) no tira error -es "cero filas", el mismo principio 3 de
  * docs/modelo-permisos.md-, así que se usa `{ count: "exact" }` para
  * distinguir ese caso y devolver un mensaje claro en vez de fingir éxito.
+ *
+ * ## `doctorId`: vinculación con el directorio (Sprint 10, tarea 10.1)
+ *
+ * `crearTurno` y `actualizarTurno` reciben además un `doctorId` opcional
+ * (`components/turnos/formulario-turno.tsx`, campo oculto detrás del
+ * `<Select>` "Médico (opcional)"). Antes de persistirlo en
+ * `appointments.doctor_id`, `resolverDoctorId` verifica que ese `id`
+ * pertenezca a un médico de `doctors` **del mismo perfil activo** -mismo
+ * criterio de ownership que `medicacion/actions.ts#asociarReceta` con
+ * `documents`-: el `<Select>` del cliente solo ofrece médicos del perfil
+ * activo, pero el campo oculto viaja en el `FormData` como cualquier otro
+ * input, y nada impide que alguien lo edite a mano antes de enviar. Sin este
+ * chequeo, un `doctorId` de OTRO perfil (ajeno al actor) pasaría el `INSERT`
+ * igual -`appointments_doctor_id_fkey` solo exige que la fila exista en
+ * `doctors`, no que sea del mismo `profile_id`- y dejaría un turno vinculado
+ * a un médico que la persona nunca cargó.
  */
 
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 
-import { esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
+import { type ClienteSupabaseServidor, esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { validarTurno } from "@/lib/validacion/turno.schema"
 import type { EstadoTurno } from "@/types/dominio"
@@ -62,6 +78,9 @@ const ERROR_INESPERADO_EDITAR =
 const ERROR_TURNO_NO_ENCONTRADO =
   "No encontramos ese turno, o ya no está disponible para editar."
 
+const ERROR_MEDICO_NO_VALIDO =
+  "El médico elegido no es válido, o no pertenece a este directorio. Volvé a elegirlo de la lista."
+
 /** `formData.get(nombre)` como string, tratando ausencia y `File` por igual como `""` -un campo colapsado (coordenadas avanzadas) puede no llegar en el `FormData` y no tiene que romper la validación con un error de tipo. */
 function campo(formData: FormData, nombre: string): string {
   const valor = formData.get(nombre)
@@ -80,6 +99,41 @@ function datosCrudosDelFormulario(formData: FormData) {
     longitud: campo(formData, "longitud"),
     notasPreparacion: campo(formData, "notasPreparacion"),
   }
+}
+
+/**
+ * Resuelve el `doctorId` opcional del `FormData` a un valor listo para
+ * `appointments.doctor_id`: `null` si viene vacío (sin vínculo, o "Ninguno"
+ * en el `<Select>`), o el `id` verificado si viene cargado. Ver el
+ * comentario de cabecera del archivo para el motivo del chequeo de
+ * ownership -nunca se confía en que el `FormData` solo pudo traer un `id`
+ * del perfil activo-.
+ */
+async function resolverDoctorId(
+  supabase: ClienteSupabaseServidor,
+  formData: FormData,
+  perfilId: string,
+): Promise<{ ok: true; doctorId: string | null } | { ok: false; error: string }> {
+  const valor = campo(formData, "doctorId")
+  if (valor.length === 0) {
+    return { ok: true, doctorId: null }
+  }
+  if (!PATRON_UUID.test(valor)) {
+    return { ok: false, error: ERROR_MEDICO_NO_VALIDO }
+  }
+
+  const { data: medico } = await supabase
+    .from("doctors")
+    .select("id")
+    .eq("id", valor)
+    .eq("profile_id", perfilId)
+    .maybeSingle()
+
+  if (!medico) {
+    return { ok: false, error: ERROR_MEDICO_NO_VALIDO }
+  }
+
+  return { ok: true, doctorId: medico.id }
 }
 
 /**
@@ -111,12 +165,18 @@ export async function crearTurno(
       return { error: validacion.error }
     }
 
+    const resueltoDoctorId = await resolverDoctorId(supabase, formData, activo.perfil.id)
+    if (!resueltoDoctorId.ok) {
+      return { error: resueltoDoctorId.error }
+    }
+
     const { datos } = validacion
 
     const { error } = await supabase.from("appointments").insert({
       profile_id: activo.perfil.id,
       specialty: datos.especialidad,
       doctor_name: datos.medico ?? null,
+      doctor_id: resueltoDoctorId.doctorId,
       appointment_date: datos.fechaHoraIso,
       location_name: datos.lugarNombre ?? null,
       location_address: datos.lugarDireccion ?? null,
@@ -173,6 +233,11 @@ export async function actualizarTurno(
       return { error: validacion.error }
     }
 
+    const resueltoDoctorId = await resolverDoctorId(supabase, formData, activo.perfil.id)
+    if (!resueltoDoctorId.ok) {
+      return { error: resueltoDoctorId.error }
+    }
+
     const { datos } = validacion
 
     const { error, count } = await supabase
@@ -181,6 +246,7 @@ export async function actualizarTurno(
         {
           specialty: datos.especialidad,
           doctor_name: datos.medico ?? null,
+          doctor_id: resueltoDoctorId.doctorId,
           appointment_date: datos.fechaHoraIso,
           location_name: datos.lugarNombre ?? null,
           location_address: datos.lugarDireccion ?? null,

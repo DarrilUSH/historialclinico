@@ -38,7 +38,7 @@ export default async function PaginaNuevoTurno() {
 
   const { data: medicos } = await supabase
     .from("doctors")
-    .select("id, full_name, specialty")
+    .select("id, full_name, specialty, institution, address, latitude, longitude")
     .eq("profile_id", activo.perfil.id)
     .eq("is_active", true)
     .order("full_name", { ascending: true })

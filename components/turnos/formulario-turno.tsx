@@ -1,7 +1,8 @@
 "use client"
 
 /**
- * Formulario de alta y edición de turnos (Sprint 6, tarea 6.1). Un solo
+ * Formulario de alta y edición de turnos (Sprint 6, tarea 6.1; vinculación
+ * con el directorio de médicos en el Sprint 10, tarea 10.1). Un solo
  * componente para las dos pantallas -`/turnos/nuevo` y
  * `/turnos/[id]/editar`-, mismo criterio que separar `modo` en vez de
  * duplicar el JSX: los campos son idénticos, solo cambia la Server Action
@@ -10,14 +11,35 @@
  *
  * ## Especialidad y médico
  *
- * `especialidad` es obligatoria y siempre texto libre. `médico` también es
- * texto libre -el directorio completo de profesionales es el Sprint 10-,
- * pero si el perfil ya tiene médicos cargados en `doctors` (por ejemplo, el
- * Dr. Rodríguez del seed), aparece un `<Select>` que autocompleta el nombre
- * -y la especialidad, si el médico la tiene cargada- en los campos de texto
- * de abajo. El `<Select>` no viaja en el `FormData` (no tiene `name`): es
- * pura ayuda de UI, la fuente de verdad que se guarda siempre es el texto de
- * `medico`/`especialidad`, editable después de elegir.
+ * `especialidad` y `médico` son siempre texto libre, editable a mano. Si el
+ * perfil ya tiene médicos cargados en `doctors` (Sprint 10), aparece un
+ * `<Select>` -"Médico (opcional)"- con los ACTIVOS del directorio más la
+ * opción "Ninguno". El `<Select>` en sí no viaja en el `FormData` (no tiene
+ * `name`): es pura ayuda de UI. Lo que sí viaja es:
+ *
+ * - `doctorId` (campo oculto): el `id` de `doctors` elegido, o `""` si es
+ *   "Ninguno" o texto libre sin elegir nada. `crearTurno`/`actualizarTurno`
+ *   lo persisten en `appointments.doctor_id`.
+ * - Los campos de texto (`medico`, `especialidad`, `lugarNombre`,
+ *   `lugarDireccion`, `latitud`, `longitud`), que siguen siendo la fuente de
+ *   verdad del turno -`doctor_name` en la base es el texto tal como quedó
+ *   guardado, no un `JOIN` contra `doctors`, mismo criterio que
+ *   `documents.doctor_name` (`supabase/migrations/20260812200000_schema_inicial.sql`
+ *   §4.4: "se conserva aunque exista doctor_id, porque es el dato textual").
+ *
+ * ## Autocompletado: SOLO lo que está vacío, nunca pisa lo tipeado
+ *
+ * Elegir un médico del `<Select>` completa `medico`, `especialidad`,
+ * `lugarNombre` (institución), `lugarDireccion` y el par
+ * `latitud`/`longitud` -si el médico las tiene cargadas-, pero cada campo
+ * SOLO si está vacío en ese momento (`lib/turnos/autocompletar-medico.ts`,
+ * que concentra el criterio y sus tests). Antes de esta tarea (Sprint 6) el
+ * `<Select>` pisaba `medico`/`especialidad` sin condición; se corrige acá
+ * porque un `<Select>` de conveniencia no debería borrar una corrección que
+ * la persona ya hizo a mano -ej: escribió "Dr. Rodríguez (reemplaza a la Dra.
+ * Torres esta semana)" y después elige a la Dra. Torres del directorio-.
+ * Elegir "Ninguno" solo limpia el vínculo (`doctorId`); no toca ningún campo
+ * de texto.
  *
  * ## Coordenadas: REGLA DE COSTO CERO del roadmap
  *
@@ -52,12 +74,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  camposAutocompletadosDesdeMedico,
+  type MedicoParaAutocompletar,
+} from "@/lib/turnos/autocompletar-medico"
 
-export interface MedicoParaAutocompletar {
-  id: string
-  full_name: string
-  specialty: string | null
-}
+export type { MedicoParaAutocompletar }
+
+/** Valor del `<SelectItem>` "Ninguno": limpia `doctorId` sin tocar los campos de texto. Un `id` real de `doctors` es siempre un uuid, así que este sentinel nunca puede colisionar con uno. */
+const SENTINEL_NINGUN_MEDICO = "ninguno"
 
 export interface ValoresTurno {
   especialidad: string
@@ -71,6 +96,8 @@ export interface ValoresTurno {
   latitud: string
   longitud: string
   notasPreparacion: string
+  /** `id` de `doctors` vinculado, o `""` sin vínculo (Sprint 10, tarea 10.1). */
+  doctorId: string
 }
 
 export interface FormularioTurnoProps {
@@ -99,28 +126,63 @@ export function FormularioTurno({
 
   const [especialidad, setEspecialidad] = React.useState(valoresIniciales?.especialidad ?? "")
   const [medico, setMedico] = React.useState(valoresIniciales?.medico ?? "")
-  const [direccion, setDireccion] = React.useState(valoresIniciales?.lugarDireccion ?? "")
+  const [lugarNombre, setLugarNombre] = React.useState(valoresIniciales?.lugarNombre ?? "")
+  const [lugarDireccion, setLugarDireccion] = React.useState(valoresIniciales?.lugarDireccion ?? "")
+  const [latitud, setLatitud] = React.useState(valoresIniciales?.latitud ?? "")
+  const [longitud, setLongitud] = React.useState(valoresIniciales?.longitud ?? "")
+  // El médico vinculado puede no estar entre los `medicos` ACTIVOS que recibe
+  // este componente (fue dado de baja después de vincularse a este turno):
+  // el `<Select>` entonces no lo muestra seleccionado, pero el campo oculto
+  // conserva el vínculo igual, así que editar y guardar sin tocar el
+  // selector no lo pierde.
+  const [doctorId, setDoctorId] = React.useState(valoresIniciales?.doctorId ?? "")
   const [mostrarCoordenadas, setMostrarCoordenadas] = React.useState(
     Boolean(valoresIniciales?.latitud || valoresIniciales?.longitud),
   )
 
   const urlMaps =
-    direccion.trim().length > 0
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(direccion.trim())}`
+    lugarDireccion.trim().length > 0
+      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lugarDireccion.trim())}`
       : "https://www.google.com/maps"
 
-  function elegirMedicoDelDirectorio(idMedico: string | null) {
-    const doctor = medicos.find((candidato) => candidato.id === idMedico)
+  function elegirMedicoDelDirectorio(valor: string | null) {
+    if (!valor || valor === SENTINEL_NINGUN_MEDICO) {
+      setDoctorId("")
+      return
+    }
+
+    const doctor = medicos.find((candidato) => candidato.id === valor)
     if (!doctor) return
-    setMedico(doctor.full_name)
-    if (doctor.specialty) {
-      setEspecialidad(doctor.specialty)
+
+    setDoctorId(doctor.id)
+
+    // Ver el criterio completo en el comentario de cabecera del archivo y en
+    // `lib/turnos/autocompletar-medico.ts`: cada campo se completa SOLO si
+    // está vacío en este momento, nunca pisa lo que la persona ya escribió.
+    const cambios = camposAutocompletadosDesdeMedico(doctor, {
+      medico,
+      especialidad,
+      lugarNombre,
+      lugarDireccion,
+      latitud,
+      longitud,
+    })
+
+    if (cambios.medico !== undefined) setMedico(cambios.medico)
+    if (cambios.especialidad !== undefined) setEspecialidad(cambios.especialidad)
+    if (cambios.lugarNombre !== undefined) setLugarNombre(cambios.lugarNombre)
+    if (cambios.lugarDireccion !== undefined) setLugarDireccion(cambios.lugarDireccion)
+    if (cambios.latitud !== undefined && cambios.longitud !== undefined) {
+      setLatitud(cambios.latitud)
+      setLongitud(cambios.longitud)
+      setMostrarCoordenadas(true)
     }
   }
 
   return (
     <form id={ID_FORMULARIO} action={enviarAccion} className="flex flex-col gap-5">
       {modo === "editar" && turnoId && <input type="hidden" name="turnoId" value={turnoId} />}
+      <input type="hidden" name="doctorId" value={doctorId} />
 
       <CampoTexto
         id="especialidad"
@@ -134,15 +196,20 @@ export function FormularioTurno({
 
       {medicos.length > 0 && (
         <div className="flex flex-col gap-2">
-          <Label htmlFor="medico-directorio-trigger">Elegir de tu directorio (opcional)</Label>
+          <Label htmlFor="medico-directorio-trigger">Médico (opcional)</Label>
           <Select
-            items={medicos.map((doctor) => ({ value: doctor.id, label: doctor.full_name }))}
+            items={[
+              { value: SENTINEL_NINGUN_MEDICO, label: "Ninguno" },
+              ...medicos.map((doctor) => ({ value: doctor.id, label: doctor.full_name })),
+            ]}
+            value={doctorId || SENTINEL_NINGUN_MEDICO}
             onValueChange={elegirMedicoDelDirectorio}
           >
             <SelectTrigger id="medico-directorio-trigger" className="w-full">
-              <SelectValue placeholder="Elegir un médico ya cargado" />
+              <SelectValue placeholder="Elegir un médico de tu directorio" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value={SENTINEL_NINGUN_MEDICO}>Ninguno</SelectItem>
               {medicos.map((doctor) => (
                 <SelectItem key={doctor.id} value={doctor.id}>
                   {doctor.full_name}
@@ -152,7 +219,8 @@ export function FormularioTurno({
             </SelectContent>
           </Select>
           <p className="text-sm text-muted-foreground">
-            Completa el nombre (y la especialidad) abajo. Podés corregirlo después de elegir.
+            Completa lo que esté vacío (nombre, especialidad, lugar y coordenadas si el médico las
+            tiene cargadas). No pisa lo que ya escribiste.
           </p>
         </div>
       )}
@@ -163,7 +231,7 @@ export function FormularioTurno({
         maxLength={150}
         value={medico}
         onChange={(evento) => setMedico(evento.target.value)}
-        ayuda="Opcional. El directorio completo de médicos llega en un sprint futuro."
+        ayuda="Opcional. Podés elegirlo de tu directorio arriba o escribirlo directo."
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -182,7 +250,8 @@ export function FormularioTurno({
         id="lugarNombre"
         label="Lugar"
         maxLength={150}
-        defaultValue={valoresIniciales?.lugarNombre}
+        value={lugarNombre}
+        onChange={(evento) => setLugarNombre(evento.target.value)}
         ayuda="Nombre de la clínica o el consultorio (opcional)."
       />
 
@@ -190,8 +259,8 @@ export function FormularioTurno({
         id="lugarDireccion"
         label="Dirección"
         maxLength={300}
-        defaultValue={valoresIniciales?.lugarDireccion}
-        onChange={(evento) => setDireccion(evento.target.value)}
+        value={lugarDireccion}
+        onChange={(evento) => setLugarDireccion(evento.target.value)}
         ayuda="Calle y altura (opcional)."
       />
 
@@ -228,7 +297,8 @@ export function FormularioTurno({
                 label="Latitud"
                 decimal
                 permiteNegativo
-                defaultValue={valoresIniciales?.latitud}
+                value={latitud}
+                onChange={(evento) => setLatitud(evento.target.value)}
                 ayuda="Ej: -54.8083"
               />
               <CampoNumero
@@ -236,7 +306,8 @@ export function FormularioTurno({
                 label="Longitud"
                 decimal
                 permiteNegativo
-                defaultValue={valoresIniciales?.longitud}
+                value={longitud}
+                onChange={(evento) => setLongitud(evento.target.value)}
                 ayuda="Ej: -68.3000"
               />
             </div>

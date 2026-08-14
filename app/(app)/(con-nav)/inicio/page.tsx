@@ -24,7 +24,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { ActivityIcon, CreditCardIcon, HeartPulseIcon, PillIcon } from "lucide-react"
+import { ActivityIcon, CreditCardIcon, HeartPulseIcon, PillIcon, StethoscopeIcon } from "lucide-react"
 
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
 import { BotonSos } from "@/components/inicio/boton-sos"
@@ -172,6 +172,29 @@ export default async function PaginaInicio() {
         <span className="flex flex-col text-left">
           <span className="text-base font-semibold text-foreground">Coberturas</span>
           <span className="text-sm text-muted-foreground">Obra social, prepaga y credenciales</span>
+        </span>
+      </Link>
+
+      {/*
+        Acceso a /medicos (Sprint 10, tarea 10.1). Mismo patrón que la card
+        de Coberturas de arriba: sin fetch propio -es un acceso directo, no
+        un resumen-, igual para cualquier permiso. Sin slot propio en la
+        bottom nav (Sprint 10 no tiene uno libre, mismo motivo que
+        `/medicacion` y `/coberturas`).
+      */}
+      <Link
+        href="/medicos"
+        className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
+      >
+        <span
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+          aria-hidden="true"
+        >
+          <StethoscopeIcon className="size-5" />
+        </span>
+        <span className="flex flex-col text-left">
+          <span className="text-base font-semibold text-foreground">Médicos</span>
+          <span className="text-sm text-muted-foreground">Directorio de profesionales y contacto</span>
         </span>
       </Link>
 

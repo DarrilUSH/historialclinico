@@ -62,7 +62,7 @@ export default async function PaginaEditarTurno({
   const { data: turno } = await supabase
     .from("appointments")
     .select(
-      "id, specialty, doctor_name, appointment_date, location_name, location_address, latitude, longitude, preparation_notes, status",
+      "id, specialty, doctor_name, doctor_id, appointment_date, location_name, location_address, latitude, longitude, preparation_notes, status",
     )
     .eq("id", id)
     .eq("profile_id", activo.perfil.id)
@@ -74,7 +74,7 @@ export default async function PaginaEditarTurno({
 
   const { data: medicos } = await supabase
     .from("doctors")
-    .select("id, full_name, specialty")
+    .select("id, full_name, specialty, institution, address, latitude, longitude")
     .eq("profile_id", activo.perfil.id)
     .eq("is_active", true)
     .order("full_name", { ascending: true })
@@ -91,6 +91,7 @@ export default async function PaginaEditarTurno({
     latitud: turno.latitude !== null ? String(turno.latitude) : "",
     longitud: turno.longitude !== null ? String(turno.longitude) : "",
     notasPreparacion: turno.preparation_notes ?? "",
+    doctorId: turno.doctor_id ?? "",
   }
 
   return (
