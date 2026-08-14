@@ -2,12 +2,13 @@
 
 /**
  * Registra el service worker al abrir la aplicación y le pide que precargue la
- * ficha SOS del perfil activo (Sprint 8, tarea 8.4).
+ * ficha SOS del perfil activo (Sprint 8, tarea 8.4). Desde el Sprint 11 (11.3)
+ * es además el dueño del registro que necesita el aviso de actualización.
  *
  * Se monta en el layout de `(con-nav)`, que es donde ya hay sesión y perfil
- * activo resueltos. No pinta nada: devuelve `null`.
+ * activo resueltos.
  *
- * ## Por qué no renderiza ni un pixel, y por qué eso importa
+ * ## Por qué casi nunca renderiza un pixel, y por qué eso importa
  *
  * `/sos` es, deliberadamente, la ruta con menos JavaScript de la app: la ficha
  * entera es un Server Component sin hidratación (ver el encabezado de
@@ -16,6 +17,13 @@
  * soporta service workers— la ficha se sigue viendo completa. Lo único que se
  * pierde en ese caso es la copia offline, que es exactamente la degradación
  * correcta.
+ *
+ * Lo único que puede llegar a pintar es `AvisoActualizacion`, y solo cuando hay
+ * una versión nueva del worker esperando. Se monta desde acá —en vez de
+ * ponerlo suelto en el layout— porque necesita **el mismo**
+ * `ServiceWorkerRegistration`: hay un solo `navigator.serviceWorker.register()`
+ * en todo el proyecto (`lib/pwa/registrar-sw.ts`), y pedirlo dos veces desde
+ * dos componentes distintos sería empezar a repartir esa responsabilidad.
  *
  * ## Una precarga por sesión de pestaña y por perfil
  *
@@ -35,6 +43,7 @@
 
 import * as React from "react"
 
+import { AvisoActualizacion } from "@/components/pwa/aviso-actualizacion"
 import { precargarFichaSos, registrarServiceWorker } from "@/lib/pwa/registrar-sw"
 
 /** Marca de "esta pestaña ya precargó la ficha de este perfil". */
@@ -61,13 +70,24 @@ function marcarPrecargado(perfilId: string): void {
 }
 
 export function RegistroServiceWorker({ perfilId }: { perfilId: string }) {
+  const [registro, setRegistro] = React.useState<ServiceWorkerRegistration | null>(null)
+
   React.useEffect(() => {
     let cancelado = false
 
     async function preparar() {
       try {
         const registro = await registrarServiceWorker()
-        if (!registro || cancelado || yaPrecargo(perfilId)) {
+        if (!registro || cancelado) {
+          return
+        }
+
+        // El registro se guarda SIEMPRE, aunque esta pestaña ya haya precargado
+        // la ficha: es lo que necesita el aviso de actualización, que no tiene
+        // nada que ver con la precarga.
+        setRegistro(registro)
+
+        if (yaPrecargo(perfilId)) {
           return
         }
         precargarFichaSos(registro, perfilId)
@@ -86,5 +106,9 @@ export function RegistroServiceWorker({ perfilId }: { perfilId: string }) {
     }
   }, [perfilId])
 
-  return null
+  if (!registro) {
+    return null
+  }
+
+  return <AvisoActualizacion registro={registro} />
 }

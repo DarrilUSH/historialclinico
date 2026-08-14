@@ -1,6 +1,7 @@
 /**
- * Tests de los helpers PUROS del service worker (`public/sw.js`, Sprint 8,
- * tarea 8.4).
+ * Tests de los helpers PUROS del service worker (`public/sw.js`, Sprint 8 tarea
+ * 8.4; ampliados en el Sprint 11 tarea 11.3 con la matriz offline nueva y el
+ * ciclo de actualización).
  *
  * ## Cómo se prueba un archivo que no se puede importar
  *
@@ -37,7 +38,8 @@ interface HelpersSw {
   clasificarSolicitud: (
     pathname: string,
     esNavegacion: boolean,
-  ) => "estatico" | "pagina-sos" | "datos-sos" | "imagen-credencial" | "navegacion" | "red"
+    busqueda?: string,
+  ) => "estatico" | "pagina" | "datos-sos" | "imagen-credencial" | "navegacion" | "red"
   decidirDestinoDeCache: (
     estado: number,
     redirigido: boolean,
@@ -49,6 +51,8 @@ interface HelpersSw {
   claveDeCache: (url: string) => string
   CACHES_VIGENTES: string[]
   FAMILIAS_CON_DATOS: string[]
+  RUTAS_PAGINA_OFFLINE: string[]
+  MENSAJE_SALTAR_ESPERA: string
   VERSION: string
 }
 
@@ -84,6 +88,8 @@ function cargarHelpers(): HelpersSw {
     claveDeCache,
     CACHES_VIGENTES,
     FAMILIAS_CON_DATOS,
+    RUTAS_PAGINA_OFFLINE,
+    MENSAJE_SALTAR_ESPERA,
     VERSION,
   })`
 
@@ -115,8 +121,46 @@ describe("public/sw.js — clasificarSolicitud (la matriz de docs/offline.md §3
     // navegación del router). Guardar las dos bajo la clave `/sos` dejaría el
     // caché con un payload RSC que el navegador intentaría mostrar como
     // página.
-    expect(sw.clasificarSolicitud("/sos", true)).toBe("pagina-sos")
-    expect(sw.clasificarSolicitud("/sos", false)).toBe("red")
+    expect(sw.clasificarSolicitud("/sos", true, "")).toBe("pagina")
+    expect(sw.clasificarSolicitud("/sos", false, "")).toBe("red")
+  })
+
+  it("las cuatro pantallas del criterio del Sprint 11 se cachean como página", () => {
+    // El criterio de aceptación de la tarea 11.3, literal: offline se ven SOS,
+    // coberturas y la última lista de turnos y medicación.
+    for (const ruta of ["/sos", "/coberturas", "/turnos", "/medicacion"]) {
+      expect(sw.clasificarSolicitud(ruta, true, "")).toBe("pagina")
+      expect(sw.clasificarSolicitud(ruta, false, "")).toBe("red")
+    }
+    expect(sw.RUTAS_PAGINA_OFFLINE).toEqual(["/sos", "/coberturas", "/turnos", "/medicacion"])
+  })
+
+  it("una página CON query NO se cachea: el deep link de push borraría la copia buena", () => {
+    // `/turnos?perfil={id}` (payload de un recordatorio, `lib/turnos/recordatorios.ts`)
+    // redirige a `/turnos/enlace` para cambiar el perfil activo. Si cayera en la
+    // estrategia de página, `decidirDestinoDeCache` vería `redirected === true`
+    // y BORRARÍA la lista guardada — justo la que la tarea promete. Va por red;
+    // la navegación pelada posterior a la redirección es la que llena el caché.
+    expect(sw.clasificarSolicitud("/turnos", true, "?perfil=abc")).toBe("navegacion")
+    expect(sw.clasificarSolicitud("/medicacion", true, "?perfil=abc")).toBe("navegacion")
+    expect(sw.clasificarSolicitud("/sos", true, "?x=1")).toBe("navegacion")
+  })
+
+  it("una subruta de una pantalla guardada NO se cachea (solo la lista, no los formularios)", () => {
+    const subrutas = [
+      "/turnos/nuevo",
+      `/turnos/${UUID}/editar`,
+      "/turnos/enlace",
+      "/medicacion/nuevo",
+      `/medicacion/${UUID}/editar`,
+      "/medicacion/enlace",
+      "/coberturas/nuevo",
+      `/coberturas/${UUID}/editar`,
+      "/perfil/sos",
+    ]
+    for (const ruta of subrutas) {
+      expect(sw.clasificarSolicitud(ruta, true, "")).toBe("navegacion")
+    }
   })
 
   it("el payload JSON de CUALQUIER perfil es datos-sos", () => {
@@ -143,9 +187,9 @@ describe("public/sw.js — clasificarSolicitud (la matriz de docs/offline.md §3
   })
 
   it("el resto de la app navega contra la red y cae a /offline, sin cachearse", () => {
-    for (const ruta of ["/estudios", "/turnos", "/medicacion", "/coberturas", "/inicio"]) {
-      expect(sw.clasificarSolicitud(ruta, true)).toBe("navegacion")
-      expect(sw.clasificarSolicitud(ruta, false)).toBe("red")
+    for (const ruta of ["/estudios", "/inicio", "/familia", "/medicos", "/signos", "/perfil"]) {
+      expect(sw.clasificarSolicitud(ruta, true, "")).toBe("navegacion")
+      expect(sw.clasificarSolicitud(ruta, false, "")).toBe("red")
     }
   })
 
@@ -225,6 +269,72 @@ describe("public/sw.js — versionado y limpieza de cachés", () => {
     for (const familia of sw.FAMILIAS_CON_DATOS) {
       expect(sw.CACHES_VIGENTES).toContain(`historial-medico-${familia}-${sw.VERSION}`)
     }
+  })
+})
+
+describe("public/sw.js — ciclo de actualización (Sprint 11, tarea 11.3)", () => {
+  it("install NO llama a skipWaiting: el worker nuevo espera a que lo acepten", () => {
+    // Esta es la línea que la tarea 11.3 sacó, y la que más fácil se vuelve a
+    // colar de vuelta "para que el deploy se vea antes". Si vuelve, el aviso de
+    // actualización deja de tener sentido (el worker ya tomó el control solo) y
+    // se recupera el problema que la tarea vino a resolver: una pestaña
+    // renderizada, controlada por código nuevo, contra un caché recién podado.
+    const install = CODIGO_SW.slice(
+      CODIGO_SW.indexOf('self.addEventListener("install"'),
+      CODIGO_SW.indexOf('self.addEventListener("activate"'),
+    )
+    expect(install).not.toBe("")
+    expect(install).not.toMatch(/^\s*await self\.skipWaiting\(\)/m)
+  })
+
+  it("skipWaiting vive en el handler `message`, detrás del mensaje de la persona", () => {
+    const mensaje = CODIGO_SW.slice(CODIGO_SW.indexOf('self.addEventListener("message"'))
+    expect(mensaje).toContain("self.skipWaiting()")
+    expect(mensaje).toContain("MENSAJE_SALTAR_ESPERA")
+  })
+
+  it("activate SIGUE reclamando los clientes: notificationclick depende de eso", () => {
+    // `skipWaiting()` y `clients.claim()` no son lo mismo y sacar uno no es
+    // motivo para sacar el otro. Sin `claim()`, `WindowClient.navigate()`
+    // rechaza con "Cannot navigate a window that is not controlled" y la
+    // notificación abre la app en la pantalla equivocada, en silencio
+    // (verificado en un teléfono real en el Sprint 6).
+    const activate = CODIGO_SW.slice(
+      CODIGO_SW.indexOf('self.addEventListener("activate"'),
+      CODIGO_SW.indexOf('self.addEventListener("fetch"'),
+    )
+    expect(activate).toContain("self.clients.claim()")
+  })
+
+  it("el literal del mensaje es el MISMO que manda lib/pwa/registrar-sw.ts", () => {
+    // Mismo caso de duplicación que `FAMILIAS_CON_DATOS`, con una consecuencia
+    // peor: si divergen, el aviso se muestra, se toca "Actualizar" y no pasa
+    // absolutamente nada. No hay error, no hay log, no hay síntoma.
+    const registrarSw = readFileSync(
+      path.resolve(__dirname, "../../lib/pwa/registrar-sw.ts"),
+      "utf8",
+    )
+    const declarado = registrarSw.match(/MENSAJE_SALTAR_ESPERA = "([^"]+)"/)
+    expect(declarado).not.toBeNull()
+    expect(declarado![1]).toBe(sw.MENSAJE_SALTAR_ESPERA)
+  })
+})
+
+describe("app/offline/page.tsx — ofrece exactamente lo que el worker guarda", () => {
+  it("los enlaces de la pantalla offline son las rutas cacheadas, sin /sos (que va aparte)", () => {
+    // Ofrecer un enlace a una pantalla que el worker NO guarda lleva de vuelta
+    // a la propia pantalla offline: el peor final posible para alguien que
+    // acaba de leer "esto sí lo podés ver sin conexión".
+    const pagina = readFileSync(path.resolve(__dirname, "../../app/offline/page.tsx"), "utf8")
+    const bloque = pagina.match(/PANTALLAS_GUARDADAS = \[([\s\S]*?)\] as const/)
+    expect(bloque).not.toBeNull()
+
+    const rutasOfrecidas = [...bloque![1].matchAll(/href: "([^"]+)"/g)].map((m) => m[1])
+    expect(rutasOfrecidas).toEqual(sw.RUTAS_PAGINA_OFFLINE.filter((ruta) => ruta !== "/sos"))
+
+    // `/sos` no está en la lista porque tiene su propio botón destacado arriba,
+    // pero el enlace tiene que existir igual.
+    expect(pagina).toContain('href="/sos"')
   })
 })
 

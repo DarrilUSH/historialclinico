@@ -1,7 +1,8 @@
 /**
- * Service Worker de Historial Médico.
+ * Service Worker de Historial Médico. **Hay uno solo y este es** (registro
+ * único en `lib/pwa/registrar-sw.ts`).
  *
- * Dos responsabilidades, agregadas en dos sprints distintos:
+ * Tres responsabilidades, agregadas en tres sprints distintos:
  *
  * 1. **Notificaciones** (Sprint 6, tarea 6.3): handlers `push` y
  *    `notificationclick`. Verificados contra un teléfono real; no se tocan.
@@ -9,6 +10,10 @@
  *    `fetch` con estrategia diferenciada por tipo de recurso, más `install`
  *    (precarga de la pantalla `/offline`), `activate` (limpieza de versiones
  *    viejas de caché) y `message` (precarga y purga a pedido de la página).
+ * 3. **Offline ampliado + ciclo de actualización controlado** (Sprint 11,
+ *    tarea 11.3): tres pantallas de datos más en el caché de páginas, y el
+ *    `skipWaiting()` automático reemplazado por uno **a pedido de la persona**
+ *    (mensaje `saltar-espera`, abajo).
  *
  * **La matriz de estrategias, el modelo de amenaza y los límites conocidos
  * están en `docs/offline.md`.** Este encabezado documenta solo lo que hay que
@@ -24,20 +29,43 @@
  * | `/offline` (pantalla pública, sin datos de nadie) | `shell` | precarga en `install` |
  * | `/_next/static/**` **inmutables** | `estaticos` | cache-first con tope |
  * | `/sos` (HTML con los datos horneados) | `paginas` | red-primero, cae al caché |
+ * | `/coberturas`, `/turnos`, `/medicacion` (ídem) | `paginas` | red-primero, cae al caché |
  * | `/api/sos/{perfilId}` (payload del contrato) | `datos` | red-primero, cae al caché |
  * | `/api/credenciales/{id}/imagen?lado=` | `imagenes` | caché-primero + revalidación |
  *
- * **Todo lo demás pasa de largo**: `/estudios`, `/turnos`, `/medicacion`,
- * `/coberturas`, los documentos médicos, las signed URLs de Supabase, las
- * Server Actions (`POST`) y cualquier otro origen. Sin red, una navegación a
- * cualquiera de esas pantallas devuelve `/offline`, que es una respuesta
- * honesta: "esto necesita conexión", en vez de datos viejos sin fecha.
+ * **Todo lo demás pasa de largo**: `/inicio`, `/estudios`, `/signos`,
+ * `/medicos`, `/familia`, `/perfil`, todas las subrutas de alta y edición, los
+ * documentos médicos, las signed URLs de Supabase, las Server Actions (`POST`)
+ * y cualquier otro origen. Sin red, una navegación a cualquiera de esas
+ * pantallas devuelve `/offline`, que es una respuesta honesta: "esto necesita
+ * conexión", en vez de datos viejos sin fecha.
  *
- * Por qué la lista es tan corta: `docs/modelo-permisos.md` §8.1. Todo lo que
- * queda escrito en el disco del teléfono **sobrevive a la revocación de un
- * permiso familiar** hasta que el dispositivo vuelva a tener red. Ese precio
- * se paga solo por lo que justifica el producto —la ficha de emergencia y la
- * credencial de la cobertura— y por nada más.
+ * Las cuatro pantallas de la lista se cachean **solo cuando alguien las abre
+ * con red** (no hay precarga de las tres nuevas): quien nunca entra a
+ * `/medicacion` no tiene su medicación escrita en el disco. La única que sí se
+ * precarga es `/sos`, porque es la que hace falta en el momento en que ya no
+ * se puede navegar a buscarla.
+ *
+ * Por qué la lista sigue siendo corta: `docs/modelo-permisos.md` §8.1. Todo lo
+ * que queda escrito en el disco del teléfono **sobrevive a la revocación de un
+ * permiso familiar** hasta que el dispositivo vuelva a tener red. Ese precio se
+ * paga solo por lo que justifica el producto —la ficha de emergencia, la
+ * credencial, y las tres listas que el roadmap del Sprint 11 declaró
+ * imprescindibles sin señal— y por nada más. Las tres nuevas viven en la caché
+ * `paginas`, que **se borra entera al llegar a `/login`**.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * UNA ENTRADA POR RUTA: las páginas con query NO se cachean
+ *
+ * `/turnos?perfil={id}` y `/medicacion?perfil={id}` son deep links de una
+ * notificación push: **redirigen** a `/…/enlace` para cambiar el perfil activo
+ * y vuelven. Si se cachearan, pasarían dos cosas malas a la vez: una entrada
+ * nueva por cada perfil que llegue por push, y —peor— `decidirDestinoDeCache`
+ * vería una respuesta `redirected` y **borraría** la copia buena de esa lista.
+ *
+ * Por eso `clasificarSolicitud` exige que la URL no traiga query. El deep link
+ * viaja por red, aterriza en la ruta pelada tras la redirección, y ESA
+ * navegación es la que llena el caché.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * NUNCA se cachea una signed URL
@@ -52,28 +80,65 @@
  * signed URLs; el caché offline usa la URL estable. `docs/offline.md` §4.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * `skipWaiting()` + `clients.claim()` CON caché versionada — se revisó, se
- * mantiene, y este es el motivo
+ * EL CICLO DE ACTUALIZACIÓN: `skipWaiting()` dejó de ser automático (Sprint 11)
  *
- * El encabezado del Sprint 6 dejó anotado que estas dos líneas había que
- * revisarlas el día que apareciera el caché, porque tomar el control de una
- * pestaña ya cargada puede dejarla pidiendo chunks que la versión nueva borró.
- * Revisado: se mantienen, y el riesgo se neutraliza así:
+ * Hasta el Sprint 8 este archivo llamaba a `self.skipWaiting()` dentro de
+ * `install`: la versión nueva se ponía al mando sola, en el acto. La razón era
+ * buena y sigue siendo cierta —en un celular las pestañas no se cierran nunca,
+ * así que sin `skipWaiting()` una corrección de este archivo se queda en
+ * `waiting` para siempre; ya pasó en un teléfono real (Sprint 6,
+ * `docs/push.md` §4.3)—. Pero el precio también es cierto: **cambiar de worker
+ * bajo los pies de una pestaña que ya está renderizada** la deja controlada por
+ * código nuevo con HTML y chunks viejos, y con un caché que `activate` acaba de
+ * podar.
  *
- * - Los estáticos de Next tienen **URL con hash de contenido**. Un build nuevo
- *   no pisa las entradas del anterior: sus chunks tienen otra URL. No existe
- *   la colisión "mismo nombre, otro contenido".
- * - `activate` **solo borra cachés de una VERSIÓN distinta** (`VERSION`, abajo),
- *   que se sube a mano cuando cambia la lógica de este archivo. Un deploy
- *   normal de la aplicación no borra nada.
- * - Si aun así una pestaña vieja pide un chunk que ya no está en el caché, cae
- *   a la red y sigue funcionando. Solo pierde ese chunk *offline*, que es un
- *   escenario de ventana muy angosta.
+ * La salida no es elegir uno de los dos males: es **darle el control a la
+ * persona**. El worker nuevo se instala y se queda esperando; la página detecta
+ * `registration.waiting` y muestra un aviso discreto ("Hay una versión nueva —
+ * Actualizar"); recién si lo tocan llega el mensaje `saltar-espera`, este
+ * worker hace `skipWaiting()`, dispara `controllerchange` y la página se
+ * recarga UNA vez. El resultado es una actualización atómica: worker nuevo,
+ * HTML nuevo y chunks nuevos empiezan juntos.
  *
- * Del otro lado, sacar `skipWaiting()` tendría un costo cierto y conocido: en
- * un celular las pestañas no se cierran nunca, así que una corrección de este
- * archivo se quedaría esperando en `waiting` con el worker viejo atendiendo
- * los pushes. Ya pasó una vez en un teléfono real (Sprint 6).
+ * **Lo que NO cambia mientras el worker nuevo espera** —y es lo que hacía falta
+ * verificar antes de tocar esto—:
+ *
+ * - El worker VIEJO sigue activo y sigue siendo el que recibe `push` y
+ *   `notificationclick`. Un `waiting` no recibe eventos push. Las
+ *   notificaciones no dependen en ningún punto de que el worker más nuevo esté
+ *   al mando, así que el aviso puede quedar sin tocar durante días sin que se
+ *   pierda un solo recordatorio.
+ * - El caché sigue siendo el de la versión vieja, coherente con el HTML viejo
+ *   que la pestaña ya tiene. `activate` (y con él la poda de versiones) no
+ *   corre hasta que alguien acepte.
+ * - La sesión no se toca: recargar la página no borra ninguna cookie, y la
+ *   purga de cachés con datos cuelga de `/login`, no de una recarga.
+ *
+ * **La primera instalación no muestra nada.** Sin worker previo
+ * (`navigator.serviceWorker.controller === null`) no hay "versión nueva": el
+ * worker se instala, activa y reclama sin aviso y sin recarga. Avisar ahí sería
+ * pedirle a alguien que "actualice" una app que acaba de abrir por primera vez.
+ * La comprobación vive en `lib/pwa/registrar-sw.ts#debeAvisarActualizacion`.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * `clients.claim()` SÍ se mantiene, y no es lo mismo que `skipWaiting()`
+ *
+ * `skipWaiting()` decide CUÁNDO una versión nueva pasa a estar activa;
+ * `clients.claim()` decide si, ya activa, atiende también las pestañas que
+ * estaban abiertas. Sacar el primero no da ningún motivo para sacar el segundo,
+ * y el segundo es obligatorio: sin él, la pestaña desde la que se acaban de
+ * activar las notificaciones queda SIN CONTROLAR y `WindowClient.navigate()`
+ * —lo que usa `notificationclick`— rechaza con "Cannot navigate a window that
+ * is not controlled". Se detectó exactamente así en un teléfono real
+ * (Sprint 6). Desde el Sprint 8 es además lo que hace que el handler `fetch`
+ * empiece a atender la pestaña actual sin esperar una recarga.
+ *
+ * El riesgo que el Sprint 6 dejó anotado para `claim()` con caché versionada
+ * sigue acotado por lo mismo de siempre: los estáticos de Next tienen **URL con
+ * hash de contenido**, así que un build nuevo no pisa las entradas del
+ * anterior; `activate` **solo borra cachés de otra VERSIÓN** (`VERSION`, abajo,
+ * se sube a mano); y una pestaña que pida un chunk que ya no está cae a la red
+ * y sigue funcionando.
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * `install` NUNCA puede fallar
@@ -166,8 +231,13 @@ function leerPayload(event) {
  * Versión del caché. **Se sube a mano cuando cambia la lógica de este
  * archivo**, no en cada deploy de la aplicación: `activate` borra todo lo que
  * lleve el prefijo y no sea de esta versión (ver el encabezado).
+ *
+ * `v2` (Sprint 11, tarea 11.3): entraron tres pantallas más a la caché
+ * `paginas`. Subirla acá es lo que garantiza que un dispositivo que venía del
+ * Sprint 8 arranque con las cinco cachés limpias en vez de arrastrar entradas
+ * clasificadas con la matriz anterior.
  */
-const VERSION = "v1"
+const VERSION = "v2"
 
 /** Prefijo común. `activate` lo usa para no tocar cachés de otras apps del origen. */
 const PREFIJO_CACHE = "historial-medico-"
@@ -198,11 +268,42 @@ const CACHES_VIGENTES = [
  */
 const FAMILIAS_CON_DATOS = ["paginas", "datos", "imagenes"]
 
+/**
+ * El único mensaje que hace que una versión nueva de este archivo pase a estar
+ * al mando (Sprint 11, ver "EL CICLO DE ACTUALIZACIÓN" en el encabezado).
+ *
+ * ⚠️ Está DUPLICADO en `lib/pwa/registrar-sw.ts` por el mismo motivo que
+ * `FAMILIAS_CON_DATOS`, y `tests/unit/sw-offline.test.ts` verifica que los dos
+ * literales coincidan. Si divergen, el botón "Actualizar" deja de hacer nada y
+ * **no hay forma de darse cuenta mirando la pantalla**: el aviso se muestra, se
+ * toca, y no pasa absolutamente nada.
+ */
+const MENSAJE_SALTAR_ESPERA = "saltar-espera"
+
 /** Pantalla pública de "sin conexión". Se precarga en `install`. */
 const RUTA_OFFLINE = "/offline"
 
-/** La ficha de emergencia: la única pantalla con datos que se cachea. */
+/** La ficha de emergencia: la pantalla que además se PRECARGA (no solo se cachea al visitarla). */
 const RUTA_SOS = "/sos"
+
+/**
+ * Las cuatro pantallas con datos que se guardan para verse sin red, en el orden
+ * en que las nombra el criterio de aceptación del Sprint 11: SOS, coberturas y
+ * "la última lista de turnos y medicación".
+ *
+ * Las cuatro son Server Components que traen **los datos horneados en el HTML**
+ * (no hay un endpoint JSON detrás que haga falta cachear aparte: el `fetch`
+ * pasa por el servidor durante el render, no desde el navegador). Guardar el
+ * HTML es guardar la lista. La única excepción son las miniaturas de
+ * `/coberturas`, que el navegador pide por signed URL a Supabase y por lo tanto
+ * **no** se ven sin red: los datos de la credencial —obra social, plan, número
+ * de afiliado— sí, la foto no. `docs/offline.md` §3 y §8.
+ *
+ * ⚠️ Agregar una ruta acá **escribe datos de salud en el disco del teléfono**.
+ * No es una lista de conveniencia: cada entrada tiene que justificarse contra
+ * `docs/modelo-permisos.md` §8.1.
+ */
+const RUTAS_PAGINA_OFFLINE = ["/sos", "/coberturas", "/turnos", "/medicacion"]
 
 /** Payload JSON del contrato (`docs/modelo-sos.md` §7), uno por perfil. */
 const PREFIJO_API_SOS = "/api/sos/"
@@ -235,19 +336,25 @@ const TOPE_ESTATICOS = 150
  * qué se cachea.
  *
  * `esNavegacion` (`request.mode === "navigate"`) no es un detalle: Next.js
- * pide la MISMA URL `/sos` de dos formas distintas -HTML en una navegación
- * completa, payload RSC (`text/x-component`) en una navegación del router-.
- * Guardar las dos bajo la clave `/sos` dejaría el caché con un payload RSC
- * que el navegador intentaría mostrar como página. Por eso `/sos` solo entra
- * al caché cuando la request es una navegación de verdad; el RSC pasa de
- * largo y, si falla por falta de red, el router de Next cae a una navegación
- * completa, que sí encuentra el HTML cacheado.
+ * pide la MISMA URL de dos formas distintas -HTML en una navegación completa,
+ * payload RSC (`text/x-component`) en una navegación del router-. Guardar las
+ * dos bajo la misma clave dejaría el caché con un payload RSC que el navegador
+ * intentaría mostrar como página. Por eso una pantalla solo entra al caché
+ * cuando la request es una navegación de verdad; el RSC pasa de largo y, si
+ * falla por falta de red, el router de Next cae a una navegación completa, que
+ * sí encuentra el HTML cacheado.
+ *
+ * `busqueda` (`url.search`) tampoco es cosmético: es lo que mantiene **una
+ * entrada por ruta** y lo que impide que un deep link de push
+ * (`/turnos?perfil={id}`, que redirige) borre la copia buena de la lista. Ver
+ * "UNA ENTRADA POR RUTA" en el encabezado.
  *
  * @param {string} pathname
  * @param {boolean} esNavegacion
- * @returns {"estatico"|"pagina-sos"|"datos-sos"|"imagen-credencial"|"navegacion"|"red"}
+ * @param {string} [busqueda] `url.search`: `""` o `"?perfil=…"`.
+ * @returns {"estatico"|"pagina"|"datos-sos"|"imagen-credencial"|"navegacion"|"red"}
  */
-function clasificarSolicitud(pathname, esNavegacion) {
+function clasificarSolicitud(pathname, esNavegacion, busqueda) {
   // La imagen de credencial primero: se puede pedir como subrecurso de `<img>`
   // o como navegación (abrirla en una pestaña), y en los dos casos le toca la
   // misma estrategia.
@@ -260,8 +367,10 @@ function clasificarSolicitud(pathname, esNavegacion) {
   if (pathname.startsWith(PREFIJO_API_SOS)) {
     return "datos-sos"
   }
-  if (pathname === RUTA_SOS && esNavegacion) {
-    return "pagina-sos"
+
+  const sinQuery = !busqueda || busqueda === "?"
+  if (esNavegacion && sinQuery && RUTAS_PAGINA_OFFLINE.indexOf(pathname) !== -1) {
+    return "pagina"
   }
   if (esNavegacion) {
     return "navegacion"
@@ -464,10 +573,11 @@ async function estrategiaEstatico(event, request) {
 }
 
 /**
- * Red-primero con caída al caché. Es la estrategia de `/sos` y del payload
- * JSON: **con red siempre gana el dato fresco** —nadie debería leer una ficha
- * de emergencia vieja teniendo la nueva a un toque— y sin red aparece la
- * última copia bajada, que es exactamente lo que el producto promete.
+ * Red-primero con caída al caché. Es la estrategia de las cuatro pantallas de
+ * `RUTAS_PAGINA_OFFLINE` y del payload JSON: **con red siempre gana el dato
+ * fresco** —nadie debería leer una ficha de emergencia vieja, ni una lista de
+ * turnos vieja, teniendo la nueva a un toque— y sin red aparece la última copia
+ * bajada, que es exactamente lo que el producto promete ("la ÚLTIMA lista").
  */
 async function estrategiaRedPrimero(request, nombreCache) {
   const cache = await caches.open(nombreCache)
@@ -528,8 +638,9 @@ async function estrategiaImagenCredencial(event, request) {
 
 /**
  * Cualquier otra navegación: red pura. Sin red, la pantalla `/offline` —clara,
- * en español y con un camino a la ficha SOS— en vez del dinosaurio de Chrome.
- * **No se cachea nada acá**: el resto de la app no tiene copia local.
+ * en español y con un camino a las cuatro pantallas que sí están guardadas— en
+ * vez del dinosaurio de Chrome. **No se cachea nada acá**: el resto de la app
+ * no tiene copia local, a propósito.
  */
 async function estrategiaNavegacion(request) {
   try {
@@ -694,10 +805,18 @@ self.addEventListener("install", (event) => {
         // instalación.
       }
 
-      // Sin esto, una versión nueva espera a que se cierren todas las pestañas
-      // de la app, cosa que en un celular no pasa nunca. Ver el encabezado
-      // para por qué sigue siendo seguro ahora que hay caché versionada.
-      await self.skipWaiting()
+      // NO hay `skipWaiting()` acá (Sprint 11). Este worker se queda en
+      // `waiting` hasta que la persona toque "Actualizar" en el aviso de
+      // `components/pwa/aviso-actualizacion.tsx`, que manda el mensaje
+      // `saltar-espera` (handler `message`, abajo). Ver "EL CICLO DE
+      // ACTUALIZACIÓN" en el encabezado: mientras espera, el worker VIEJO sigue
+      // activo y sigue atendiendo los pushes, así que la espera no cuesta
+      // ninguna notificación.
+      //
+      // En la PRIMERA instalación no hay nada que esperar: sin un worker activo
+      // al que desplazar, el navegador pasa de `installed` a `activated` solo.
+      // El aviso no aparece en ese caso porque la página lo condiciona a que ya
+      // exista un controlador (`lib/pwa/registrar-sw.ts#debeAvisarActualizacion`).
     })(),
   )
 })
@@ -749,13 +868,13 @@ self.addEventListener("fetch", (event) => {
     return
   }
 
-  const estrategia = clasificarSolicitud(url.pathname, request.mode === "navigate")
+  const estrategia = clasificarSolicitud(url.pathname, request.mode === "navigate", url.search)
 
   switch (estrategia) {
     case "estatico":
       event.respondWith(estrategiaEstatico(event, request))
       return
-    case "pagina-sos":
+    case "pagina":
       event.respondWith(estrategiaRedPrimero(request, CACHE_PAGINAS))
       return
     case "datos-sos":
@@ -774,8 +893,12 @@ self.addEventListener("fetch", (event) => {
 })
 
 /**
- * Mensajes de la página. Solo dos, y los dos con la forma validada: el `data`
+ * Mensajes de la página. Solo tres, y los tres con la forma validada: el `data`
  * de un `postMessage` es entrada no confiable como cualquier otra.
+ *
+ * El tercero (`saltar-espera`) es el que cierra el ciclo de actualización; ver
+ * `MENSAJE_SALTAR_ESPERA` arriba y "EL CICLO DE ACTUALIZACIÓN" en el
+ * encabezado.
  */
 self.addEventListener("message", (event) => {
   const datos = event.data
@@ -791,6 +914,19 @@ self.addEventListener("message", (event) => {
 
   if (datos.tipo === "purgar-datos") {
     event.waitUntil(purgarCachesConDatos())
+    return
+  }
+
+  // El único camino por el que una versión nueva de este archivo pasa a estar
+  // al mando (Sprint 11). Lo manda `aplicarActualizacion()` al worker en
+  // `waiting`, y solo después de que alguien toque "Actualizar".
+  //
+  // Que este mensaje llegue "de más" no rompe nada: `skipWaiting()` sobre un
+  // worker que ya está activo no hace absolutamente nada, y sobre uno en
+  // `waiting` hace exactamente lo que se pidió. Por eso no hace falta ninguna
+  // validación extra más allá del tipo.
+  if (datos.tipo === MENSAJE_SALTAR_ESPERA) {
+    event.waitUntil(self.skipWaiting())
   }
 })
 

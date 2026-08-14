@@ -163,6 +163,23 @@ Las dos líneas son seguras **hoy** porque este service worker no tiene handler
 **La tarea de PWA/offline (Sprint 8/11) tiene que revisarlas** junto con el
 versionado del caché.
 
+> **Actualizado en el Sprint 11 (tarea 11.3).** Se revisaron, y se separaron:
+> `clients.claim()` **se mantiene** —es lo que hace que `notificationclick`
+> pueda navegar la pestaña, tal como cuenta el párrafo de arriba—, pero
+> `skipWaiting()` **salió de `install`**. Una versión nueva del worker ahora
+> espera y muestra un aviso ("Hay una versión nueva — Actualizar"); recién al
+> tocarlo hace `skipWaiting()` y la pantalla se recarga una vez.
+>
+> **Esto no afecta a las notificaciones**, y es lo primero que se verificó: un
+> worker en `waiting` no recibe eventos `push`. El worker **viejo** sigue activo
+> y sigue atendiendo los pushes mientras el aviso está sin tocar, así que el
+> problema que describe esta sección —"una corrección se quedó esperando con el
+> worker viejo atendiendo los pushes"— sigue sin poder pasar en silencio: ahora
+> hay un aviso en pantalla que dice exactamente eso.
+>
+> El porqué completo, las cuatro trampas del patrón y lo que cambia (y lo que
+> no) durante la espera están en `docs/offline.md` §5.1.
+
 ### 4.4 Nada de caché en `sw.js` todavía
 
 No hay `install` con `addAll` ni handler `fetch`, y es deliberado: este

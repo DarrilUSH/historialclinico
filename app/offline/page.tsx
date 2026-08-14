@@ -25,19 +25,41 @@
  *
  * ## Lo que dice y lo que no promete
  *
- * Ofrece la ficha SOS porque es lo único que de verdad está guardado en el
- * teléfono. **No ofrece "reintentar" como botón**: un botón que recarga sin
- * red vuelve a esta misma pantalla y se lee como que la app está rota. El
- * texto explica qué hacer (recuperar señal) y qué sí funciona mientras tanto.
+ * Ofrece la ficha SOS —destacada, porque es la única que el worker **precarga**
+ * sola— y, desde el Sprint 11 (tarea 11.3), enlaces a las otras tres pantallas
+ * que quedan guardadas al visitarlas con señal: Coberturas, Turnos y
+ * Medicación. La diferencia se dice con todas las letras en el texto ("tal como
+ * las viste la última vez que tuviste señal") en vez de esconderse: prometer
+ * una lista al día sin conexión sería mentir, y una lista vieja presentada como
+ * fresca es peor que no tener ninguna.
+ *
+ * **No ofrece "reintentar" como botón**: un botón que recarga sin red vuelve a
+ * esta misma pantalla y se lee como que la app está rota. El texto explica qué
+ * hacer (recuperar señal) y qué sí funciona mientras tanto.
  */
 
 import type { Metadata } from "next"
 
-import { HeartPulseIcon, WifiOffIcon } from "lucide-react"
+import { CalendarDaysIcon, HeartPulseIcon, PillIcon, WalletIcon, WifiOffIcon } from "lucide-react"
 
 export const metadata: Metadata = {
   title: "Sin conexión — Historial Médico",
 }
+
+/**
+ * Las tres pantallas que el Sprint 11 (tarea 11.3) sumó al caché, además de
+ * `/sos`. **Tiene que decir lo mismo que `RUTAS_PAGINA_OFFLINE` en
+ * `public/sw.js`**: ofrecer acá un enlace a una pantalla que el worker no
+ * guarda lleva de vuelta a esta misma pantalla, que es la peor forma de
+ * responder "no hay conexión".
+ *
+ * `tests/unit/sw-offline.test.ts` verifica que las dos listas coincidan.
+ */
+const PANTALLAS_GUARDADAS = [
+  { href: "/coberturas", texto: "Coberturas", Icono: WalletIcon },
+  { href: "/turnos", texto: "Turnos", Icono: CalendarDaysIcon },
+  { href: "/medicacion", texto: "Medicación", Icono: PillIcon },
+] as const
 
 export default function PaginaOffline() {
   return (
@@ -78,6 +100,29 @@ export default function PaginaOffline() {
           Los datos que veas ahí son la última copia que se guardó en este
           teléfono. Al pie de la ficha figura cuándo se revisaron por última
           vez.
+        </p>
+
+        <p className="mt-2 text-base text-muted-foreground">
+          También quedan guardadas las últimas versiones de estas pantallas, tal
+          como las viste la última vez que tuviste señal:
+        </p>
+        <ul className="flex flex-col gap-2">
+          {PANTALLAS_GUARDADAS.map((pantalla) => (
+            <li key={pantalla.href}>
+              <a
+                href={pantalla.href}
+                className="flex min-h-tactil w-full items-center gap-3 rounded-lg border border-border px-4 py-3 text-base font-semibold text-foreground transition-colors duration-(--duracion-media) hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+              >
+                <pantalla.Icono className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                {pantalla.texto}
+              </a>
+            </li>
+          ))}
+        </ul>
+        <p className="text-sm text-muted-foreground">
+          Las fotos de las credenciales solo se ven completas en la ficha SOS.
+          En Coberturas vas a ver los datos (obra social, plan y número de
+          afiliado) sin las miniaturas.
         </p>
       </div>
     </main>

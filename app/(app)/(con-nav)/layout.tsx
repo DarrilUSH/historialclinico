@@ -70,10 +70,16 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
   return (
     <div className="flex min-h-pantalla w-full flex-col bg-background">
       {/* Registra el service worker y le pide precargar la ficha SOS de ESTE
-          perfil (Sprint 8.4). No pinta nada; va acá y no en el layout raíz
-          porque `/login` y `/registro` no tienen ninguna ficha que guardar.
-          Ver `lib/pwa/registrar-sw.ts` para por qué el registro subió al
-          arranque en este sprint. */}
+          perfil (Sprint 8.4). Va acá y no en el layout raíz porque `/login` y
+          `/registro` no tienen ninguna ficha que guardar. Ver
+          `lib/pwa/registrar-sw.ts` para por qué el registro subió al arranque
+          en ese sprint.
+
+          Casi siempre devuelve `null`. Lo único que puede llegar a pintar es la
+          barra "Hay una versión nueva" (Sprint 11.3,
+          `components/pwa/aviso-actualizacion.tsx`), que se posiciona `fixed`
+          sobre la bottom nav: por eso da igual que esté acá arriba en el
+          árbol. */}
       <RegistroServiceWorker perfilId={perfil.id} />
 
       <EncabezadoPerfil perfil={perfil} esPropio={permisos.esPropio} />

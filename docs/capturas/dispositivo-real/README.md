@@ -19,6 +19,7 @@ Samsung Galaxy A71 (SM-A715F), Android 13, Chrome — 2026-08-13, vía ADB (`adb
 | sprint10-medicos.png | `/medicos` (tarea 10.1) en el dispositivo real: directorio del perfil de Roberto con los dos médicos del seed, tarjeta de Dr. Carlos Rodríguez con especialidad, matrícula, institución y los botones grandes "Llamar"/"Cómo llegar" + "Editar"/"Dar de baja" (sesión de María, `can_manage`) |
 | sprint10-medico-llamar.png | Tocar "Llamar" en la tarjeta del Dr. Rodríguez abre el discador nativo de Android con `+54 2901 23-4000` precargado -el mismo teléfono guardado en `doctors.phone`, sin reformatear-, confirmando que el `tel:` dispara el discador real y no un link muerto |
 | sprint11-instalar-menu.png | Menú ⋮ de Chrome sobre `/inicio` (build de producción, `next start`) con **"Instalar y crear acceso directo"** presente -el criterio de instalabilidad de Chrome, equivalente al "Instalar aplicación" que pide el ROADMAP, pasa- |
+| sprint11-offline-pantalla.png | `/offline` **actualizada** (tarea 11.3) en el dispositivo real, build de producción: bajo el botón grande "Abrir mi ficha SOS" aparece el bloque nuevo "También quedan guardadas las últimas versiones de estas pantallas, tal como las viste la última vez que tuviste señal" con los tres accesos **Coberturas / Turnos / Medicación**, y la aclaración de que las miniaturas de credencial no se ven sin red (§3.4 de `docs/offline.md`) |
 
 Flujo verificado con toques e ingreso de texto reales por ADB: login de María → selección del perfil gestionado de Roberto → inicio. El camino de error (submit vacío) también se verificó en pantalla física.
 
@@ -356,3 +357,38 @@ Suite completa de RLS (`scripts/test-rls.sql`, sin ninguna migración nueva de e
 **Para reproducir esta prueba con un WebAPK real** (no necesario para esta tarea, documentado para quien retome el tema): habría que servir la app por un origen alcanzable desde internet (túnel HTTPS tipo `ngrok`/`cloudflared`, o el propio deploy de Neolo) en vez de `localhost` vía `adb reverse`. Es infraestructura de prueba, no código de la app.
 
 Suites de esta tarea: `npm run test` → **654/654** (649 previos + 5 nuevos: 4 de `lib/pwa/boton-instalar.ts` + 1 de `RUTA_MANIFEST`), `npx tsc --noEmit` limpio, `npx eslint` limpio (1 error de `react-hooks/set-state-in-effect` detectado y corregido en `components/pwa/boton-instalar.tsx`, ver el commit), `node scripts/verificar-contraste.mjs` 98/98, `npm run build` limpio con `/manifest.webmanifest` listado como ruta estática (`○`). RLS sin cambios de esquema en esta tarea: **234/234 PASS** (`scripts/test-rls.sql`, corrida completa igual, para no asumir "no tocó nada" sin comprobarlo).
+
+## Sprint 11 · service worker consolidado: offline ampliado y actualización controlada (tarea 11.3) — verificación PARCIAL, con el motivo declarado
+
+**2026-08-14.** Contra `next build && npm run start` (no `next dev`: el caché de estáticos exige el build de producción, límite 5 de `docs/offline.md`). Se detuvo el server `dev`, se buildeó y se levantó `prod`, igual que en 11.1.
+
+### Lo que SÍ se verificó
+
+**A. En el Galaxy A71 real** (`adb reverse tcp:3000` activo):
+
+1. **`/offline` actualizada** (`sprint11-offline-pantalla.png`): la pantalla pública abre con el diseño completo y, debajo del botón "Abrir mi ficha SOS", el bloque nuevo con los tres accesos **Coberturas / Turnos / Medicación** y la aclaración sobre las miniaturas. Es la ruta pública, así que se pudo ver sin sesión.
+
+**B. Contra el mismo build de producción, inspeccionando el service worker de verdad** (no un mock: `navigator.serviceWorker` y la Cache API reales del navegador, sobre `http://localhost:3000`):
+
+2. **El worker nuevo se instala y SE QUEDA ESPERANDO.** Con el worker del Sprint 8 activo, publicar este `sw.js` dejó el registro en `active = activated` + `waiting = /sw.js`, y las cachés en **`shell-v1`, `estaticos-v1`, `shell-v2`, `estaticos-v2` conviviendo**. Que las de `v1` siguieran ahí es la prueba de que `activate` **no corrió**: el `skipWaiting()` automático está efectivamente fuera de `install`, que es el cambio central de la tarea.
+3. **`install` precargó la `/offline` nueva bajo `v2`.** `historial-medico-shell-v2` contenía `/offline` (21.091 bytes, con los cuatro `href` — `/sos`, `/coberturas`, `/turnos`, `/medicacion`) y `/icono-192.png`, más **17 estáticos** en `estaticos-v2` sacados del propio HTML (`extraerRecursosDeHtml`). El worker en espera prepara su caché sin tocar la del worker que está sirviendo.
+4. **El mensaje `saltar-espera` cierra el ciclo, entero.** Un `postMessage({tipo:"saltar-espera"})` al worker en `waiting` produjo, en este orden: `skipWaiting()` → `activate` → `clients.claim()` → **evento `controllerchange` disparado** (que es exactamente lo que `aplicarActualizacion` usa para recargar una sola vez), `waiting` vacío, y las cachés quedaron en **solo `shell-v2` + `estaticos-v2`**. O sea: la limpieza de versiones viejas de `activate` **sigue andando con los nombres nuevos**, que era el cuarto punto del encargo.
+5. **Una navegación SIN sesión no envenena el caché.** Ir a `/turnos` sin cookie devolvió `307 → /login?desde=%2Fturnos`, y la caché `historial-medico-paginas-v2` **ni siquiera se creó**: `decidirDestinoDeCache` vio `redirected === true` y descartó. Es la garantía de seguridad del Sprint 8 (§6.1 de `docs/offline.md`) sosteniéndose sobre las tres rutas nuevas — sin ella, el caché de `/turnos` terminaría conteniendo la pantalla de login.
+
+### Lo que NO se verificó, y por qué
+
+La sesión del teléfono (y la del navegador de escritorio) había **vencido** al empezar esta tarea: las dos pantallas abrían en `/login`. Reponerla exige tipear la contraseña del seed en el formulario, y **las reglas de seguridad de este asistente prohíben ingresar contraseñas en un campo de login, sin excepción por tratarse de una credencial de prueba** — la instrucción para ese caso es pedirle a la persona que lo haga ella misma. Así que quedó pendiente, sin inventarse nada:
+
+- Las cuatro rutas (`/sos`, `/coberturas`, `/turnos`, `/medicacion`) abriendo **sin red** con su última copia (faltan `sprint11-offline-turnos.png` y `sprint11-offline-medicacion.png`).
+- La **barra "Hay una versión nueva — Actualizar"** en pantalla (`sprint11-aviso-actualizacion.png`), su toque, la recarga única y la sesión intacta después.
+- El push de prueba con el worker ya actualizado.
+
+Los puntos 2, 3 y 4 de arriba cubren **todo el mecanismo** que esas capturas ilustrarían del lado del service worker (espera, mensaje, `controllerchange`, poda de cachés); lo que falta demostrar en pantalla es la interfaz que lo dispara y el render de las tres listas desde el caché.
+
+**Para completarlo** (10 segundos de trabajo humano): iniciar sesión en el teléfono con la receta de login de más arriba y dejar el server `prod` levantado. Después: visitar las cuatro rutas con red, cortar (`adb reverse --remove tcp:3000` + `adb shell svc wifi disable`), capturar, restaurar, tocar `public/sw.js`, rebuild y recargar para que aparezca el aviso.
+
+### Coordinación de servidores
+
+Se dejó corriendo **`prod`** (`npm run start`) en el puerto 3000, a propósito y en contra de la costumbre de restaurar `dev` al final: la verificación pendiente necesita el build de producción levantado. Para volver al desarrollo normal: detener `prod` y levantar `dev` (`.claude/launch.json` ya tiene las dos entradas).
+
+Suites de esta tarea: `npm run test` → **684/684** (654 previos + 30 nuevos entre `sw-offline` y `actualizacion-sw`), `npx tsc --noEmit` limpio, `npx eslint .` limpio (`public/sw.js` incluido, verificado aparte con `--no-ignore`), `node scripts/verificar-contraste.mjs` **98/98**, `npm run build` limpio, `scripts/test-rls.sql` **234/234 PASS** y `scripts/test-storage-rls.sh` **20/20 PASS** (sin migraciones nuevas en esta tarea: se corrieron igual para no asumir "no tocó nada" sin comprobarlo).

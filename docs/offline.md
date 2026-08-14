@@ -1,12 +1,19 @@
 # Modo offline: qué se guarda en el teléfono y qué no
 
-> Sprint 8, tarea 8.4. Implementación: `public/sw.js`, `lib/pwa/registrar-sw.ts`,
+> Sprint 8 tarea 8.4 (caché de datos vitales) y **Sprint 11 tarea 11.3**
+> (consolidación: offline ampliado a tres pantallas más y ciclo de actualización
+> controlado). Implementación: `public/sw.js`, `lib/pwa/registrar-sw.ts`,
+> `components/pwa/aviso-actualizacion.tsx`,
+> `components/pwa/registro-service-worker.tsx`,
 > `app/api/sos/[perfilId]/route.ts`, `app/api/credenciales/[id]/imagen/route.ts`,
 > `app/offline/page.tsx`.
 >
 > Contrato del payload: `docs/modelo-sos.md` §7. Permisos y ventana de
 > revocación: `docs/modelo-permisos.md` §8.1. Notificaciones (el otro
 > inquilino del mismo service worker): `docs/push.md`.
+>
+> **La matriz completa por ruta está en §3.2.** Si venís a responder "¿esta
+> pantalla anda sin conexión?", esa es la tabla.
 
 ---
 
@@ -36,6 +43,7 @@ se pudo.
 | Se guarda | Por qué |
 |---|---|
 | El HTML de `/sos` con los datos horneados | Es la pantalla entera de la promesa |
+| El HTML de `/coberturas`, `/turnos` y `/medicacion` | Sprint 11: el criterio de aceptación las nombra por su nombre (§2.1) |
 | `/api/sos/{perfilId}` (payload JSON del contrato) | Los mismos datos en forma legible por código, uno **por perfil** |
 | Las fotos de la credencial principal (`/api/credenciales/{id}/imagen`) | El carnet que se pide en la ventanilla |
 | `/offline` (pantalla pública, sin datos de nadie) | La respuesta honesta para todo lo demás |
@@ -43,16 +51,51 @@ se pudo.
 
 | NO se guarda | Por qué |
 |---|---|
-| `/estudios`, `/turnos`, `/medicacion`, `/coberturas`, `/inicio`, `/familia` | No son la promesa, y cada una multiplicaría los datos de salud escritos en el disco |
+| `/inicio`, `/estudios`, `/signos`, `/medicos`, `/familia`, `/perfil` | No hacen falta sin conexión, y cada una multiplicaría los datos de salud escritos en el disco |
+| Todas las subrutas de alta/edición (`/turnos/nuevo`, `/medicacion/{id}/editar`, …) | No hay edición offline (§8, límite 4): un formulario cacheado prometería lo contrario |
+| Cualquier pantalla **con query** (`/turnos?perfil={id}`) | §3.3 — una entrada por ruta, y el deep link de push no puede borrar la copia buena |
 | Documentos médicos (PDF, fotos de estudios) | Lo más sensible del producto, y nada de eso se lee en una guardia sin conexión |
 | Cualquier **signed URL** de Supabase Storage | Ver §4 |
 | Respuestas a `POST` (Server Actions) | Una mutación no se cachea nunca |
 | Cualquier otro origen | El worker ni siquiera lo intercepta |
 
 Sin red, una navegación a cualquier pantalla de la columna derecha devuelve
-`/offline`. **Es deliberado que no muestre datos viejos**: una lista de turnos
-de hace tres semanas, sin ninguna señal de que está vieja, es peor que decir
-"esto necesita conexión".
+`/offline`, que desde el Sprint 11 **enlaza a las cuatro que sí están
+guardadas**.
+
+### 2.1 El Sprint 11 revirtió una decisión del Sprint 8, y conviene decirlo
+
+La versión anterior de este documento decía, en esta misma tabla, que
+`/turnos`, `/medicacion` y `/coberturas` **no** se guardaban, con este
+argumento: *"una lista de turnos de hace tres semanas, sin ninguna señal de que
+está vieja, es peor que decir «esto necesita conexión»"*.
+
+El criterio de aceptación del Sprint 11 pide lo contrario, con todas las letras:
+*"offline: SOS, coberturas y última lista de turnos y medicación se ven"*. La
+decisión se revisó y se cambió. El argumento del Sprint 8 no era falso, era
+**incompleto**: comparaba "lista vieja" contra "nada", cuando la comparación
+real es contra la alternativa que de verdad tiene alguien en una sala de espera
+sin señal, que es *no poder confirmar a qué hora era el turno ni qué dosis
+tomaba*. Un dato viejo y fechado es útil; lo que es dañino es un dato viejo
+**presentado como fresco**.
+
+Por eso el cambio no viene solo. Viene con tres cosas que lo hacen honesto:
+
+1. **La barra "Sin conexión — estás viendo datos guardados"**
+   (`components/base/indicador-conexion.tsx`, Sprint 8.5) ya está en el layout
+   de `(con-nav)`: aparece arriba de estas tres pantallas apenas se corta la
+   red. La lista vieja nunca se ve sin ese cartel.
+2. **Solo se guarda lo que alguien abrió.** No hay precarga de las tres nuevas
+   (§7): quien nunca entra a `/medicacion` no tiene su medicación en el disco.
+   La precarga sigue siendo exclusiva de `/sos`, que es la que hace falta
+   justamente cuando ya no se puede navegar a buscarla.
+3. **Las tres viven en la caché `paginas`**, que es una de las tres familias con
+   datos personales: se borra entera al llegar a `/login` (§6.2) y se revalida
+   contra el servidor en cuanto vuelve la red (§6.1).
+
+Lo que **no** cambió: los documentos médicos, los estudios y las signed URLs
+siguen fuera, y siguen fuera por el mismo motivo de siempre
+(`docs/modelo-permisos.md` §8.1).
 
 ---
 
@@ -64,12 +107,20 @@ La decisión vive en una sola función pura, `clasificarSolicitud`
 | Recurso | Caché | Estrategia | Por qué esa y no otra |
 |---|---|---|---|
 | `/_next/static/**` con `immutable` | `estaticos` | **cache-first**, tope de 150 entradas | La URL lleva hash de contenido: si está en el caché, es la correcta. Revalidar sería gastar red para confirmar lo obvio |
-| `/sos` (solo `mode: "navigate"`) | `paginas` | **red-primero**, cae al caché | Con red gana el dato fresco: nadie debería leer una ficha vieja teniendo la nueva a un toque. Sin red aparece la última copia |
+| `/sos`, `/coberturas`, `/turnos`, `/medicacion` (solo `mode: "navigate"` y **sin query**) | `paginas` | **red-primero**, cae al caché | Con red gana el dato fresco: nadie debería leer una ficha ni una agenda vieja teniendo la nueva a un toque. Sin red aparece la última copia |
 | `/api/sos/{perfilId}` | `datos` | **red-primero**, cae al caché | Ídem, y una clave por perfil |
 | `/api/credenciales/{id}/imagen` | `imagenes` | **caché-primero + revalidación de fondo** | En una guardia la foto tiene que aparecer ya, sin esperar un timeout de red. La revalidación es lo que hace que esa comodidad no se vuelva un agujero (§6) |
 | `/offline` | `shell` | **precarga en `install`** | Tiene que existir antes del primer corte de red, no después |
 | Cualquier otra navegación | — | **red**, y `/offline` si falla | La pantalla clara en vez del dinosaurio de Chrome |
 | Todo lo demás | — | **no se intercepta** | Menos superficie, menos que pueda salir mal |
+
+**Por qué las tres pantallas nuevas no necesitan cachear ningún endpoint
+aparte.** Las cuatro son Server Components: el `fetch` a Supabase ocurre en el
+servidor durante el render, y lo que llega al navegador es HTML con los datos
+**adentro**. No hay un `GET /api/turnos` que el navegador dispare y que hubiera
+que guardar en paralelo — guardar el HTML *es* guardar la lista. La única
+excepción son las miniaturas de `/coberturas`, que sí son un `fetch` del
+navegador y sí quedan afuera (§3.4).
 
 El roadmap pedía "cache-first para el shell, credenciales e imagen SOS;
 network-first con fallback a cache para los datos SOS en JSON". Lo que está
@@ -81,17 +132,83 @@ grupo sanguíneo, siga viendo el valor anterior. Ofrecer el dato fresco cuando s
 puede y el guardado cuando no se puede es exactamente lo que pide el criterio de
 aceptación ("al volver la conexión el cache se refresca").
 
-### 3.1 Por qué `/sos` solo se cachea en una navegación de verdad
+### 3.1 Por qué una pantalla solo se cachea en una navegación de verdad
 
-Next.js pide la **misma URL** `/sos` de dos formas: HTML en una navegación
-completa, y payload RSC (`text/x-component`) cuando el router hace una
-navegación del lado del cliente. Guardar las dos bajo la clave `/sos` dejaría el
-caché con un payload RSC que el navegador intentaría mostrar como página.
+Next.js pide la **misma URL** de dos formas: HTML en una navegación completa, y
+payload RSC (`text/x-component`) cuando el router hace una navegación del lado
+del cliente. Guardar las dos bajo la misma clave dejaría el caché con un payload
+RSC que el navegador intentaría mostrar como página.
 
 Por eso la clasificación exige `request.mode === "navigate"`. El RSC pasa de
 largo, y si falla por falta de red **el router de Next cae a una navegación
 completa**, que sí encuentra el HTML cacheado. El camino "tocar el botón SOS sin
-señal" funciona por esa caída, no a pesar de ella.
+señal" —o "tocar Turnos en la bottom nav sin señal"— funciona por esa caída, no
+a pesar de ella.
+
+### 3.2 La matriz completa por ruta
+
+Lo que hay que mirar para responder "¿esta pantalla anda sin conexión?". La
+columna "Offline" dice qué ve alguien **sin red**, no qué se cachea.
+
+| Ruta | Offline | Se guarda al… | Notas |
+|---|---|---|---|
+| `/sos` | ✅ última copia | **precargarse** al abrir la app + al visitarla | La única con precarga. §7 |
+| `/coberturas` | ✅ última copia, **sin miniaturas** | visitarla con red | §3.4 |
+| `/turnos` | ✅ última lista | visitarla con red | Sprint 11 |
+| `/medicacion` | ✅ última lista | visitarla con red | Sprint 11 |
+| `/api/credenciales/{id}/imagen?lado=` | ✅ | verse dentro de `/sos` | Caché-primero. §4 |
+| `/api/sos/{perfilId}` | ✅ | precargarse | Alimenta el sello "Copia descargada el…" |
+| `/offline` | ✅ (es la pantalla) | `install` | Pública, sin un solo dato. §6.4 |
+| `/inicio` | ❌ → `/offline` | — | Es un índice de accesos: sin red no lleva a ningún lado nuevo |
+| `/estudios`, `/estudios/**` | ❌ → `/offline` | — | Documentos médicos: lo más sensible, y nada de eso se lee sin conexión |
+| `/signos`, `/signos/**` | ❌ → `/offline` | — | |
+| `/medicos` | ❌ → `/offline` | — | |
+| `/familia`, `/familia/accesos` | ❌ → `/offline` | — | Pantalla de permisos: mostrarla vieja sería mostrar permisos que ya no rigen |
+| `/perfil`, `/perfiles` | ❌ → `/offline` | — | |
+| `/turnos/nuevo`, `/turnos/{id}/editar`, `/medicacion/nuevo`, `/coberturas/nuevo`, `/perfil/sos` y toda alta o edición | ❌ → `/offline` | — | No hay edición offline (§8, límite 4) |
+| `/turnos/enlace`, `/medicacion/enlace`, `/signos/enlace` | ❌ → `/offline` | — | Son redirecciones: sin red no hay a dónde redirigir |
+| `/turnos?perfil=…`, `/medicacion?perfil=…` (deep link de push) | ❌ → `/offline` | — | §3.3 |
+| `/login`, `/registro`, `/recuperar` | ❌ → `/offline` | — | Sin red no hay autenticación posible |
+| Signed URLs de Supabase Storage | ❌ | — | Otro origen: el worker ni las intercepta. §4 |
+
+La fuente de verdad de las cuatro primeras filas es `RUTAS_PAGINA_OFFLINE` en
+`public/sw.js`, y `tests/unit/sw-offline.test.ts` verifica que la lista de
+enlaces de `app/offline/page.tsx` diga exactamente lo mismo.
+
+### 3.3 Una entrada por ruta: las páginas con query no se cachean
+
+`/turnos?perfil={id}` y `/medicacion?perfil={id}` son deep links del payload de
+una notificación push (`lib/turnos/recordatorios.ts`,
+`docs/recordatorios.md` §9). Esas páginas **redirigen** a `/…/enlace` para
+cambiar el perfil activo —una cookie solo se puede escribir en un Route
+Handler— y vuelven.
+
+Si cayeran en la estrategia de página pasarían dos cosas malas a la vez:
+
+1. Una entrada de caché nueva por cada perfil que llegue por push, y ninguna que
+   una navegación pelada a `/turnos` pueda volver a encontrar.
+2. Peor: `fetch` sigue las redirecciones, así que la respuesta llegaría al worker
+   con `redirected === true` y `decidirDestinoDeCache` la marcaría
+   **"descartar"** — es decir, **tocar el recordatorio de un turno borraría la
+   lista de turnos guardada**, justo la que esta tarea promete.
+
+Por eso `clasificarSolicitud` exige que `url.search` esté vacío. El deep link
+viaja por red, aterriza en la ruta pelada tras la redirección, y **esa**
+navegación es la que llena el caché.
+
+### 3.4 Offline, `/coberturas` muestra los datos pero no las fotos
+
+Las miniaturas de la billetera (`components/coberturas/miniatura-credencial.tsx`)
+piden su propia **signed URL** con `?miniatura=1` y cargan la imagen desde
+Supabase Storage: otro origen, vida de 300 segundos, imposible de cachear (§4).
+Sin red, esa carga falla y —por diseño previo, no por esta tarea— la miniatura
+simplemente no se ve.
+
+Lo que sí se ve es lo que se necesita para una ventanilla: obra social, plan y
+**número de afiliado**, que están en el HTML. Y la foto de la credencial
+principal sigue disponible a un toque en `/sos`, que la sirve por la URL estable
+`/api/credenciales/{id}/imagen` y sí está cacheada. La pantalla `/offline` lo
+dice explícitamente en vez de dejar que se descubra con una foto rota.
 
 ---
 
@@ -158,12 +275,17 @@ el mismo criterio que ya aplicaban el visor y la miniatura de la billetera.
 Cinco cachés, todas con el prefijo `historial-medico-` y el sufijo de versión:
 
 ```
-historial-medico-shell-v1       ← /offline y el ícono
-historial-medico-estaticos-v1   ← /_next/static/** inmutables (tope 150)
-historial-medico-paginas-v1     ← /sos
-historial-medico-datos-v1       ← /api/sos/{perfilId}
-historial-medico-imagenes-v1    ← /api/credenciales/{id}/imagen
+historial-medico-shell-v2       ← /offline y el ícono
+historial-medico-estaticos-v2   ← /_next/static/** inmutables (tope 150)
+historial-medico-paginas-v2     ← /sos, /coberturas, /turnos, /medicacion
+historial-medico-datos-v2       ← /api/sos/{perfilId}
+historial-medico-imagenes-v2    ← /api/credenciales/{id}/imagen
 ```
+
+`v1` → `v2` en el Sprint 11 (tarea 11.3), porque cambió la matriz de
+clasificación. Subirla es lo que garantiza que un dispositivo que venía del
+Sprint 8 arranque con las cinco cachés limpias en vez de arrastrar entradas
+guardadas con las reglas anteriores.
 
 - **`VERSION` se sube a mano** cuando cambia la lógica de `public/sw.js`, no en
   cada deploy de la aplicación. En `activate`, el worker borra todo lo que lleve
@@ -178,27 +300,88 @@ historial-medico-imagenes-v1    ← /api/credenciales/{id}/imagen
   hash: sin tope, cada build dejaría sus chunks para siempre. Al pasarse se
   borran los más viejos (la Cache API conserva el orden de inserción).
 
-### 5.1 `skipWaiting()` + `clients.claim()`: se revisaron y se mantienen
+### 5.1 El ciclo de actualización: `skipWaiting()` dejó de ser automático
 
-El encabezado del Sprint 6 dejó anotado que estas dos líneas había que
-revisarlas el día que apareciera el caché, porque tomar el control de una
-pestaña ya cargada puede dejarla pidiendo chunks que la versión nueva borró.
-Revisado, se mantienen:
+**Esta sección reemplaza la del Sprint 8, que decía lo contrario.** Hasta la
+tarea 11.3, `install` llamaba a `self.skipWaiting()`: la versión nueva se ponía
+al mando sola, en el acto.
 
-- Los estáticos de Next tienen **URL con hash de contenido**: un build nuevo no
-  pisa las entradas del anterior. La colisión "mismo nombre, otro contenido" no
-  existe.
-- `activate` **solo borra cachés de otra versión**, y la versión se sube a mano.
-  Un deploy normal no borra nada.
-- Si aun así una pestaña vieja pide un chunk que ya no está, cae a la red y
-  sigue funcionando. Solo lo pierde *offline*, en una ventana muy angosta.
+Los dos lados del problema, los dos reales:
 
-Del otro lado, sacarlos tendría un costo cierto: en un celular las pestañas no
-se cierran nunca, así que una corrección de `sw.js` se quedaría en `waiting` con
-el worker viejo atendiendo los pushes. **Ya pasó en un teléfono real** (Sprint
-6, `docs/push.md` §4).
+- **Con `skipWaiting()` automático**, una pestaña ya renderizada queda de golpe
+  controlada por código nuevo, con el HTML y los chunks viejos que ya tiene, y
+  con un caché que `activate` acaba de podar. Nada de eso avisa; se descubre
+  cuando algo no anda.
+- **Sin `skipWaiting()` y sin nada más**, en un celular las pestañas no se
+  cierran nunca, así que una corrección de `sw.js` se queda en `waiting` para
+  siempre con el worker viejo atendiendo los pushes. **Ya pasó en un teléfono
+  real** (Sprint 6, `docs/push.md` §4.3).
 
-### 5.2 `install` nunca puede fallar
+La salida no es elegir uno de los dos males: es **darle el control a la
+persona**.
+
+```
+ deploy con sw.js nuevo
+   → el navegador lo instala y lo deja en `waiting`   (NO toma el control)
+   → `vigilarActualizacion` lo detecta                (lib/pwa/registrar-sw.ts)
+   → barra "Hay una versión nueva — Actualizar"       (components/pwa/aviso-actualizacion.tsx)
+   → toque en "Actualizar"
+   → `aplicarActualizacion` → postMessage {tipo:"saltar-espera"} al worker en espera
+   → el worker hace `skipWaiting()` y, al activarse, `clients.claim()`
+   → `controllerchange` → UNA recarga, misma pantalla, misma sesión
+```
+
+**Lo que no se rompe mientras el worker nuevo espera** —lo que había que
+verificar antes de tocar esto—:
+
+| | Estado durante la espera |
+|---|---|
+| **Push** | El worker **viejo** sigue activo y es el que recibe `push` y `notificationclick`. Un worker en `waiting` no recibe eventos push. El aviso puede quedar sin tocar durante días sin perder un recordatorio |
+| **Caché** | Sigue el de la versión vieja, coherente con el HTML viejo que la pestaña ya tiene. `activate` —y con él la poda de versiones— no corre hasta que alguien acepte |
+| **Sesión** | Intacta. Recargar no borra ninguna cookie, y la purga de cachés con datos cuelga de `/login` (§6.2), no de una recarga |
+| **Pantalla** | Se vuelve a la misma URL con el mismo perfil activo |
+
+**Las cuatro trampas de este patrón, y cómo las evita el código:**
+
+1. **Avisar en la primera instalación.** Sin worker previo
+   (`navigator.serviceWorker.controller === null`) no hay "versión nueva": el
+   worker se instala, activa y reclama solo. Avisar ahí sería pedirle a alguien
+   que actualice una app que acaba de abrir. La regla vive aislada en
+   `debeAvisarActualizacion` y está cubierta por
+   `tests/unit/actualizacion-sw.test.ts`.
+2. **Recargar en la primera visita.** `controllerchange` **también** se dispara
+   cuando el worker recién instalado reclama una pestaña que no tenía
+   controlador. Un listener global recargaría la app en medio de la primera
+   visita, sin que nadie pidiera nada. Por eso el listener se registra dentro de
+   `aplicarActualizacion`, colgado del gesto, y con `once: true`.
+3. **El bucle de recarga.** Doble guarda: la bandera de módulo
+   `actualizacionEnCurso` y el `once: true`. Después de la recarga no queda
+   nadie en `waiting`, así que el aviso no vuelve a aparecer.
+4. **Detectar solo el caso raro.** Además de `updatefound`, `vigilarActualizacion`
+   comprueba `registration.waiting` **al montar**: en un celular, recargar la app
+   con una versión ya instalada de una visita anterior es el caso *normal*, no
+   el excepcional. Sin esa comprobación inicial el aviso solo aparecería en la
+   ventana de segundos en la que el worker se instala.
+
+### 5.2 `clients.claim()` sí se mantiene, y no es lo mismo que `skipWaiting()`
+
+`skipWaiting()` decide **cuándo** una versión pasa a estar activa;
+`clients.claim()` decide si, ya activa, atiende también las pestañas abiertas.
+Sacar el primero no da ningún motivo para sacar el segundo, y el segundo es
+obligatorio: sin él, la pestaña desde la que se acaban de activar las
+notificaciones queda sin controlar y `WindowClient.navigate()` rechaza con
+"Cannot navigate a window that is not controlled" — la notificación abre la app
+y se queda donde estaba, en silencio. Se detectó así en un teléfono real
+(Sprint 6). Desde el Sprint 8 es además lo que hace que el handler `fetch`
+empiece a atender la pestaña actual sin esperar una recarga.
+
+El riesgo que el Sprint 6 anotó para `claim()` con caché versionada sigue
+acotado por lo mismo de siempre: los estáticos de Next tienen **URL con hash de
+contenido**, así que un build nuevo no pisa las entradas del anterior;
+`activate` **solo borra cachés de otra versión**; y una pestaña que pida un
+chunk que ya no está cae a la red y sigue funcionando.
+
+### 5.3 `install` nunca puede fallar
 
 Si la promesa de `install` rechaza, el worker no se instala — y con él se caen
 **también las notificaciones**, que no tienen nada que ver con el caché. Por eso
@@ -215,9 +398,16 @@ hasta 300 segundos a la revocación. **El caché offline alarga esa ventana**, y
 conviene decirlo sin eufemismos: una copia guardada de la ficha SOS de Roberto
 sigue en el teléfono de Diego hasta que ocurra alguna de estas tres cosas.
 
-**1. Diego vuelve a tener red sobre ese recurso.** Es el mecanismo principal.
-Toda respuesta de red pasa por `decidirDestinoDeCache`, que es la decisión de
-seguridad del worker:
+**El Sprint 11 amplió esa superficie** —ahora también puede haber una copia de
+la medicación, la agenda de turnos y las coberturas de Roberto— sin cambiar
+ninguno de los tres mecanismos: las tres pantallas nuevas viven en la caché
+`paginas`, que ya era una de las tres familias con datos personales. El §2.1
+explica por qué el intercambio se consideró aceptable.
+
+### 6.1 Vuelve la red sobre ese recurso
+
+Es el mecanismo principal. Toda respuesta de red pasa por
+`decidirDestinoDeCache`, que es la decisión de seguridad del worker:
 
 | Respuesta | Qué hace | Por qué |
 |---|---|---|
@@ -235,15 +425,17 @@ La estrategia caché-primero de las imágenes revalida siempre en segundo plano
 justamente por esto: la comodidad de ver la foto al instante no puede costar que
 una revocación no llegue nunca.
 
-**2. Diego cierra sesión, o la sesión vence.** Al llegar a `/login` se borran
-las tres cachés con datos personales (`paginas`, `datos`, `imagenes`) —
+### 6.2 Cierra sesión, o la sesión vence
+
+Al llegar a `/login` se borran las tres cachés con datos personales
+(`paginas`, `datos`, `imagenes`) —
 `purgarCacheOffline`. Cuelga de `/login` y no del botón "Cerrar sesión" a
 propósito: cubre también la sesión que vence sola y el rebote de `proxy.ts`, dos
 casos en los que nadie tocó ningún botón y el resultado es el mismo. Y `/login`
 es, por `esRutaSoloAnonima`, una pantalla a la que no se llega con sesión
 activa: no puede borrar el caché de una sesión viva por accidente.
 
-**3. Se desinstala la app o se limpian los datos del navegador.**
+### 6.3 Se desinstala la app o se limpian los datos del navegador
 
 **Lo que queda como límite real:** un dispositivo revocado que nunca más se
 conecta conserva la última copia. No hay forma de borrar datos de un teléfono
@@ -251,7 +443,7 @@ que no habla con el servidor —ninguna aplicación puede—, y es exactamente e
 mismo riesgo que una foto de la credencial sacada con la cámara. Está declarado
 acá, en §8, y en `docs/modelo-permisos.md` §8.1.
 
-### 6.1 Por qué `/offline` no puede tener ni un dato
+### 6.4 Por qué `/offline` no puede tener ni un dato
 
 `/offline` se precarga en `install`, con un `fetch` que puede ocurrir antes de
 que exista cualquier sesión, y vive en la caché `shell`, que **no se purga al
@@ -262,13 +454,24 @@ escrito en el disco sin nadie que lo revise. Por eso la pantalla vive fuera de
 
 ---
 
-## 7. Cómo se llena el caché: la precarga
+## 7. Cómo se llena el caché: la precarga (solo `/sos`) y la visita
 
-El caché no se llena solo. Y **no alcanza con esperar a que alguien abra `/sos`
-con señal**: "acordate de abrir la ficha antes de quedarte sin conexión" no es
-un producto, es una trampa.
+Hay **dos** formas de que algo entre al caché, y la diferencia es una decisión,
+no un detalle de implementación:
 
-El flujo es:
+| | Precarga | Visita |
+|---|---|---|
+| Qué | `/sos` + sus estáticos, sus fotos de credencial y `/api/sos/{perfilId}` | `/coberturas`, `/turnos`, `/medicacion` |
+| Cuándo | Al abrir la app, sin que nadie haga nada | Cuando alguien abre esa pantalla con red |
+| Por qué así | "Acordate de abrir la ficha antes de quedarte sin señal" no es un producto, es una trampa | Nadie necesita su lista de turnos sin haberla mirado nunca — y no cachearla es no escribirla en el disco |
+
+Esa asimetría es deliberada. `/sos` existe para el momento en que ya no se puede
+navegar a buscarla; las otras tres son pantallas que se usan a diario, y quien
+nunca entra a `/medicacion` no tiene su medicación guardada en el teléfono. Es
+la aplicación directa del principio de §2: cada byte que se escribe en el disco
+tiene que justificarse.
+
+El flujo de la precarga es: 
 
 1. `components/pwa/registro-service-worker.tsx` se monta en el layout de
    `(con-nav)` —o sea, en cualquier pantalla con sesión y perfil activo— y
@@ -299,6 +502,11 @@ abre la app": abrir la app de nuevo es justamente cuando conviene refrescar. La
 clave incluye el `perfilId`, así que **cambiar de perfil vuelve a precargar** —
 indispensable, porque `/sos` se guarda bajo una sola clave y una copia offline
 de la ficha equivocada en una guardia es peor que no tener ninguna.
+
+**Las tres pantallas nuevas se guardan por el camino normal**, sin ningún
+mecanismo extra: son una navegación más que cae en `estrategiaRedPrimero` y
+queda en la caché `paginas`. No hay nada que "activar", y por eso tampoco hay
+nada que pueda quedar a medio activar.
 
 ### 7.1 El registro subió al arranque, y eso cambia una decisión del Sprint 6
 
@@ -340,6 +548,26 @@ recordatorios", que es lo que `mobile-ux-patterns` marca de verdad.
    muestra `sos_updated_at` ("Datos revisados el …"), que responde otra
    pregunta (`docs/modelo-sos.md` §6.1). Mostrar "esta copia se bajó el …" es la
    tarea 8.5, que ya tiene el dato servido en el payload.
+8. **`/coberturas`, `/turnos` y `/medicacion` se guardan bajo una única clave
+   cada una**, igual que `/sos` (límite 3): la copia offline es la del último
+   perfil que se estuvo mirando. Es consistente consigo misma —el HTML cacheado
+   incluye el encabezado con el nombre del perfil, así que offline se ve
+   "Roberto" arriba de la medicación de Roberto— pero **no** hay una copia por
+   perfil.
+9. **Sin red, `/coberturas` no muestra las miniaturas.** §3.4: son signed URLs
+   de Supabase, que no se pueden cachear. Los datos de la credencial sí se ven,
+   y la foto de la principal sigue disponible en `/sos`.
+10. **Ninguna de las tres pantallas nuevas tiene sello de "copia descargada
+    el…".** `/sos` sí lo tiene (`FrescuraOffline`, tarea 8.5) porque su payload
+    JSON trae `generado_at`; las otras tres son HTML y no hay un dato equivalente
+    horneado adentro. Lo que sí aparece en las tres es la barra global "Sin
+    conexión — estás viendo datos guardados" (`IndicadorConexion`), que dice lo
+    esencial —esto no está al día— sin fingir una precisión que no hay.
+11. **Una actualización aceptada en otra pestaña no recarga esta.** La recarga
+    cuelga del gesto (§5.1, trampa 2), así que una pestaña que no tocó
+    "Actualizar" queda con HTML viejo bajo un worker nuevo hasta que se navegue.
+    En un celular hay una sola pestaña, así que en la práctica no ocurre; en
+    escritorio, cae a la red y funciona igual.
 
 ---
 
@@ -349,8 +577,12 @@ recordatorios", que es lo que `mobile-ux-patterns` marca de verdad.
 
 ```bash
 # Helpers puros del service worker: matriz de estrategias, decisión de caché,
-# versionado, extracción de recursos. Evalúa el `public/sw.js` REAL.
+# versionado, extracción de recursos, ciclo de actualización. Evalúa el
+# `public/sw.js` REAL.
 npm run test -- sw-offline
+
+# La regla de cuándo mostrar el aviso "hay una versión nueva".
+npm run test -- actualizacion-sw
 
 # Contrato del payload (docs/modelo-sos.md §7): forma, reglas duras, ausencias.
 npm run test -- sos-payload
@@ -359,21 +591,50 @@ npm run test -- sos-payload
 npm run test -- rutas
 ```
 
-`tests/unit/sw-offline.test.ts` además verifica dos cosas que ningún type
-checker puede: que `sw.js` siga registrando los seis handlers (agregar caché no
-apagó las notificaciones) y que la lista de familias de caché con datos
-personales sea **idéntica** en `public/sw.js` y en `lib/pwa/registrar-sw.ts`,
-que están duplicadas porque un archivo de `public/` no se puede importar desde
-TypeScript.
+`tests/unit/sw-offline.test.ts` además verifica cinco cosas que ningún type
+checker puede:
+
+1. Que `sw.js` siga registrando los seis handlers — agregar caché, y después
+   cambiar el ciclo de actualización, no apagó las notificaciones.
+2. Que la lista de familias de caché con datos personales sea **idéntica** en
+   `public/sw.js` y en `lib/pwa/registrar-sw.ts`.
+3. Que el literal del mensaje `saltar-espera` sea **el mismo** en los dos
+   archivos. Si divergen, el aviso se muestra, se toca "Actualizar" y no pasa
+   absolutamente nada: no hay error, no hay log, no hay síntoma.
+4. Que `install` **no** llame a `skipWaiting()` y que `activate` **sí** llame a
+   `clients.claim()`. Son las dos líneas que más fácil se vuelven a colar de
+   vuelta (§5.1, §5.2).
+5. Que los enlaces de `app/offline/page.tsx` sean exactamente las rutas que el
+   worker guarda. Ofrecer un enlace a una pantalla no cacheada lleva de vuelta a
+   la propia pantalla offline.
+
+Los puntos 2 y 3 existen porque un archivo de `public/` no se puede importar
+desde TypeScript y los literales están duplicados a mano.
 
 Lo que **no** se prueba en unit y se prueba en el dispositivo: las estrategias
-con efectos (`fetch`, `caches.put`) y el ciclo de vida
-`install`/`activate`/`fetch`. Un mock de la Cache API demostraría que el mock
-funciona.
+con efectos (`fetch`, `caches.put`), el ciclo de vida
+`install`/`activate`/`fetch` y el cableado del ciclo de actualización
+(`updatefound`, `statechange`, `controllerchange`, `postMessage`). Un mock de la
+Cache API demostraría que el mock funciona.
 
 ### 9.2 En un dispositivo real
 
-`docs/capturas/dispositivo-real/README.md`, sección del Sprint 8.4.
+`docs/capturas/dispositivo-real/README.md`, secciones del Sprint 8.4 y del
+Sprint 11.3.
+
+Para probar el **ciclo de actualización** hace falta publicar una versión nueva
+de verdad, que es exactamente lo que el criterio de aceptación pide:
+
+```bash
+# 1. Cambiar VERSION en public/sw.js (o cualquier byte del archivo).
+# 2. Rebuild y restart: el navegador compara el sw.js byte a byte.
+npm run build && npm run start
+# 3. Recargar la app en el teléfono → aparece "Hay una versión nueva".
+# 4. Tocar "Actualizar" → una sola recarga, misma pantalla, sesión intacta.
+```
+
+Un `next dev` no sirve para esto por el mismo motivo que no sirve para el resto
+(límite 5).
 
 **Con `next build && next start`, no con `next dev`** (límite 5).
 

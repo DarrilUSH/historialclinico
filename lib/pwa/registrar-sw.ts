@@ -32,6 +32,14 @@
  * montado en el layout de `(con-nav)` —es decir, con sesión y perfil activo ya
  * resueltos—, no en el layout raíz: `/login` y `/registro` no tienen ninguna
  * ficha que precargar.
+ *
+ * ## Sprint 11 (tarea 11.3): este archivo también maneja el ciclo de actualización
+ *
+ * `public/sw.js` dejó de llamar a `skipWaiting()` en `install`. La mitad
+ * navegador de esa decisión vive acá abajo (`debeAvisarActualizacion`,
+ * `vigilarActualizacion`, `aplicarActualizacion`) y su interfaz en
+ * `components/pwa/aviso-actualizacion.tsx`. El motivo completo está en el
+ * encabezado de `public/sw.js`.
  */
 
 /** Scope y ruta del service worker. Un solo SW para toda la app (ver `public/sw.js`). */
@@ -48,6 +56,17 @@ const RUTA_SW = "/sw.js"
  */
 const PREFIJO_CACHE = "historial-medico-"
 const FAMILIAS_CON_DATOS = ["paginas", "datos", "imagenes"] as const
+
+/**
+ * Mensaje que le pide al worker en espera que se ponga al mando
+ * (`self.skipWaiting()`).
+ *
+ * ⚠️ Mismo caso de duplicación que `FAMILIAS_CON_DATOS`: el literal está
+ * también en `public/sw.js` y `tests/unit/sw-offline.test.ts` verifica que
+ * coincidan. Si divergen, el botón "Actualizar" deja de hacer nada **sin
+ * ningún síntoma visible**: el aviso aparece, se toca, y no pasa nada.
+ */
+const MENSAJE_SALTAR_ESPERA = "saltar-espera"
 
 /**
  * ¿Este navegador soporta service workers?
@@ -147,6 +166,160 @@ export function precargarFichaSos(
     return
   }
   trabajador.postMessage({ tipo: "precargar-sos", perfilId })
+}
+
+/* ─────────────────── Ciclo de actualización (Sprint 11, 11.3) ───────────────────
+   Desde esta tarea `public/sw.js` NO llama a `skipWaiting()` en `install`: una
+   versión nueva se instala y espera. Estas tres funciones son el otro extremo
+   del ciclo —detectar la espera, avisarle a la persona y aplicarla cuando lo
+   pida—. El porqué completo está en el encabezado de `public/sw.js`, sección
+   "EL CICLO DE ACTUALIZACIÓN"; la interfaz está en
+   `components/pwa/aviso-actualizacion.tsx`.
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * ¿Hay que mostrar el aviso "hay una versión nueva"?
+ *
+ * Función pura, separada del DOM justamente para poder probarla
+ * (`tests/unit/actualizacion-sw.test.ts`), porque encierra la única regla del
+ * ciclo que es fácil de romper y difícil de ver rota:
+ *
+ * - **`hayEnEspera`**: existe un worker instalado que no llegó a activarse. Sin
+ *   esto no hay nada que aplicar y el botón "Actualizar" no tendría a quién
+ *   mandarle el mensaje.
+ * - **`hayControlador`** (`navigator.serviceWorker.controller !== null`): esta
+ *   pestaña ya está siendo atendida por un worker. Es lo que distingue "hay una
+ *   versión nueva" de "es la primera vez que se instala". En la primera
+ *   instalación el worker se activa solo, sin desplazar a nadie, y avisar ahí
+ *   sería pedirle a alguien que actualice una app que acaba de abrir por
+ *   primera vez — y peor, la recarga posterior sería una recarga sorpresa en la
+ *   primera visita.
+ */
+export function debeAvisarActualizacion(estado: {
+  hayEnEspera: boolean
+  hayControlador: boolean
+}): boolean {
+  return estado.hayEnEspera && estado.hayControlador
+}
+
+/**
+ * Avisa (una vez, y cada vez que aparezca una versión nueva) mientras la
+ * pantalla esté montada. Devuelve la función de limpieza.
+ *
+ * Cubre los dos caminos por los que aparece un worker en espera, que no son
+ * intercambiables:
+ *
+ * 1. **Ya estaba esperando al montar.** Pasa siempre que la persona recarga la
+ *    app con una versión nueva ya instalada de una visita anterior — que en un
+ *    celular es el caso NORMAL, no el raro. Sin esta comprobación inicial, el
+ *    aviso solo aparecería en la ventana de segundos en la que el worker se
+ *    instala, y la actualización quedaría enterrada para siempre.
+ * 2. **Se instala mientras la pantalla está abierta** (`updatefound` →
+ *    `statechange` hasta `installed`).
+ *
+ * La condición se evalúa en el momento de avisar, no al suscribirse: en la
+ * primera visita `navigator.serviceWorker.controller` es `null` al montar y
+ * pasa a existir cuando el worker recién instalado llama a `clients.claim()`.
+ */
+export function vigilarActualizacion(
+  registro: ServiceWorkerRegistration,
+  alDetectar: () => void,
+): () => void {
+  if (!haySoporteServiceWorker()) {
+    return () => {}
+  }
+
+  function evaluar(): void {
+    if (
+      debeAvisarActualizacion({
+        hayEnEspera: Boolean(registro.waiting),
+        hayControlador: Boolean(navigator.serviceWorker.controller),
+      })
+    ) {
+      alDetectar()
+    }
+  }
+
+  evaluar()
+
+  const limpiezas: Array<() => void> = []
+
+  function alEncontrarVersion(): void {
+    const entrante = registro.installing
+    if (!entrante) {
+      return
+    }
+    const alCambiarEstado = () => {
+      // `installed` es el estado en el que el worker quedó listo pero todavía
+      // no tomó el control. Es exactamente el momento del aviso.
+      if (entrante.state === "installed") {
+        evaluar()
+      }
+    }
+    entrante.addEventListener("statechange", alCambiarEstado)
+    limpiezas.push(() => entrante.removeEventListener("statechange", alCambiarEstado))
+  }
+
+  registro.addEventListener("updatefound", alEncontrarVersion)
+
+  return () => {
+    registro.removeEventListener("updatefound", alEncontrarVersion)
+    for (const limpiar of limpiezas) {
+      limpiar()
+    }
+  }
+}
+
+/**
+ * Marca de "ya pedimos la actualización en esta carga de página".
+ *
+ * Vive a nivel de módulo (no en un `useState`) porque tiene que sobrevivir a
+ * cualquier desmontaje o re-render del aviso: lo que protege es la RECARGA, y
+ * una recarga duplicada no es un detalle cosmético — dos `location.reload()`
+ * encadenados sobre un worker que está cambiando son la receta del bucle de
+ * recarga infinita, el modo de fallar más citado de este patrón.
+ */
+let actualizacionEnCurso = false
+
+/**
+ * Le pide al worker en espera que se ponga al mando y recarga la pantalla UNA
+ * vez, cuando el cambio se concretó.
+ *
+ * **La recarga cuelga de `controllerchange`, no de un `setTimeout`.** Ese
+ * evento es la señal de que el worker nuevo ya está activo Y ya reclamó esta
+ * pestaña (`clients.claim()` en `activate`): recargar antes serviría la página
+ * vieja otra vez, y recargar "por las dudas" a los N milisegundos sería
+ * adivinar.
+ *
+ * **Por qué el listener se registra acá y no al arrancar la app.**
+ * `controllerchange` también se dispara en la PRIMERA instalación, cuando el
+ * worker recién activado reclama una pestaña que no tenía controlador. Un
+ * listener global recargaría la app en medio de la primera visita, sin que
+ * nadie haya pedido nada. Al colgarlo del gesto —y con `once: true`— solo
+ * puede dispararse por la actualización que la persona aceptó.
+ *
+ * **La sesión no se toca.** Recargar no borra ninguna cookie; la purga de
+ * cachés con datos cuelga de `/login` (`purgarCacheOffline`), no de una
+ * recarga. Después de actualizar se sigue en la misma pantalla, con la misma
+ * sesión y el mismo perfil activo.
+ */
+export function aplicarActualizacion(registro: ServiceWorkerRegistration): void {
+  const enEspera = registro.waiting
+
+  if (!enEspera || actualizacionEnCurso) {
+    return
+  }
+  actualizacionEnCurso = true
+
+  navigator.serviceWorker.addEventListener(
+    "controllerchange",
+    () => {
+      window.location.reload()
+    },
+    { once: true },
+  )
+
+  enEspera.postMessage({ tipo: MENSAJE_SALTAR_ESPERA })
 }
 
 /**
