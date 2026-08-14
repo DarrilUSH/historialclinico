@@ -227,7 +227,7 @@ Los datos de emergencia (grupo sanguíneo, alergias, condiciones crónicas, medi
 - `sos_updated_at` lo mantiene el trigger `set_sos_updated_at`, que **solo** se dispara cuando cambia algún campo SOS. Es lo que alimenta el "Datos actualizados el 12/08 14:30" del indicador offline: si dependiera de `updated_at`, cambiar el teléfono del perfil haría parecer que los datos vitales se revisaron cuando no fue así.
 - La cobertura principal de la ficha SOS no se copia en `profiles`: se toma de `insurance_cards` con `is_primary = true`, evitando un dato duplicado que se desactualiza.
 
-**Confirmación pendiente del Sprint 8:** la tarea `[Opus] - Modelo y edición de datos vitales SOS` debe validar esta decisión y, si la ratifica, `docs/modelo-sos.md` se limita a referenciar esta sección en vez de proponer `emergency_info`.
+**Confirmada en el Sprint 8** (tarea `[Opus] - Modelo y edición de datos vitales SOS`): la decisión se ratificó sin cambios de esquema. El contrato completo —inventario de campos, permisos, qué NO entra en la ficha, y los contratos de lectura y de payload offline que consumen las tareas 8.3/8.4/8.5— está en [`modelo-sos.md`](./modelo-sos.md).
 
 ### 11. Archivos: `storage_path`, nunca URL — y la base lo hace cumplir
 

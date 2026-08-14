@@ -2368,6 +2368,332 @@ select pruebas_rls.registrar('12. alertas medicación',
 
 
 -- =============================================================================
+-- BLOQUE 13 — ficha SOS: quién la lee, quién la edita y qué valida la base
+-- -----------------------------------------------------------------------------
+-- Tarea 8.2 (docs/modelo-sos.md). Los datos SOS son OCHO COLUMNAS de
+-- `profiles`, no una tabla: no tienen políticas propias y heredan literalmente
+-- las de la fila. Eso es exactamente lo que hay que demostrar acá, porque es
+-- fácil suponer que "los datos vitales" tienen alguna regla especial y no la
+-- tienen: se rigen por `profiles_select_visible` (leer) y
+-- `profiles_update_administrador` (escribir).
+--
+-- Lo que ya estaba cubierto y NO se repite:
+--   * BLOQUE 1  — 'B lee la fila de profiles de A' → 0 filas (sin permiso).
+--   * BLOQUE 2  — 'B lee la ficha SOS de A (perfil visible)' → 1 fila.
+--   * BLOQUE 2  — 'B EDITA el perfil de A (incluida la ficha SOS)' → 0 filas,
+--                 pero tocando `full_name`, NO una columna SOS.
+--
+-- Lo que faltaba y agrega este bloque: que el intento de UPDATE de un
+-- `can_view` sobre las COLUMNAS SOS concretas también dé cero filas, el caso
+-- positivo del `can_manage` sobre esas mismas columnas, el ida y vuelta de un
+-- texto con tildes y ñ, el alcance exacto del trigger `set_sos_updated_at` y
+-- el CHECK `profiles_blood_type_valido` con los dientes afuera.
+--
+-- Escenario heredado (no se crea nada nuevo): Rosa Medina (:p_g3) es un perfil
+-- GESTIONADO -el caso "Roberto" del roadmap-; María (:p_a) la administra
+-- (can_manage) y Diego (:p_b) la mira (can_view + can_upload, sin can_manage)
+-- desde los BLOQUES 11 y 12.
+-- =============================================================================
+\echo ''
+\echo '### BLOQUE 13 — ficha SOS: lectura, edición y validación del grupo sanguíneo'
+
+-- Renderizador legible de la ficha, mismo criterio que pruebas_rls.med(): sin
+-- SECURITY DEFINER, así que corre con los privilegios de quien la llama y RLS
+-- la filtra igual que a un SELECT directo.
+create function pruebas_rls.sos(p_id uuid) returns text
+language sql
+as $$
+    select coalesce(
+        (select format('grupo=%s | alergias=%s | crónicas=%s | crítica=%s | contacto=%s (%s, %s) | notas=%s',
+                       coalesce(p.blood_type, 'NULL'),
+                       coalesce(nullif(array_to_string(p.allergies, ' + '), ''), '(vacío)'),
+                       coalesce(nullif(array_to_string(p.chronic_conditions, ' + '), ''), '(vacío)'),
+                       coalesce(nullif(array_to_string(p.critical_medication, ' + '), ''), '(vacío)'),
+                       coalesce(p.emergency_contact, 'NULL'),
+                       coalesce(p.emergency_contact_phone, 'NULL'),
+                       coalesce(p.emergency_contact_relationship, 'NULL'),
+                       coalesce(p.sos_notes, 'NULL'))
+           from public.profiles p
+          where p.id = p_id),
+        '(sin acceso a la fila)');
+$$;
+
+grant execute on function pruebas_rls.sos(uuid) to anon, authenticated;
+
+
+-- --- 13.1 can_view LEE la ficha SOS entera ----------------------------------
+
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+select pruebas_rls.registrar('13. ficha SOS',
+       'B (can_view) lee la fila del perfil gestionado', '1 filas', count(*) || ' filas')
+  from public.profiles where id = :p_g3;
+
+-- Las ocho columnas, una por una: que la fila sea visible no alcanza si
+-- mañana alguien agrega una `column-level privilege` sobre alguna de ellas.
+select pruebas_rls.registrar('13. ficha SOS',
+       'B (can_view) lee las OCHO columnas SOS  [CRITERIO DE ACEPTACIÓN]',
+       'grupo=A- | alergias=(vacío) | crónicas=(vacío) | crítica=(vacío) | contacto=NULL (NULL, NULL) | notas=NULL',
+       pruebas_rls.sos(:p_g3));
+
+commit;
+
+
+-- --- 13.2 can_view NO edita ninguna columna SOS -----------------------------
+
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+do $$
+declare v integer;
+begin
+    update public.profiles set blood_type = 'AB+'
+     where id = 'f0000000-0000-4000-8000-00000000f001';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'B (can_view) cambia el GRUPO SANGUÍNEO del gestionado', '0 filas', v || ' filas');
+end $$;
+
+do $$
+declare v integer;
+begin
+    update public.profiles set allergies = '{"Inventada por Diego"}'
+     where id = 'f0000000-0000-4000-8000-00000000f001';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'B (can_view) agrega una ALERGIA al gestionado', '0 filas', v || ' filas');
+end $$;
+
+do $$
+declare v integer;
+begin
+    update public.profiles
+       set emergency_contact = 'Diego', emergency_contact_phone = '2901000000'
+     where id = 'f0000000-0000-4000-8000-00000000f001';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'B (can_view) se pone como CONTACTO DE EMERGENCIA', '0 filas', v || ' filas');
+end $$;
+
+do $$
+declare v integer;
+begin
+    update public.profiles set sos_notes = 'Nota puesta por Diego'
+     where id = 'f0000000-0000-4000-8000-00000000f001';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'B (can_view + can_upload) escribe las OBSERVACIONES SOS', '0 filas', v || ' filas');
+end $$;
+
+-- Y la ficha sigue siendo la que era: ninguno de los cuatro intentos dejó nada.
+select pruebas_rls.registrar('13. ficha SOS',
+       'La ficha del gestionado quedó intacta tras los intentos de B', 'A-',
+       coalesce((select blood_type from public.profiles where id = :p_g3), 'NULL'));
+
+commit;
+
+
+-- --- 13.3 can_manage SÍ edita, y las tildes vuelven intactas ----------------
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v integer;
+begin
+    update public.profiles
+       set blood_type                     = 'O+',
+           allergies                      = '{"Alergia a penicilína, ñoquis","Ácaros"}',
+           chronic_conditions             = '{"Hipertensión arterial","Diabetes tipo 2"}',
+           critical_medication            = '{"Acenocumarol 4 mg"}',
+           emergency_contact              = 'Begoña Muñoz Ibáñez',
+           emergency_contact_phone        = '+54 9 2901 612345',
+           emergency_contact_relationship = 'sobrina política',
+           sos_notes                      = 'Marcapasos desde 2019. ¿Alergia a látex? Prótesis de cadera.'
+     where id = 'f0000000-0000-4000-8000-00000000f001';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'A (can_manage) edita la ficha SOS completa del gestionado', '1 filas', v || ' filas');
+end $$;
+
+-- El ida y vuelta literal del criterio de aceptación: lo que entró con tildes,
+-- ñ y signos de apertura sale idéntico. Si en algún punto de la cadena
+-- (cliente, driver, columna, dump) hubiera un latin1 escondido, esto falla.
+select pruebas_rls.registrar('13. ficha SOS',
+       'Ida y vuelta UTF-8 de la ficha completa  [CRITERIO DE ACEPTACIÓN]',
+       'grupo=O+ | alergias=Alergia a penicilína, ñoquis + Ácaros | crónicas=Hipertensión arterial + Diabetes tipo 2 | crítica=Acenocumarol 4 mg | contacto=Begoña Muñoz Ibáñez (+54 9 2901 612345, sobrina política) | notas=Marcapasos desde 2019. ¿Alergia a látex? Prótesis de cadera.',
+       pruebas_rls.sos(:p_g3));
+
+-- Una entrada con coma sigue siendo UNA entrada del arreglo: el modelo guarda
+-- listas, no un texto con comas que alguien parsea después.
+select pruebas_rls.registrar('13. ficha SOS',
+       'La alergia con coma quedó como UN solo elemento del text[]', '2',
+       coalesce((select cardinality(allergies)::text from public.profiles where id = :p_g3), 'NULL'));
+
+commit;
+
+
+-- --- 13.4 El trigger set_sos_updated_at, y su límite exacto -----------------
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+-- Se movió con la edición de 13.3 (que ocurrió en OTRA transacción, así que
+-- now() es distinto del de la creación del perfil en el BLOQUE 11).
+select pruebas_rls.registrar('13. ficha SOS',
+       'sos_updated_at se movió al editar la ficha (trigger)', 'sí',
+       coalesce((select case when sos_updated_at > created_at then 'sí' else 'no' end
+                   from public.profiles where id = :p_g3), '(sin fila)'));
+
+commit;
+
+-- Editar un campo NO-SOS del perfil no debe tocar la marca de frescura: es el
+-- motivo entero de que `sos_updated_at` exista y no se use `updated_at`. Si
+-- esto fallara, la ficha diría "datos vitales revisados hoy" porque alguien
+-- corrigió un nombre mal escrito.
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare antes timestamptz; despues timestamptz; n integer;
+begin
+    select sos_updated_at into antes from public.profiles
+     where id = 'f0000000-0000-4000-8000-00000000f001';
+
+    update public.profiles set full_name = 'Rosa Medina Ñandú'
+     where id = 'f0000000-0000-4000-8000-00000000f001';
+    get diagnostics n = row_count;
+
+    select sos_updated_at into despues from public.profiles
+     where id = 'f0000000-0000-4000-8000-00000000f001';
+
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'Editar full_name NO mueve sos_updated_at (alcance del trigger)',
+        '1 filas, no cambió',
+        n || ' filas, ' || case when antes is not distinct from despues
+                                then 'no cambió' else 'cambió' end);
+end $$;
+
+commit;
+
+
+-- --- 13.5 profiles_blood_type_valido, con los dientes afuera ----------------
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+-- Un grupo inválido NO llega nunca acá: lo frena antes el schema Zod
+-- (lib/validacion/sos.schema.ts). Esto prueba la SEGUNDA barrera, la que
+-- queda si alguien escribe por fuera de la aplicación.
+do $$
+declare v text;
+begin
+    begin
+        update public.profiles set blood_type = 'Z+'
+         where id = 'f0000000-0000-4000-8000-00000000f001';
+        v := 'aceptado';
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'UPDATE crudo con grupo sanguíneo inválido  [CRITERIO DE ACEPTACIÓN]',
+        'rechazado (23514)', v);
+end $$;
+
+-- Las variantes que "casi" parecen válidas y que un desplegable mal armado
+-- podría mandar.
+do $$
+declare v text; malo text;
+begin
+    v := '';
+    foreach malo in array array['a+', 'AB', '0+', 'A positivo', 'O ', '']
+    loop
+        begin
+            update public.profiles set blood_type = malo
+             where id = 'f0000000-0000-4000-8000-00000000f001';
+            v := v || coalesce(nullif(malo, ''), '(vacío)') || '=aceptado ';
+        exception when check_violation then null;
+                  when others          then v := v || malo || '=error' || sqlstate || ' ';
+        end;
+    end loop;
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'Variantes casi-válidas del grupo sanguíneo aceptadas por el CHECK',
+        '(ninguna)', coalesce(nullif(btrim(v), ''), '(ninguna)'));
+end $$;
+
+-- Y los ocho válidos entran todos: un CHECK demasiado estrecho sería un bug
+-- igual de real que uno demasiado laxo.
+do $$
+declare v text; bueno text; aceptados integer := 0;
+begin
+    foreach bueno in array array['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+    loop
+        begin
+            update public.profiles set blood_type = bueno
+             where id = 'f0000000-0000-4000-8000-00000000f001';
+            aceptados := aceptados + 1;
+        exception when others then null;
+        end;
+    end loop;
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'Los 8 grupos sanguíneos del CHECK se aceptan', '8', aceptados::text);
+end $$;
+
+-- NULL es un valor legítimo: "no lo sé" es información, no un campo sin llenar.
+do $$
+declare v text;
+begin
+    begin
+        update public.profiles set blood_type = null
+         where id = 'f0000000-0000-4000-8000-00000000f001';
+        v := 'aceptado';
+    exception when others then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('13. ficha SOS',
+        'blood_type NULL ("No lo sé") es válido', 'aceptado', v);
+end $$;
+
+commit;
+
+
+-- --- 13.6 Revocado: deja de ver la ficha en el acto -------------------------
+-- La segunda mitad del criterio de aceptación del roadmap: "el familiar con
+-- can_view los ve y el revocado no". Se borra la fila de permiso de Diego
+-- sobre el perfil gestionado -es el último bloque, así que no afecta a nadie
+-- más- y se vuelve a preguntar sin tocar ninguna sesión.
+
+delete from public.family_permissions
+ where owner_profile_id = :p_g3 and granted_profile_id = :p_b;
+
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+select pruebas_rls.registrar('13. ficha SOS',
+       'B REVOCADO ya no lee la fila del gestionado  [CRITERIO DE ACEPTACIÓN]',
+       '0 filas', count(*) || ' filas')
+  from public.profiles where id = :p_g3;
+
+select pruebas_rls.registrar('13. ficha SOS',
+       'B REVOCADO no alcanza la ficha SOS ni por la función auxiliar',
+       '(sin acceso a la fila)', pruebas_rls.sos(:p_g3));
+
+commit;
+
+-- El visitante sin sesión ya está cubierto por el BLOQUE 6 ('anon lee
+-- profiles' → denegado 42501) y no se repite acá: `anon` ni siquiera tiene el
+-- privilegio de SELECT sobre `profiles`, así que no llega a la instancia en la
+-- que RLS filtraría filas. Es una barrera anterior, no una más estricta.
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''

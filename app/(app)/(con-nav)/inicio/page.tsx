@@ -24,7 +24,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { CreditCardIcon, PillIcon } from "lucide-react"
+import { CreditCardIcon, HeartPulseIcon, PillIcon } from "lucide-react"
 
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
 import { ProximoTurno } from "@/components/inicio/proximo-turno"
@@ -119,6 +119,36 @@ export default async function PaginaInicio() {
           <span className="text-sm text-muted-foreground">Obra social, prepaga y credenciales</span>
         </span>
       </Link>
+
+      {/*
+        Acceso a /perfil/sos (Sprint 8, tarea 8.2): la pantalla de EDICIÓN de
+        los datos vitales. La entrada GRANDE a la ficha de lectura llega con
+        el botón SOS de la tarea 8.3 (`components/inicio/boton-sos.tsx`) y no
+        es esta card.
+
+        A diferencia de las dos de arriba, esta SÍ depende del permiso:
+        `/perfil/sos` exige `can_manage` (espeja
+        `profiles_update_administrador`, nota ② de docs/modelo-permisos.md) y
+        redirige a `/inicio` a quien no lo tenga. Mostrarle la card a un
+        `can_view` sería ofrecerle un camino que rebota.
+      */}
+      {permisos.canManage && (
+        <Link
+          href="/perfil/sos"
+          className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
+        >
+          <span
+            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+            aria-hidden="true"
+          >
+            <HeartPulseIcon className="size-5" />
+          </span>
+          <span className="flex flex-col text-left">
+            <span className="text-base font-semibold text-foreground">Ficha SOS</span>
+            <span className="text-sm text-muted-foreground">Editar datos vitales</span>
+          </span>
+        </Link>
+      )}
 
       {/*
         El banner de recordatorios se renderiza SIEMPRE desde el servidor y
