@@ -34,6 +34,7 @@ import {
 } from "lucide-react"
 
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
+import { BotonInstalar } from "@/components/pwa/boton-instalar"
 import { BotonSos } from "@/components/inicio/boton-sos"
 import { ProximoTurno } from "@/components/inicio/proximo-turno"
 import { CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA } from "@/components/base/tarjeta"
@@ -277,6 +278,15 @@ export default async function PaginaInicio() {
         de nuevo lo que ya está activo.
       */}
       <ActivarNotificaciones />
+
+      {/*
+        Botón de instalación de la PWA (Sprint 11, tarea 11.1): discreto, al
+        final de la pantalla, y solo visible si el navegador entregó
+        `beforeinstallprompt` y la app todavía no corre instalada. En iOS
+        (sin ese evento) y con la app ya instalada, `BotonInstalar` devuelve
+        `null` — ver su encabezado.
+      */}
+      <BotonInstalar />
     </div>
   )
 }

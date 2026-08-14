@@ -30,6 +30,37 @@ const fuenteMono = Atkinson_Hyperlegible_Mono({
 export const metadata: Metadata = {
   title: "Historial Médico",
   description: "Tu historial médico, siempre a mano.",
+  // Ícono de la pantalla de inicio de iOS (Sprint 11, tarea 11.1). Generado
+  // desde el mismo `public/icono-192.png` que usa el resto de la PWA —ver
+  // `app/manifest.ts`—, a pantalla completa y sin transparencia porque Safari
+  // no la respeta de forma consistente en este uso.
+  icons: {
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  // `capable` + `statusBarStyle` (Sprint 11, tarea 11.1): agregan a la PWA
+  // instalada desde iOS a pantalla completa, sin la barra de Safari.
+  //
+  // Next 16 emite `capable: true` como `<meta name="mobile-web-app-capable">`
+  // -el tag estándar, sin el prefijo `apple-`- y NO agrega además el viejo
+  // `apple-mobile-web-app-capable`
+  // (`node_modules/next/dist/lib/metadata/metadata.js`, rama "Apple Web
+  // App"): Safari reciente ya entiende el tag estándar, así que no hace
+  // falta el duplicado. Se deja esta nota porque la tarea pedía el nombre
+  // viejo del meta tag y el comportamiento real de esta versión de Next es
+  // otro.
+  //
+  // `statusBarStyle: "default"` en vez de `"black-translucent"`: esta última
+  // vuelve transparente la barra de estado y deja el contenido corriendo por
+  // debajo, lo que exige manejar `env(safe-area-inset-top)` en el layout. Hoy
+  // la app solo reserva `safe-area-inset-bottom` (para la bottom nav fija,
+  // `app/(app)/(con-nav)/layout.tsx`) y nada arriba, así que
+  // "black-translucent" tapa el encabezado del perfil bajo el notch en un
+  // iPhone. "default" reserva su propio espacio y no depende de nada nuevo.
+  appleWebApp: {
+    capable: true,
+    title: "H. Médico",
+    statusBarStyle: "default",
+  },
 };
 
 export const viewport: Viewport = {

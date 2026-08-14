@@ -13,6 +13,7 @@ import { describe, it, expect } from "vitest"
 import {
   RUTA_CRON_ALERTAS_MEDICACION,
   RUTA_CRON_RECORDATORIOS,
+  RUTA_MANIFEST,
   RUTA_OFFLINE,
   destinoSeguro,
   esRutaDeApi,
@@ -55,6 +56,14 @@ describe("lib/auth/rutas.ts", () => {
   it("/offline no vuelve pública ninguna ruta con nombre parecido", () => {
     expect(esRutaPublica("/offline-datos", EN_PROD)).toBe(false)
     expect(esRutaPrivada("/offline-datos", EN_PROD)).toBe(true)
+  })
+
+  it("el manifest de instalación es público TAMBIÉN en producción", () => {
+    // Chrome lo pide para evaluar instalabilidad, posiblemente sin sesión:
+    // un 307 al login rompe el manifest y la app deja de ofrecerse como
+    // instalable. Ver el comentario de RUTA_MANIFEST en lib/auth/rutas.ts.
+    expect(esRutaPublica(RUTA_MANIFEST, EN_PROD)).toBe(true)
+    expect(esRutaPublica("/manifest.webmanifest", EN_PROD)).toBe(true)
   })
 
   it("el payload offline de la ficha SOS SÍ exige sesión", () => {

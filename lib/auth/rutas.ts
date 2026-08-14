@@ -102,6 +102,23 @@ export const RUTA_CRON_ALERTAS_MEDICACION = "/api/push/procesar-alertas-medicaci
 export const RUTA_OFFLINE = "/offline"
 
 /**
+ * El manifest de instalación (Sprint 11, tarea 11.1: `app/manifest.ts`, que
+ * Next resuelve a esta ruta exacta). Misma familia de excepción que
+ * `RUTA_SERVICE_WORKER`: Chrome lo pide para decidir si la app es
+ * instalable, y esa comprobación puede ocurrir sin sesión (la primera vez
+ * que alguien llega a `/login`, el navegador ya puede estar evaluando
+ * instalabilidad en segundo plano). Un `307 → /login` acá no es JSON válido
+ * de manifest: Chrome lo descarta en silencio y la app deja de ofrecerse
+ * como instalable, sin ningún error visible.
+ *
+ * A diferencia de los íconos (`public/icons/*.png`), que el `matcher` de
+ * `proxy.ts` ya excluye por extensión de imagen, `/manifest.webmanifest` no
+ * tiene una extensión de imagen y sí llega al proxy — necesita esta
+ * excepción con nombre propio. `tests/unit/rutas.test.ts` la cubre.
+ */
+export const RUTA_MANIFEST = "/manifest.webmanifest"
+
+/**
  * Rutas públicas: se sirven con o sin sesión. Cada entrada cubre la ruta
  * exacta y sus subrutas (`/recuperar` cubre `/recuperar/confirmar`), salvo
  * `/` que se compara exacta —si no, cubriría toda la aplicación—.
@@ -113,6 +130,7 @@ export const RUTAS_PUBLICAS = [
   "/recuperar",
   RUTA_SERVICE_WORKER,
   RUTA_OFFLINE,
+  RUTA_MANIFEST,
   RUTA_CRON_RECORDATORIOS,
   RUTA_CRON_ALERTAS_MEDICACION,
 ] as const
