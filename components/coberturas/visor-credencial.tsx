@@ -195,7 +195,7 @@ export function VisorCredencial({
 
             <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-white p-2">
               {estado === "cargando" && (
-                <p role="status" className="text-base text-neutral-500">
+                <p role="status" className="text-base text-neutral-600">
                   Cargando la foto…
                 </p>
               )}
