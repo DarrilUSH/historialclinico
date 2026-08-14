@@ -104,6 +104,61 @@ export function formatearBytes(bytes: number): string {
 }
 
 /**
+ * 5 MiB — idéntico al `file_size_limit` del bucket `credenciales-cobertura`
+ * (5242880 bytes, `supabase/migrations/20260812230000_storage.sql`). Mismo
+ * criterio que `LIMITE_BYTES` de arriba: no tiene sentido dejar pasar acá un
+ * archivo que el servidor va a rechazar igual, pero el límite es MÁS CHICO
+ * que el de `documentos-medicos` porque es una foto de credencial, no un
+ * estudio escaneado de varias páginas.
+ */
+export const LIMITE_BYTES_CREDENCIAL = 5 * 1024 * 1024
+
+/** MIME real aceptado por el bucket `credenciales-cobertura`: solo imagen, nunca PDF (ver el comentario del bucket en la migración de Storage). */
+export type MimeImagenCredencial = Exclude<MimeValidado, "application/pdf">
+
+export interface ResultadoValidacionCredencial {
+  valido: boolean
+  tipo: MimeImagenCredencial | null
+  error?: string
+}
+
+/**
+ * Validación de la foto de UNA cara de una credencial de cobertura
+ * (Sprint 8, tarea 8.1). Reusa el mismo detector de magic bytes que
+ * `validarArchivo` -`detectarMimeReal`, la pieza que de verdad importa no
+ * duplicar-, con dos diferencias bucket-específicas: el límite de tamaño
+ * (5 MiB en vez de 25 MiB) y el rechazo explícito de PDF -`credenciales-cobertura`
+ * no lo acepta, ver `allowed_mime_types` en la migración de Storage-.
+ */
+export async function validarImagenCredencial(
+  archivo: Blob,
+): Promise<ResultadoValidacionCredencial> {
+  if (archivo.size === 0) {
+    return { valido: false, tipo: null, error: "El archivo está vacío." }
+  }
+
+  if (archivo.size > LIMITE_BYTES_CREDENCIAL) {
+    return {
+      valido: false,
+      tipo: null,
+      error: `La foto pesa ${formatearBytes(archivo.size)} y el límite es ${formatearBytes(LIMITE_BYTES_CREDENCIAL)}. Probá sacarla de nuevo o elegí otra.`,
+    }
+  }
+
+  const tipo = await detectarMimeReal(archivo)
+
+  if (!tipo || tipo === "application/pdf") {
+    return {
+      valido: false,
+      tipo: null,
+      error: "La foto tiene que ser una imagen (JPG, PNG o WebP), no un PDF.",
+    }
+  }
+
+  return { valido: true, tipo }
+}
+
+/**
  * Valida un archivo elegido por el usuario antes de comprimirlo y subirlo:
  * tamaño y MIME real. No valida nada relacionado a permisos ni a Storage
  * -eso lo hace la Server Action de la tarea siguiente del roadmap

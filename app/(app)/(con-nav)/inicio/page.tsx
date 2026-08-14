@@ -24,7 +24,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { PillIcon } from "lucide-react"
+import { CreditCardIcon, PillIcon } from "lucide-react"
 
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
 import { ProximoTurno } from "@/components/inicio/proximo-turno"
@@ -95,6 +95,28 @@ export default async function PaginaInicio() {
           <span className="text-sm text-muted-foreground">
             {textoResumenTomas(tomasDeHoy.length, tomasPendientesHoy)}
           </span>
+        </span>
+      </Link>
+
+      {/*
+        Acceso a /coberturas (Sprint 8, tarea 8.1). Mismo patrón que la card
+        de Medicación de arriba: sin fetch propio -es un acceso directo, no
+        un resumen-, igual para cualquier permiso. "Card simple", como pide
+        el criterio de la tarea: sin contador ni consulta a la base.
+      */}
+      <Link
+        href="/coberturas"
+        className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
+      >
+        <span
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+          aria-hidden="true"
+        >
+          <CreditCardIcon className="size-5" />
+        </span>
+        <span className="flex flex-col text-left">
+          <span className="text-base font-semibold text-foreground">Coberturas</span>
+          <span className="text-sm text-muted-foreground">Obra social, prepaga y credenciales</span>
         </span>
       </Link>
 
