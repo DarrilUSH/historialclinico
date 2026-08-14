@@ -40,10 +40,26 @@ import "server-only"
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 
-import { evaluarSigno, type PesoPrevio } from "@/lib/signos/evaluar"
+import { evaluarSigno, type PesoPrevio, type ReglaAlerta } from "@/lib/signos/evaluar"
 import { DB_A_TIPO, TIPO_A_DB } from "@/lib/signos/tipos"
 import { combinarUmbrales } from "@/lib/signos/umbrales"
 import type { Database } from "@/types/database.types"
+
+/**
+ * Una fila de `vital_sign_alerts` tal como quedó PERSISTIDA — lo que necesita
+ * `lib/signos/notificar.ts` (Sprint 9.3) para armar el push sin releer la
+ * base una segunda vez. `id` y `tipo` viajan por completitud del registro;
+ * el armado del texto del push solo usa `regla`, `valor`, `umbral` y
+ * `referencia` (ver `AlertaParaNotificar` en `lib/signos/notificar.ts`).
+ */
+export interface AlertaSignoPersistida {
+  id: string
+  regla: ReglaAlerta
+  tipo: Database["public"]["Enums"]["vital_sign_type"]
+  valor: number
+  umbral: number
+  referencia: number | null
+}
 
 if (typeof window !== "undefined") {
   throw new Error(
@@ -83,16 +99,23 @@ const PESOS_A_CONSIDERAR = 30
 
 /**
  * Evalúa la medición `signoId` y persiste una fila de `vital_sign_alerts` por
- * cada regla violada. Devuelve cuántas alertas quedaron creadas de verdad.
+ * cada regla violada. Devuelve las alertas que quedaron creadas de verdad —no
+ * un conteo—, porque `registrarSigno` (Sprint 9.3) las necesita completas para
+ * armar el push inmediato con `lib/signos/notificar.ts`: releerlas de la base
+ * una segunda vez solo para notificar sumaría una consulta y una ventana
+ * donde otra sesión podría marcarlas vistas antes de que el push describa lo
+ * que de verdad se guardó.
  *
  * Idempotente: el `upsert` con `ignoreDuplicates` se apoya en el índice único
  * `vital_sign_alerts_una_por_regla (vital_sign_id, regla)`, así que reevaluar
  * la misma medición no duplica nada (un doble submit, una corrida manual de
- * reparación, un reintento del runtime).
+ * reparación, un reintento del runtime) — y tampoco reenvía el push: las
+ * filas que el `upsert` descarta por conflicto no vuelven en el `.select()`,
+ * así que un backfill que reevalúa mediciones viejas no notifica de nuevo.
  *
  * Lanza si la base responde con error — quien llama la trata como best-effort.
  */
-export async function registrarAlertasDeSigno(signoId: string): Promise<number> {
+export async function registrarAlertasDeSigno(signoId: string): Promise<AlertaSignoPersistida[]> {
   const supabase = clienteAdmin()
 
   const { data: signo, error: errorSigno } = await supabase
@@ -107,7 +130,7 @@ export async function registrarAlertasDeSigno(signoId: string): Promise<number> 
   if (!signo) {
     // La medición se borró entre el INSERT y la evaluación. No es un error del
     // sistema: no hay nada que alertar sobre una fila que ya no existe.
-    return 0
+    return []
   }
 
   const { data: fila, error: errorUmbrales } = await supabase
@@ -162,7 +185,7 @@ export async function registrarAlertasDeSigno(signoId: string): Promise<number> 
     historialPeso,
   )
 
-  if (violadas.length === 0) return 0
+  if (violadas.length === 0) return []
 
   const { data: creadas, error: errorAlta } = await supabase
     .from("vital_sign_alerts")
@@ -182,11 +205,11 @@ export async function registrarAlertasDeSigno(signoId: string): Promise<number> 
       })),
       { onConflict: "vital_sign_id,regla", ignoreDuplicates: true },
     )
-    .select("id")
+    .select("id, regla, tipo, valor, umbral, referencia")
 
   if (errorAlta) {
     throw new Error(`No se pudieron registrar las alertas de la medición ${signoId}: ${errorAlta.message}`)
   }
 
-  return creadas?.length ?? 0
+  return creadas ?? []
 }

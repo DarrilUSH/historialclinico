@@ -15,6 +15,12 @@
  * Sin entrada en la bottom nav todavía (no hay slot libre, mismo motivo que
  * documenta `/medicacion`): se llega desde la card de `/inicio`
  * (`app/(app)/(con-nav)/inicio/page.tsx`) o por URL directa.
+ *
+ * Arriba de las dos partes va el banner persistente de alertas (Sprint 9,
+ * tarea 9.3): `components/signos/banner-alerta.tsx`, con las filas de
+ * `vital_sign_alerts` sin ver del perfil activo. Solo se pide -y solo lo deja
+ * leer RLS- a quien administra el perfil (`can_manage`, el mismo conjunto que
+ * recibió el push que trajo hasta acá vía `/signos/enlace`).
  */
 
 import type { Metadata } from "next"
@@ -25,8 +31,10 @@ import { PlusIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
+import { BannerAlertasSignos } from "@/components/signos/banner-alerta"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { obtenerAlertasSinVer } from "@/lib/signos/alertas-sin-ver"
 import { obtenerUltimasMedicionesPorTipo, type MedicionSigno } from "@/lib/signos/consultas"
 import { formatearValorSigno } from "@/lib/signos/formato"
 import {
@@ -51,12 +59,22 @@ export default async function PaginaSignos() {
   }
 
   const { supabase } = await requerirSesion({ desde: "/signos" })
-  const porTipo = await obtenerUltimasMedicionesPorTipo(supabase, activo.perfil.id)
+
+  // El banner de alertas (tarea 9.3) solo tiene sentido -y solo lo deja leer
+  // RLS- a quien administra el perfil (titular o can_manage): es el mismo
+  // conjunto que recibe el push. Pedirlo solo bajo ese permiso evita una
+  // consulta que la base igual vaciaría para can_view/can_upload.
+  const [porTipo, alertasSinVer] = await Promise.all([
+    obtenerUltimasMedicionesPorTipo(supabase, activo.perfil.id),
+    activo.permisos.canManage ? obtenerAlertasSinVer(supabase, activo.perfil.id) : Promise.resolve([]),
+  ])
   const sinMediciones = TIPOS_SIGNO.every((tipo) => porTipo[tipo].length === 0)
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
       <h1 className="text-2xl font-semibold tracking-tight text-balance">Signos vitales</h1>
+
+      <BannerAlertasSignos alertas={alertasSinVer} />
 
       {activo.permisos.canUpload && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

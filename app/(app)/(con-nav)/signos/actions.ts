@@ -15,11 +15,26 @@
  * `vital_sign_thresholds` y deja una fila de `vital_sign_alerts` por cada regla
  * violada. Es **best-effort**: la carga nunca falla porque la evaluación falle.
  *
+ * Si esa evaluación creó alguna alerta, se notifica de inmediato
+ * (`lib/signos/notificar.ts`, Sprint 9.3): sin esperar a ningún cron, dentro
+ * de esta misma cadena síncrona, que es lo que garantiza el "menos de 30
+ * segundos" del criterio de aceptación del ROADMAP. También best-effort: un
+ * push que falla no deshace la medición ni la alerta ya guardadas, y el
+ * banner persistente de `/signos` sigue siendo la red de contención.
+ *
+ * También vive acá `marcarAlertaVista` (Sprint 9.3): el `UPDATE` de UNA
+ * columna (`acknowledged_at`) que cierra el banner. La política y el trigger
+ * de sellado ya existen (`docs/modelo-signos.md` §3.3); esta acción es la
+ * puerta de entrada desde la interfaz.
+ *
  * Exige `upload` (`vital_signs_insert_puede_cargar`,
- * `docs/modelo-permisos.md` §6.1 y §4.2: "cargar un dato del día"). No hay
- * `actualizarSigno`/`suspenderSigno` en esta tarea -a diferencia de
- * medicación, una medición no se edita ni se suspende, corregirla es tarea
- * de `can_manage` en un sprint futuro si el producto lo pide-.
+ * `docs/modelo-permisos.md` §6.1 y §4.2: "cargar un dato del día") para
+ * `registrarSigno`. `marcarAlertaVista` exige `manage`
+ * (`vital_sign_alerts_update_visto_administrador` = titular o `can_manage`,
+ * el mismo conjunto que recibe el push). No hay `actualizarSigno`/
+ * `suspenderSigno` en esta tarea -a diferencia de medicación, una medición no
+ * se edita ni se suspende, corregirla es tarea de `can_manage` en un sprint
+ * futuro si el producto lo pide-.
  */
 
 import { redirect } from "next/navigation"
@@ -27,6 +42,7 @@ import { revalidatePath } from "next/cache"
 
 import { esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { notificarAlertasDeSigno } from "@/lib/signos/notificar"
 import { registrarAlertasDeSigno } from "@/lib/signos/registrar-alertas"
 import { esSignoTipo, TIPO_A_DB } from "@/lib/signos/tipos"
 import { validarSigno } from "@/lib/validacion/signo.schema"
@@ -34,6 +50,8 @@ import { validarSigno } from "@/lib/validacion/signo.schema"
 export interface EstadoSignoAccion {
   error: string | null
 }
+
+const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const SIN_PERFIL_ACTIVO =
   "No hay un perfil activo. Elegí de nuevo a quién le estás cargando la medición."
@@ -43,6 +61,14 @@ const ERROR_TIPO_INVALIDO =
 
 const ERROR_INESPERADO =
   "Ocurrió un problema y no pudimos guardar la medición. Probá de nuevo en unos minutos."
+
+const SIN_ALERTA_ID = "No pudimos identificar la alerta. Volvé a intentarlo desde la lista."
+
+const ERROR_ALERTA_NO_ENCONTRADA =
+  "No encontramos esa alerta, o ya no tenés permiso para administrarla."
+
+const ERROR_INESPERADO_ALERTA =
+  "Ocurrió un problema y no pudimos marcar la alerta como vista. Probá de nuevo en unos minutos."
 
 /** `formData.get(nombre)` como string, tratando ausencia y `File` por igual como `""` (mismo criterio que `medicacion/actions.ts#campo`). */
 function campo(formData: FormData, nombre: string): string {
@@ -119,7 +145,27 @@ export async function registrarSigno(
     // esto revienta, queda el log y el dato; devolverle un error a quien acaba
     // de cargar bien haría que reintente y termine sin la medición.
     try {
-      await registrarAlertasDeSigno(guardado.id)
+      const alertasCreadas = await registrarAlertasDeSigno(guardado.id)
+
+      // Notificación inmediata (tarea 9.3): SIN esperar a ningún cron, en la
+      // misma cadena síncrona — es lo que garantiza el "menos de 30 segundos"
+      // del ROADMAP. Try/catch propio: un push que falla no puede deshacer ni
+      // la medición ni las alertas, que ya quedaron guardadas arriba.
+      if (alertasCreadas.length > 0) {
+        try {
+          await notificarAlertasDeSigno({
+            profileId: activo.perfil.id,
+            nombrePerfil: activo.perfil.full_name,
+            vitalSignId: guardado.id,
+            alertas: alertasCreadas,
+          })
+        } catch (errorNotificacion) {
+          console.error(
+            `[signos] Las alertas de ${datos.tipo} se guardaron pero no se pudo notificar al administrador:`,
+            errorNotificacion,
+          )
+        }
+      }
     } catch (errorAlertas) {
       console.error(
         `[signos] La medición de ${datos.tipo} se guardó pero no se pudieron evaluar los umbrales:`,
@@ -137,4 +183,77 @@ export async function registrarSigno(
   revalidatePath("/signos")
   revalidatePath("/inicio")
   redirect("/signos?cargado=1")
+}
+
+/**
+ * Marca UNA alerta como vista (Sprint 9, tarea 9.3). Es el único `UPDATE` que
+ * el cliente puede hacer sobre `vital_sign_alerts`: el privilegio de columna
+ * de la migración 20260814080000 §3.3 solo concede `UPDATE (acknowledged_at)`
+ * a `authenticated` -tocar `mensaje`, `umbral` o `acknowledged_by` a mano
+ * devuelve `42501` aunque la política de fila lo autorice-, y el trigger
+ * `vital_sign_alerts_sellar_visto` reemplaza lo que se mande por `now()` y
+ * sella el autor con `perfil_actor()`: **el cliente solo pone el timestamp,
+ * el trigger firma** (contrato de `docs/modelo-signos.md` §9).
+ *
+ * Exige `manage` (`vital_sign_alerts_update_visto_administrador` = titular o
+ * `can_manage`): son exactamente los mismos que reciben el push
+ * (`destinatarios_de_avisos`), la misma regla que ya aplica la política de
+ * `SELECT` sobre esta tabla. No hay redirect: a diferencia de `registrarSigno`,
+ * esta acción no navega a ningún lado -el banner que la dispara puede estar en
+ * `/signos` o en `/inicio`
+ * (`components/signos/banner-alerta.tsx`), y redirigir siempre a una de las
+ * dos rompería la otra-. Revalidar las dos rutas alcanza para que la lista de
+ * alertas sin ver se actualice en cualquiera de las dos donde el banner viva.
+ *
+ * Idempotente por diseño de la base, no de esta acción: un segundo `UPDATE`
+ * sobre una alerta ya vista no falla -el trigger conserva
+ * `acknowledged_at`/`acknowledged_by` viejos en silencio-, así que un doble
+ * click no puede "robarle" el sellado a quien la vio primero.
+ */
+export async function marcarAlertaVista(
+  _estadoPrevio: EstadoSignoAccion,
+  formData: FormData,
+): Promise<EstadoSignoAccion> {
+  try {
+    const activo = await obtenerPerfilActivo()
+    if (!activo) {
+      return { error: SIN_PERFIL_ACTIVO }
+    }
+
+    const alertaId = campo(formData, "alertaId")
+    if (!PATRON_UUID.test(alertaId)) {
+      return { error: SIN_ALERTA_ID }
+    }
+
+    const { supabase } = await requerirPermiso(activo.perfil.id, "manage", {
+      siNoHaySesion: "lanzar",
+    })
+
+    const { error, count } = await supabase
+      .from("vital_sign_alerts")
+      .update({ acknowledged_at: new Date().toISOString() }, { count: "exact" })
+      .eq("id", alertaId)
+      .eq("profile_id", activo.perfil.id)
+
+    if (error) {
+      console.error(`[signos] Fallo al marcar vista la alerta ${alertaId}:`, error)
+      return { error: ERROR_INESPERADO_ALERTA }
+    }
+    // RLS devuelve cero filas (no un error) cuando el permiso se perdió entre
+    // que se pintó el banner y se apretó el botón, o cuando el id no existe o
+    // es de otro perfil — mismo criterio que `perfil/sos/actions.ts`.
+    if (!count) {
+      return { error: ERROR_ALERTA_NO_ENCONTRADA }
+    }
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message }
+    }
+    console.error("[signos] Fallo inesperado al marcar una alerta como vista:", error)
+    return { error: ERROR_INESPERADO_ALERTA }
+  }
+
+  revalidatePath("/signos")
+  revalidatePath("/inicio")
+  return { error: null }
 }

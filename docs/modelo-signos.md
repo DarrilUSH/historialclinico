@@ -347,6 +347,41 @@ Lo que la 9.3 **tiene que decidir** (esta tarea no lo prejuzga):
   el push necesita el nombre de pila del perfil, como en
   `lib/medicacion/alertas.ts`. `mensaje` es la línea del banner.
 
+### 10.1 Lo que la 9.3 decidió
+
+- **Síncrono, dentro de `registrarSigno`.** `lib/signos/notificar.ts#notificarAlertasDeSigno`
+  se llama inmediatamente después de `registrarAlertasDeSigno`, en la misma
+  cadena de la Server Action, con su propio `try/catch` (best-effort: un push
+  que falla no deshace la medición ni la alerta, ya guardadas). No se agregó
+  ninguna columna de cola a `vital_sign_alerts` — el evento es puntual y el
+  <30s del ROADMAP se verificó en un dispositivo real en **menos de 15
+  segundos** (`docs/capturas/dispositivo-real/README.md`, sección de la 9.3).
+- **UN push por carga, agrupando todas las reglas violadas.** 170/110 crea dos
+  filas en `vital_sign_alerts` pero un solo `PayloadPush`:
+  `lib/signos/notificar.ts#armarTextoAlertaSignos` arma "170/110 (umbral
+  160/100)" cuando `sistolica_alta` y `diastolica_alta` llegan juntas, y un
+  texto por-regla cuando llega una sola (tensión con una sola regla,
+  glucemia, peso). `tag: signo-{vital_sign_id}` — no `alerta-{id}` — para que
+  el reemplazo del lado del dispositivo opere por MEDICIÓN.
+- **El texto del push no es `mensaje`.** Es propio de `notificar.ts`, más
+  corto y agrupado; `mensaje` sigue siendo exclusivo del banner (una línea por
+  regla, con el detalle completo).
+- **Deep link: `/signos/enlace`**, calcado de `/medicacion/enlace` (Route
+  Handler fuera de `/api`, mismos tres porqués). Cambia el perfil activo con
+  `cambiarPerfilDesdeParametro` y redirige a `/signos`, donde vive el banner.
+- **El banner vive en `/signos` Y `/inicio`** (`components/signos/banner-alerta.tsx`),
+  no solo en `/signos`: el ROADMAP pide "banner persistente en la app" y
+  `/inicio` es la primera pantalla que ve quien administra el perfil, aunque
+  no haya entrado todavía a `/signos` esta sesión. Mismo query en las dos
+  (`lib/signos/alertas-sin-ver.ts`), detrás de `activo.permisos.canManage`.
+- **`marcarAlertaVista` es una sola acción, por alerta** — el artefacto que
+  pide el ROADMAP —, y no redirige (a diferencia del resto de las Server
+  Actions de `/signos`): el banner puede estar en `/signos` o en `/inicio`, y
+  redirigir siempre a una de las dos rompería la otra. Con dos o más alertas
+  sin ver, el banner agrega "Marcar todas como vistas", que invoca la MISMA
+  acción una vez por `id` desde el cliente (`useTransition`, sin Server Action
+  nueva) — decisión Senior UX documentada en el encabezado del componente.
+
 ---
 
 ## 11. Contrato para la tarea 9.4 (historial y gráficos)
@@ -395,6 +430,9 @@ Lo que la 9.3 **tiene que decidir** (esta tarea no lo prejuzga):
 # Motor puro: 43 casos (normal, borde exacto 160/100, por encima, glucemia
 # baja y alta, ventana y mediana de peso, valor imposible, descargo).
 npm run test -- umbrales
+
+# Armado del texto del push de la 9.3 (agrupación de reglas en un mensaje).
+npm run test -- notificar-signos
 
 # Base: 47 casos nuevos en el BLOQUE 14 (223 en total, todos PASS).
 npx supabase db reset

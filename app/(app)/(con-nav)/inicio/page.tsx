@@ -30,10 +30,12 @@ import { ActivarNotificaciones } from "@/components/notificaciones/activar-notif
 import { BotonSos } from "@/components/inicio/boton-sos"
 import { ProximoTurno } from "@/components/inicio/proximo-turno"
 import { CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA } from "@/components/base/tarjeta"
+import { BannerAlertasSignos } from "@/components/signos/banner-alerta"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { obtenerTomasDeHoy } from "@/lib/medicacion/tomas-de-hoy"
 import { cn } from "@/lib/utils"
 import { obtenerPerfilActivo, type PermisosPerfilActivo } from "@/lib/perfil-activo"
+import { obtenerAlertasSinVer } from "@/lib/signos/alertas-sin-ver"
 
 export const metadata: Metadata = {
   title: "Inicio — Historial Médico",
@@ -59,6 +61,15 @@ export default async function PaginaInicio() {
   const tomasDeHoy = await obtenerTomasDeHoy(supabase, perfil.id)
   const tomasPendientesHoy = tomasDeHoy.filter((toma) => toma.status === "pending").length
 
+  // Banner de alertas de signos vitales (Sprint 9, tarea 9.3): mismo criterio
+  // de permiso que `/signos` -solo `can_manage` recibe el push y solo
+  // `can_manage` puede leer estas filas por RLS-, para que el banner
+  // "persistente en la app" del ROADMAP alcance a quien administra el perfil
+  // aunque no haya entrado todavía a `/signos` esta sesión.
+  const alertasSinVer = permisos.canManage
+    ? await obtenerAlertasSinVer(supabase, perfil.id)
+    : []
+
   return (
     <div className="flex w-full flex-1 flex-col items-center justify-center gap-8 px-4 py-12 text-center">
       {/*
@@ -69,6 +80,16 @@ export default async function PaginaInicio() {
         suma un quinto ítem a la bottom nav.
       */}
       <BotonSos />
+
+      {/*
+        Banner de alertas de signos vitales (Sprint 9, tarea 9.3): justo
+        debajo del SOS -la acción de emergencia sigue siendo lo más
+        prominente de la pantalla- y arriba del saludo, para que quien abre la
+        app vea de entrada que hay algo sin ver, sin tener que entrar a
+        `/signos` primero. `BannerAlertasSignos` ya devuelve `null` con la
+        lista vacía, así que no hace falta un `if` acá.
+      */}
+      <BannerAlertasSignos alertas={alertasSinVer} className="w-full max-w-sm" />
 
       <div className="flex flex-col items-center gap-2">
         <p className="text-lg text-muted-foreground">Estás viendo el historial de</p>
