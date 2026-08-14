@@ -13,8 +13,8 @@
 --   - Storage paths: {profile_id}/{año}/{uuid}.ext
 --   - Credenciales de prueba: password123
 --   - Todas las fechas en 2025-2026 para contexto realista
---   - Datos de Roberto: completos para la ficha SOS (grupo sanguíneo, alergias,
---     condiciones crónicas, contacto de emergencia)
+--   - Datos de Roberto: completos para la ficha SOS (documento, teléfono, grupo
+--     sanguíneo, alergias, condiciones crónicas, contacto de emergencia)
 -- =============================================================================
 
 -- UUIDs para reproducibilidad
@@ -124,9 +124,17 @@ insert into public.profiles (
 ) on conflict (id) do nothing;
 
 -- Roberto Gómez (GESTIONADO, sin cuenta, creado por María)
--- Datos SOS completos para pruebas offline
+-- Datos SOS completos para pruebas offline.
+--
+-- `national_id` y `phone` están cargados a propósito, y no solo para que la
+-- ficha SOS muestre el DNI en vez de "DNI no registrado"
+-- (`components/sos/ficha-sos.tsx`): son los dos campos que el criterio de
+-- aceptación de la tarea 10.2 exige buscar —y no encontrar— en el contexto que
+-- se le manda a Gemini. Con las columnas en NULL, esa verificación contra el
+-- seed sería vacua: no se puede probar que no viaja un dato que no existe.
+-- Ver `docs/minimizacion-datos.md` §7.3.
 insert into public.profiles (
-    id, user_id, full_name, date_of_birth, role,
+    id, user_id, full_name, national_id, phone, date_of_birth, role,
     created_by_profile_id,
     blood_type, allergies, chronic_conditions,
     critical_medication, emergency_contact, emergency_contact_phone,
@@ -136,6 +144,8 @@ insert into public.profiles (
     '660e8400-e29b-41d4-a716-446655440003'::uuid,
     null,
     'Roberto Gómez',
+    '8234567',
+    '+54 9 2901 445566',
     '1945-11-03'::date,
     'elder',
     '660e8400-e29b-41d4-a716-446655440001'::uuid,
