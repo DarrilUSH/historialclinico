@@ -29,6 +29,10 @@ import type { AuthError } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 import { ACCION, registrarAcceso } from "@/lib/auditoria"
 import {
+  limpiarCookieTamano,
+  sincronizarCookieTamano,
+} from "@/lib/densidad/servidor"
+import {
   PARAM_DESDE,
   RUTA_LOGIN,
   RUTA_POST_LOGIN,
@@ -169,6 +173,12 @@ export async function registrarse(
     }
   }
 
+  // Ídem `iniciarSesion`: el perfil recién creado nace en `grande` (el DEFAULT
+  // de la columna), pero la cookie que haya en este navegador puede ser de
+  // otra cuenta. Sincronizar acá la deja diciendo la verdad desde el primer
+  // render, en vez de heredar el modo del último que usó el equipo.
+  await sincronizarCookieTamano()
+
   redirect(RUTA_POST_LOGIN)
 }
 
@@ -211,6 +221,17 @@ export async function iniciarSesion(
   // no lanza, así que esto no puede dejar a nadie afuera de su historial.
   await registrarAcceso({ accion: ACCION.login })
 
+  // Modo de letra (Sprint 13): iniciar sesión es el momento en que una cuenta
+  // empieza a usar ESTE navegador, y por lo tanto el único en que se puede
+  // volcar su preferencia guardada a la cookie espejo. Es lo que hace que el
+  // modo "viaje entre dispositivos": María entrando por primera vez desde la
+  // tablet ve la letra chica que eligió en el celular, sin tocar nada.
+  //
+  // Pisa la cookie SIEMPRE, incluso si ya había una: en un navegador
+  // compartido cuya sesión anterior venció sin logout, la cookie que quedó es
+  // de otra persona. Ver `sincronizarCookieTamano` en lib/densidad/servidor.ts.
+  await sincronizarCookieTamano()
+
   redirect(destino ?? RUTA_POST_LOGIN)
 }
 
@@ -222,6 +243,11 @@ export async function cerrarSesion(): Promise<void> {
   // sesión no tiene por qué heredar (ni siquiera transitoriamente, antes de
   // la primera revalidación) el perfil que dejó la anterior.
   await limpiarPerfilActivo()
+  // El modo de letra es preferencia de la CUENTA, no del dispositivo: mismo
+  // argumento, misma conclusión. Sin este borrado, la letra chica de María
+  // sería el único resto de su sesión que sobrevive al logout y lo primero que
+  // vería Roberto al entrar en el mismo navegador.
+  await limpiarCookieTamano()
   redirect(RUTA_LOGIN)
 }
 

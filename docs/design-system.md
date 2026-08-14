@@ -298,7 +298,13 @@ runtime.
 
 **Raíz.** `html { font-size: 112.5% }`. Con la configuración por defecto del
 navegador eso es exactamente **18px**, y si la persona ya agrandó la tipografía
-del sistema, toda la escala crece con ella. `1rem = 18px`.
+del sistema, toda la escala crece con ella. `1rem = 18px`. La raíz no cambia
+entre modos de densidad: los 18px son comunes al modo grande y al compacto:
+lo que varía es cuánto ocupa cada escalón `text-*` dentro de esa raíz.
+
+La tabla siguiente es la escala del **modo grande**, el default de la app y el
+que ve la enorme mayoría de las cuentas. Ninguno de sus valores cambia con el
+modo de densidad.
 
 | Utilidad | Tamaño | px | Interlineado | Uso |
 |---|---|---|---|---|
@@ -317,6 +323,40 @@ La escala se comprime abajo a propósito: entre `text-xs` y `text-base` hay solo
 2px de diferencia porque el sistema se niega a tener texto chico. Lo que en
 otros proyectos sería "letra chica" acá sigue siendo legible.
 
+### 4.1 Modo compacto ("letra chica", Sprint 13)
+
+La cuenta puede activar un segundo modo, gobernado por el atributo
+`data-tamano="chica"` en `<html>` (contrato completo en la sección 10). No es
+un zoom sobre la escala de arriba: la reducción es progresiva y no uniforme,
+más floja abajo -donde el límite es la legibilidad- y más fuerte arriba -donde
+el límite es solo el aire de la pantalla-, así que ningún escalón pierde más
+de lo que puede permitirse perder.
+
+| Utilidad | Tamaño | px | Interlineado | Δ vs. grande |
+|---|---|---|---|---|
+| `text-xs` | 0.7778rem | 14px | 1.45 | -12% |
+| `text-sm` | 0.8333rem | 15px | 1.45 | -12% |
+| `text-base` | 0.8889rem | **16px** | **1.5** | -11% |
+| `text-lg` | 1rem | 18px | 1.45 | -14% |
+| `text-xl` | 1.1111rem | 20px | 1.35 | -17% |
+| `text-2xl` | 1.2778rem | 23px | 1.25 | -18% |
+| `text-3xl` | 1.4444rem | 26px | 1.2 | -19% |
+| `text-4xl` | 1.7222rem | 31px | 1.12 | -21% |
+| `text-5xl` | 2.0556rem | 37px | 1.08 | -23% |
+| `text-6xl` | 2.4444rem | 44px | 1.05 | -24% |
+
+`text-base` tiene un piso duro que no se cruza en ningún modo: 16px. Por
+debajo de eso, iOS Safari hace zoom automático al enfocar un campo de
+formulario, y los primitivos de `components/ui/` usan `text-base` en todos sus
+campos. Si algún día hace falta apretar más el modo compacto, se aprieta
+espaciado, no este escalón.
+
+Vale la pena notar el patrón, porque no es casualidad: cada escalón chico cae,
+aproximadamente, sobre el escalón anterior de la escala grande (`text-lg`
+chica son 18px, lo mismo que `text-base` grande). Es lo que hace que la app se
+lea como la misma app en los dos modos, y no como una versión distinta con
+menos jerarquía.
+
 **Tracking.** Los valores por defecto de Tailwind aprietan demasiado para
 lectura senior. `tracking-tight` pasa de -0.025em a **-0.006em**, y el `body`
 lleva un `letter-spacing: 0.005em` que abre apenas el texto de cuerpo.
@@ -331,8 +371,14 @@ imposible.
 
 ## 5. Espaciado, objetivos táctiles, radios y sombras
 
-**Objetivo táctil.** WCAG 2.5.5 y las reglas Senior UX del proyecto piden 48px.
-El token los garantiza y los deja crecer:
+**Unidad de espaciado.** Toda la escala de espaciado de Tailwind 4 (`p-4`,
+`gap-3`, `size-10`, y también `--card-spacing` de las tarjetas de shadcn)
+resuelve `calc(var(--spacing) * N)`. En el **modo grande** es el default de
+Tailwind, sin redefinir: `0.25rem`, que con la raíz de 18px de esta app son
+4,5px. Ese valor no cambia.
+
+**Objetivo táctil.** WCAG 2.5.5 y las reglas Senior UX del proyecto piden 48px
+en el modo grande. El token los garantiza y los deja crecer:
 
 ```css
 --spacing-tactil: max(48px, 2.75rem);        /* 49.5px por defecto */
@@ -347,13 +393,49 @@ mínimos de una sola vez para controles que no pasan por los primitivos de
 Se usa `min-height` y no `height` a propósito: si alguien pasa `h-10` por
 `className`, el mínimo táctil sigue mandando.
 
-**Radios.** `--radius: 0.75rem` (13.5px). La escala del preset deriva de ahí:
-`rounded-sm` 8.1px, `rounded-md` 10.8px, `rounded-lg` 13.5px (botones y campos),
-`rounded-xl` 18.9px (tarjetas y diálogos), `rounded-2xl` 24.3px (tarjetas de
-perfil). Generosos, nunca pastilla completa salvo en insignias y avatares.
+### 5.1 Modo compacto: espaciado, táctil y radios
+
+Ninguno de los valores del modo grande de arriba cambia ni un píxel cuando la
+cuenta activa el modo compacto (`data-tamano="chica"`, sección 10): lo que
+sigue son los tokens que solo existen, redefinidos, dentro de ese modo.
+
+`--spacing` baja de 0.25rem (4,5px) a `0.2222rem` (4px), -11%: la misma
+proporción que la tipografía, para que la relación entre texto y aire no se
+distorsione, y cae justo sobre la grilla de 4px. Como es la unidad de la que
+cuelga toda la escala de Tailwind, este único cambio comprime paddings, gaps,
+márgenes y tamaños de ícono de la app entera de una sola vez.
+
+Los tres tokens táctiles y la bottom nav bajan con el mismo criterio, sin
+perforar nunca el piso de 40px que fija el ROADMAP para el modo compacto:
+
+| Token | Grande | Chica | Uso |
+|---|---|---|---|
+| `--spacing-tactil` | `max(48px, 2.75rem)` → 49,5px | `max(40px, 2.25rem)` → 40,5px | Piso de cualquier control interactivo |
+| `--spacing-tactil-amplio` | `max(56px, 3.25rem)` → 58,5px | `max(48px, 2.75rem)` → 49,5px | Controles de mayor jerarquía |
+| `--spacing-sos-boton` | `max(64px, 3.75rem)` → 67,5px | `max(56px, 3.25rem)` → 58,5px | Botón de emergencia (Sprint 8). Reservado a ese único uso |
+| `--spacing-bottom-nav` | `4.75rem` → 85,5px | `4rem` → 72px | Alto de la bottom nav fija; el shell la reserva también como padding inferior del contenido |
+
+La escalera queda desplazada un escalón, y es lo elegante del caso: el
+objetivo "amplio" del modo compacto (49,5px) es, en la práctica, el objetivo
+normal del modo grande. Nadie termina con un control más chico que el piso
+compacto ni con uno que la mano no encuentre. El botón SOS, además, sigue
+siendo por lejos el control más grande de la app en los dos modos: la
+distancia relativa contra el objetivo táctil normal incluso crece en
+compacta (1,44× contra 1,36× en grande), así que nunca se confunde con un
+botón común.
+
+**Radios.** `--radius: 0.75rem` (13.5px) en el modo grande, sin cambios. La
+escala del preset deriva de ahí: `rounded-sm` 8.1px, `rounded-md` 10.8px,
+`rounded-lg` 13.5px (botones y campos), `rounded-xl` 18.9px (tarjetas y
+diálogos), `rounded-2xl` 24.3px (tarjetas de perfil). Generosos, nunca
+pastilla completa salvo en insignias y avatares. En el modo compacto
+`--radius` baja a `0.625rem` (11,25px); toda la escala derivada se recalcula
+sola porque el bloque `@theme inline` de la sección 3 la define como
+múltiplos de este token -una tarjeta más chica con un radio que no acompaña
+se ve desproporcionada, la curva se come el contenido-.
 
 **Sombras.** Dos niveles, teñidos al verde del fondo. Nada de negro puro ni de
-glassmorphism.
+glassmorphism. No cambian entre modos de densidad.
 
 | Utilidad | Uso |
 |---|---|
@@ -453,8 +535,13 @@ usarlo.
 5. **Los tamaños vienen de los primitivos.** `components/ui/` ya trae 18px,
    altura táctil y foco visible. Si hace falta pasar una clase de tamaño, va
    como excepción documentada, no como costumbre.
-6. **`text-xs` es el piso.** Si algo "necesita" ser más chico, el problema es la
-   densidad de la pantalla, no el tamaño de la letra.
+6. **`text-xs` es el piso -de cada modo-.** 16px en el modo grande, 14px en el
+   compacto (sección 10). Si algo "necesita" ser más chico que el piso del
+   modo activo, el problema es la densidad de la pantalla, no el tamaño de la
+   letra. Hay, además, un piso que ningún modo cruza: `text-base` nunca baja
+   de 16px, porque iOS Safari hace zoom automático al enfocar un campo de
+   formulario con letra menor a eso, y los primitivos de `components/ui/`
+   usan `text-base` en todos sus campos.
 7. **Foco visible siempre.** Existe una regla global de `:focus-visible` con
    contorno de 3px y offset de 2px para cualquier elemento que no pase por los
    primitivos. Nunca `outline: none` sin reemplazo.
@@ -464,7 +551,7 @@ usarlo.
 ## 9. Verificación
 
 ```bash
-node scripts/verificar-contraste.mjs   # 98 pares AA, sale 1 si alguno falla
+node scripts/verificar-contraste.mjs   # 196 pares AA en 4 combinaciones de tema × densidad, sale 1 si alguno falla
 npx tsc --noEmit
 npm run test
 npm run build
@@ -483,3 +570,49 @@ Medido en el navegador sobre el dev server (Chromium, `getComputedStyle`):
 - `/perfiles` en claro: h1 32px con 14.84:1, avatar 6.76:1, insignia de relación
   5.22:1 (compuesta sobre el fondo real, respetando el alfa).
 - `/perfiles` en oscuro: h1 15.96:1, avatar 8.50:1, borde de tarjeta 3.12:1.
+
+---
+
+## 10. Densidad (modo de letra chica)
+
+Sprint 13 agregó un segundo eje además del tema claro/oscuro: el modo de
+densidad, con dos valores, grande (default) y chica (compacto). No es una
+preferencia cosmética menor -es una segunda escala completa, con su propia
+tipografía (sección 4.1), su propio espaciado y sus propios objetivos
+táctiles y radios (sección 5.1)-, pensada para cuentas que prefieren ver más
+contenido por pantalla a costa de algo de aire, sin resignar ninguna garantía
+de accesibilidad que tiene el modo grande.
+
+**Dónde vive.** El atributo `data-tamano` en `<html>` gobierna el modo, en el
+mismo elemento donde next-themes pone la clase `.dark`: son dos ejes
+independientes que conviven en el mismo lugar. Lo escribe el layout raíz
+(`app/layout.tsx`) del lado del servidor, a partir de la preferencia de la
+cuenta logueada (`lib/densidad/servidor.ts`), así que llega resuelto en el
+HTML inicial y no hay parpadeo al cargar -el mismo motivo por el que
+next-themes aplica `.dark` con un script bloqueante antes del primer
+pintado-. Los tokens que cambian entre modos viven en `app/globals.css`,
+sección 5 ("DENSIDAD COMPACTA").
+
+**El variant `chica:`.** Para lo que un token global no alcanza a expresar
+-cambiar una grilla de dos columnas a una, pasar de `flex-col` a `flex-row`,
+recortar un texto con `line-clamp-2` que en el modo grande no hace falta
+recortar- existe el custom variant `chica:`, definido como
+`&:is([data-tamano="chica"], [data-tamano="chica"] *)`. El escalado de
+tipografía y espaciado no lo necesita: sale solo, porque las utilidades de
+Tailwind leen esos tokens en tiempo de uso.
+
+**Por qué no existe `grande:`.** Es deliberado. El modo grande es el que no
+se toca -es el default de la app y el que ve la enorme mayoría de las
+cuentas-, así que una utilidad `grande:algo` sería, por definición, un cambio
+en el modo grande, que es exactamente lo que este sistema existe para evitar.
+Lo que haría falta expresar con ella siempre se puede escribir al revés: una
+clase base pensada para el modo grande, corregida con `chica:` cuando el modo
+compacto la necesita distinta.
+
+**La regla dura.** Nunca se toca un solo píxel del modo grande al trabajar en
+el modo compacto, y el piso táctil del modo compacto nunca baja de 40px. Todo
+lo demás -qué vista se rediseña primero, cómo se prueba cada una, qué
+invariantes estructurales verifica `node scripts/verificar-contraste.mjs`
+además de los 196 pares de color en las cuatro combinaciones de tema y
+densidad- está en `docs/densidad.md`, el contrato completo para el rediseño
+vista por vista.

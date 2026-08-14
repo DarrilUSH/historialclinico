@@ -3921,6 +3921,209 @@ select pruebas_rls.registrar('16. share target temporal (shared_uploads_temp)',
 
 
 -- =============================================================================
+-- BLOQUE 17 — Preferencia de tamaño de letra (Sprint 13, tarea 13.1)
+-- -----------------------------------------------------------------------------
+-- `profiles.display_density` es la única columna de `profiles` que NO describe
+-- al paciente sino a la cuenta que MIRA la pantalla, y por eso es la única a la
+-- que no le sirve la nota ② de la matriz ("titular o can_manage editan el
+-- perfil"): un `can_manage` puede corregir la ficha SOS de Roberto, pero no
+-- tiene por qué decidir con qué tamaño de letra ve la app la cuenta de María.
+--
+-- La regla no la puede expresar ni un privilegio de columna (no mira filas) ni
+-- una política RLS (no puede comparar `new` contra `old`): la impone el trigger
+-- `profiles_proteger_densidad`. Este bloque prueba las cuatro esquinas de esa
+-- decisión —el titular sí, el administrador ajeno no, la edición legítima de
+-- terceros sigue intacta, y un perfil sin cuenta no admite preferencia—, más el
+-- default y la visibilidad de lectura.
+--
+-- Estado de partida: el BLOQUE 4 dejó a Diego con `can_manage` sobre el perfil
+-- de María. Se re-afirma acá con un UPDATE idempotente en vez de asumirlo, para
+-- que el bloque siga siendo válido si algún bloque intermedio cambia la matriz.
+-- =============================================================================
+\echo '### BLOQUE 17 — preferencia de tamaño de letra (display_density)'
+
+update public.family_permissions
+   set can_manage = true
+ where owner_profile_id = :p_a and granted_profile_id = :p_b;
+
+-- El default del producto es el modo grande, y toda fila existente lo heredó
+-- del `ALTER TABLE ... DEFAULT` sin migración de datos.
+select pruebas_rls.registrar('17. densidad',
+       'Toda fila de profiles arranca en el modo grande (default de la columna)',
+       '0 filas distintas de grande',
+       count(*) || ' filas distintas de grande')
+  from public.profiles where display_density <> 'grande';
+
+-- ── El titular SÍ cambia la suya.
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v integer;
+begin
+    update public.profiles set display_density = 'chica'
+     where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('17. densidad',
+        'A cambia SU PROPIA preferencia de tamaño  [CRITERIO DE ACEPTACIÓN]',
+        '1 filas', v || ' filas');
+end $$;
+
+select pruebas_rls.registrar('17. densidad',
+       'El valor quedó persistido en la fila de A', 'chica', display_density::text)
+  from public.profiles where id = :p_a;
+
+-- Nadie más que el titular: A administra el perfil GESTIONADO de Rosa (:p_g3,
+-- lo creó ella en el BLOQUE 11) y aun así no puede darle una preferencia. Un
+-- perfil sin cuenta no mira nada; el trigger lo rechaza antes de que el CHECK
+-- llegue a opinar.
+--
+-- El `row_count` del camino feliz no es decorativo: la primera versión de este
+-- caso apuntaba a :p_g (Roberto), que el BLOQUE 5 borra, y un UPDATE que no
+-- encuentra fila no lanza nada — la prueba "pasaba por no existir el objetivo".
+-- Reportar cuántas filas tocó convierte ese escenario en un resultado distinto
+-- y visible ('sin fila objetivo') en vez de un falso 'cambiado'.
+do $$
+declare v text; n integer;
+begin
+    begin
+        update public.profiles set display_density = 'chica'
+         where id = 'f0000000-0000-4000-8000-00000000f001';
+        get diagnostics n = row_count;
+        v := case when n = 0 then 'sin fila objetivo' else 'cambiado' end;
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when check_violation         then v := 'rechazado (23514)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('17. densidad',
+        'A le cambia la preferencia a un perfil GESTIONADO que administra (no tiene cuenta, no mira nada)',
+        'rechazado (42501)', v);
+end $$;
+
+commit;
+
+-- ── El administrador ajeno NO.
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        update public.profiles set display_density = 'grande'
+         where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        v := 'cambiado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('17. densidad',
+        'B con can_manage sobre A le cambia la preferencia de tamaño  [CRITERIO DE ACEPTACIÓN]',
+        'rechazado (42501)', v);
+end $$;
+
+select pruebas_rls.registrar('17. densidad',
+       'La preferencia de A siguió intacta después del intento de B', 'chica',
+       (select display_density::text from public.profiles
+         where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'));
+
+-- La contracara imprescindible: el trigger NO puede haber roto la edición
+-- legítima. B con can_manage sigue editando el resto del perfil de A -incluida
+-- la ficha SOS, que es el caso de uso central del Sprint 8- porque el predicado
+-- solo mira `display_density is distinct from`.
+do $$
+declare v integer;
+begin
+    update public.profiles set blood_type = 'A-'
+     where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('17. densidad',
+        'B con can_manage sigue editando OTRAS columnas del perfil de A (el trigger no lo rompe)',
+        '1 filas', v || ' filas');
+end $$;
+
+-- Un UPDATE que reenvía el MISMO valor de densidad no es un cambio y no debe
+-- fallar: es lo que hace cualquier `update` de fila completa (un ORM, un
+-- formulario que reenvía todo). El trigger compara con `is distinct from`
+-- justamente para no convertir eso en un error.
+do $$
+declare v text;
+begin
+    begin
+        update public.profiles
+           set display_density = display_density, full_name = 'María Gómez'
+         where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        v := 'aceptado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('17. densidad',
+        'B reenvía la MISMA densidad de A junto con otra columna (no es un cambio)',
+        'aceptado', v);
+end $$;
+
+-- Lectura: la preferencia viaja en `select *` para quien puede ver la fila. Se
+-- deja escrito como caso porque es una decisión, no un descuido — ver "LA
+-- LECTURA SÍ ES VISIBLE" en la migración 20260814120000 y docs/densidad.md §6.
+select pruebas_rls.registrar('17. densidad',
+       'B (autorizado sobre A) LEE la preferencia de A: se acepta a propósito, no es dato de salud',
+       'chica',
+       (select display_density::text from public.profiles
+         where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'));
+
+commit;
+
+-- ── El CHECK, medido sin el trigger de por medio.
+-- Fuera de un `set local role`, esto corre como `postgres`: `es_sesion_de_usuario()`
+-- devuelve false y el trigger se abstiene, igual que con el seed o una
+-- migración. Lo único que queda en pie es
+-- `profiles_densidad_solo_con_cuenta`, y tiene que alcanzar: un bug de un job
+-- con service_role tampoco puede dejar una preferencia colgada de un perfil que
+-- nadie usa para mirar.
+do $$
+declare v text; n integer;
+begin
+    begin
+        update public.profiles set display_density = 'chica'
+         where id = 'f0000000-0000-4000-8000-00000000f001';
+        get diagnostics n = row_count;
+        v := case when n = 0 then 'sin fila objetivo' else 'cambiado' end;
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('17. densidad',
+        'service_role/seed le pone densidad a un perfil gestionado (solo queda el CHECK)',
+        'rechazado (23514)', v);
+end $$;
+
+-- Invariantes estructurales: que las tres piezas existan de verdad y no solo en
+-- el texto de la migración.
+select pruebas_rls.registrar('17. densidad',
+       'El trigger profiles_proteger_densidad existe sobre profiles', '1',
+       (select count(*)::text from pg_trigger t
+          join pg_class c on c.oid = t.tgrelid
+         where c.relname = 'profiles' and t.tgname = 'profiles_proteger_densidad'));
+
+select pruebas_rls.registrar('17. densidad',
+       'El CHECK profiles_densidad_solo_con_cuenta existe', '1',
+       (select count(*)::text from pg_constraint
+         where conname = 'profiles_densidad_solo_con_cuenta'));
+
+select pruebas_rls.registrar('17. densidad',
+       'El enum display_density tiene exactamente los dos modos del producto',
+       'chica, grande',
+       (select string_agg(e.enumlabel, ', ' order by e.enumlabel)
+          from pg_enum e join pg_type t on t.oid = e.enumtypid
+         where t.typname = 'display_density'));
+
+-- Se restaura el estado para no arrastrar la preferencia ni el grupo sanguíneo
+-- editado a los totales de otras corridas.
+update public.profiles set display_density = 'grande' where id = :p_a;
+update public.profiles set blood_type = 'A+'           where id = :p_a;
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''

@@ -783,6 +783,31 @@ Demo: sitio productivo funcionando con dominio, legales y notificaciones reales,
 
 ---
 
+## Sprint 13: Modo de letra chica (densidad compacta)
+
+> Pedido del usuario (2026-08-14, con el Sprint 12 en pausa): además del modo actual de letra GRANDE (Senior UX, queda como está y como default), un modo de letra CHICA para quien ve bien — pantallas mejor organizadas, tipografía/tarjetas/secciones más compactas. Decisiones cerradas con el usuario: la preferencia es **de quien mira** (cuenta logueada, persistida en su perfil, viaja entre dispositivos); rediseño **profundo vista por vista** (TODAS las vistas); **SOS también compacta**; conmutador **Opción A** (pregunta en el selector de perfiles + botón A/a siempre visible en el encabezado).
+
+**Objetivo:** que María (49, ve bien) use la app densa y Roberto (80) la use grande, cada uno sin enterarse del modo del otro.
+**Entregable demostrable:** alternar A/a reorganiza TODA la app al instante y la preferencia persiste entre sesiones y dispositivos.
+
+### [Opus] - Fundaciones de densidad: preferencia, tokens y conmutadores
+
+Migración de la columna de preferencia en `profiles` (de la cuenta que mira, default `grande`), atributo `data-tamano` en `<html>` resuelto server-side (sin flash), set completo de tokens compactos en `globals.css` (tipografía, espaciados, alturas táctiles — piso 40px en compacta), custom variant de Tailwind para redisenos por vista (`chica:`), Server Action de persistencia, pregunta en el selector de perfiles y botón A/a en el encabezado. El script de contraste debe validar los pares en AMBAS densidades (un texto que era "grande" para WCAG puede pasar a umbral 4.5:1 en compacta).
+
+- **Criterio de aceptación:** alternar A/a cambia toda la app al instante y sin flash al recargar; la preferencia persiste en la base y sigue a la cuenta; RLS del campo verificada; contraste PASS en ambas densidades.
+
+### [Sonnet] - Rediseño compacto por secciones (5 tandas)
+
+1. Shell + inicio + navegación; 2. Estudios completo (galería, filtros, carga, detalle, tendencias); 3. Turnos + medicación + signos; 4. Coberturas + familia + médicos + SOS (edición y ficha); 5. Ficha IA + compartir + offline + auth. Cada tanda: reorganización real en modo chico (grillas más densas, tarjetas compactas, listas apretadas) sin tocar el modo grande, verificación en dispositivo de ambos modos, suites completas.
+
+- **Criterio de aceptación por tanda:** en modo chico las pantallas muestran más contenido por pantalla con jerarquía clara; en modo grande quedan EXACTAMENTE como estaban (captura comparativa); a11y sostenida (foco, teclado, targets ≥40px compacta).
+
+### Checkpoint Sprint 13
+
+Demo en el dispositivo real: alternar A/a en 6 pantallas representativas, persistencia tras relogin, ambos modos auditados (contraste dual, a11y, suites completas). **Fable aprueba y recién ahí se retoma la pausa del Sprint 12 cuando el usuario lo pida.**
+
+---
+
 ## Protocolo de Auditoría y Checkpoints
 
 ### Cómo funciona

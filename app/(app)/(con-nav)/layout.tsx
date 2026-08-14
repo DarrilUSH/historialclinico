@@ -56,6 +56,7 @@ import { BottomNav } from "@/components/navegacion/bottom-nav"
 import { EncabezadoPerfil } from "@/components/navegacion/encabezado-perfil"
 import { RegistroServiceWorker } from "@/components/pwa/registro-service-worker"
 import { Toaster } from "@/components/ui/sonner"
+import { obtenerTamano } from "@/lib/densidad/servidor"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 export default async function LayoutConNav({ children }: { children: ReactNode }) {
@@ -66,6 +67,13 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
   }
 
   const { perfil, permisos } = activo
+
+  // Modo de letra de la CUENTA (Sprint 13). El layout raíz ya lo resolvió para
+  // pintar `<html data-tamano>`; acá se vuelve a pedir solo para que el botón
+  // A/a sepa en qué estado dibujarse. No cuesta nada: `obtenerTamano` está
+  // envuelta en `cache()` de React, así que esta segunda llamada en el mismo
+  // request devuelve el valor ya resuelto, igual que `obtenerPerfilActivo`.
+  const tamano = await obtenerTamano()
 
   return (
     <div className="flex min-h-pantalla w-full flex-col bg-background">
@@ -102,7 +110,7 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
           sobre la bottom nav: por eso da igual dónde esté en el árbol. */}
       <RegistroServiceWorker perfilId={perfil.id} />
 
-      <EncabezadoPerfil perfil={perfil} esPropio={permisos.esPropio} />
+      <EncabezadoPerfil perfil={perfil} esPropio={permisos.esPropio} tamano={tamano} />
 
       {/* Indicador global de conexión: barra visible cuando el dispositivo
           está offline (Sprint 8, tarea 8.5). */}

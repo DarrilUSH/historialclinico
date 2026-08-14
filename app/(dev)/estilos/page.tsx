@@ -102,29 +102,99 @@ export default function PaginaEstilos() {
         <section id="tipografia" className="mb-16 scroll-mt-32">
           <h2 className="mb-6 text-3xl font-bold">Tipografía</h2>
           <p className="mb-6 text-muted-foreground">
-            Atkinson Hyperlegible Next (variable, 200-800). Raíz: 18px.
-            Interlineado de cuerpo: 1.6. Escala comprimida propositivamente en
-            los tamaños chicos: esta app no baja de 16px.
+            Atkinson Hyperlegible Next (variable, 200-800). Raíz: 18px en los
+            dos modos de densidad (Sprint 13). Cada fila muestra el tamaño
+            real de la escala &quot;Grande&quot; (modo por defecto, interlineado de
+            cuerpo 1.6, piso 16px) y de la escala &quot;Chica&quot; (modo compacto
+            activable por cuenta, interlineado de cuerpo 1.5, piso 14px). En
+            los dos modos, <code>text-base</code> tiene un piso duro de 16px:
+            por debajo de eso, iOS Safari hace zoom automático al enfocar un
+            campo de formulario.
           </p>
 
           <div className="space-y-6">
             {[
-              { clase: "text-xs", token: "text-xs", px: "16px", lineheight: "1.5" },
-              { clase: "text-sm", token: "text-sm", px: "17px", lineheight: "1.55" },
+              {
+                clase: "text-xs",
+                token: "text-xs",
+                px: "16px",
+                lineheight: "1.5",
+                pxChica: "14px",
+                lineheightChica: "1.45",
+              },
+              {
+                clase: "text-sm",
+                token: "text-sm",
+                px: "17px",
+                lineheight: "1.55",
+                pxChica: "15px",
+                lineheightChica: "1.45",
+              },
               {
                 clase: "text-base",
                 token: "text-base (defecto)",
                 px: "18px",
                 lineheight: "1.6",
+                pxChica: "16px",
+                lineheightChica: "1.5",
               },
-              { clase: "text-lg", token: "text-lg", px: "21px", lineheight: "1.55" },
-              { clase: "text-xl", token: "text-xl", px: "24px", lineheight: "1.4" },
-              { clase: "text-2xl", token: "text-2xl", px: "28px", lineheight: "1.3" },
-              { clase: "text-3xl", token: "text-3xl", px: "32px", lineheight: "1.22" },
-              { clase: "text-4xl", token: "text-4xl", px: "39px", lineheight: "1.15" },
-              { clase: "text-5xl", token: "text-5xl", px: "48px", lineheight: "1.1" },
-              { clase: "text-6xl", token: "text-6xl", px: "58px", lineheight: "1.05" },
-            ].map(({ clase, token, px, lineheight }) => (
+              {
+                clase: "text-lg",
+                token: "text-lg",
+                px: "21px",
+                lineheight: "1.55",
+                pxChica: "18px",
+                lineheightChica: "1.45",
+              },
+              {
+                clase: "text-xl",
+                token: "text-xl",
+                px: "24px",
+                lineheight: "1.4",
+                pxChica: "20px",
+                lineheightChica: "1.35",
+              },
+              {
+                clase: "text-2xl",
+                token: "text-2xl",
+                px: "28px",
+                lineheight: "1.3",
+                pxChica: "23px",
+                lineheightChica: "1.25",
+              },
+              {
+                clase: "text-3xl",
+                token: "text-3xl",
+                px: "32px",
+                lineheight: "1.22",
+                pxChica: "26px",
+                lineheightChica: "1.2",
+              },
+              {
+                clase: "text-4xl",
+                token: "text-4xl",
+                px: "39px",
+                lineheight: "1.15",
+                pxChica: "31px",
+                lineheightChica: "1.12",
+              },
+              {
+                clase: "text-5xl",
+                token: "text-5xl",
+                px: "48px",
+                lineheight: "1.1",
+                pxChica: "37px",
+                lineheightChica: "1.08",
+              },
+              {
+                clase: "text-6xl",
+                token: "text-6xl",
+                px: "58px",
+                lineheight: "1.05",
+                pxChica: "44px",
+                lineheightChica: "1.05",
+              },
+            ].map(({ clase, token, px, lineheight, pxChica, lineheightChica }) => (
               <Tarjeta key={clase}>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
                   <div className="flex-1">
@@ -132,9 +202,25 @@ export default function PaginaEstilos() {
                       Muestra de texto en tamaño {token}
                     </p>
                   </div>
-                  <div className="text-right text-xs text-muted-foreground">
-                    <p>{px}</p>
-                    <p>line-height: {lineheight}</p>
+                  <div className="flex gap-4 text-right text-xs text-muted-foreground">
+                    <p>
+                      <span className="font-semibold text-foreground">
+                        Grande
+                      </span>
+                      <br />
+                      {px}
+                      <br />
+                      line-height: {lineheight}
+                    </p>
+                    <p>
+                      <span className="font-semibold text-foreground">
+                        Chica
+                      </span>
+                      <br />
+                      {pxChica}
+                      <br />
+                      line-height: {lineheightChica}
+                    </p>
                   </div>
                 </div>
               </Tarjeta>

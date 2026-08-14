@@ -827,6 +827,7 @@ export type Database = {
           created_by_profile_id: string | null
           critical_medication: string[]
           date_of_birth: string | null
+          display_density: Database["public"]["Enums"]["display_density"]
           emergency_contact: string | null
           emergency_contact_phone: string | null
           emergency_contact_relationship: string | null
@@ -849,6 +850,7 @@ export type Database = {
           created_by_profile_id?: string | null
           critical_medication?: string[]
           date_of_birth?: string | null
+          display_density?: Database["public"]["Enums"]["display_density"]
           emergency_contact?: string | null
           emergency_contact_phone?: string | null
           emergency_contact_relationship?: string | null
@@ -871,6 +873,7 @@ export type Database = {
           created_by_profile_id?: string | null
           critical_medication?: string[]
           date_of_birth?: string | null
+          display_density?: Database["public"]["Enums"]["display_density"]
           emergency_contact?: string | null
           emergency_contact_phone?: string | null
           emergency_contact_relationship?: string | null
@@ -1435,6 +1438,7 @@ export type Database = {
         | "otorgar_permiso"
         | "revocar_permiso"
       appointment_status: "pending" | "confirmed" | "completed" | "cancelled"
+      display_density: "grande" | "chica"
       doc_category:
         | "laboratory"
         | "imaging"
@@ -1594,6 +1598,7 @@ export const Constants = {
         "revocar_permiso",
       ],
       appointment_status: ["pending", "confirmed", "completed", "cancelled"],
+      display_density: ["grande", "chica"],
       doc_category: [
         "laboratory",
         "imaging",

@@ -29,6 +29,11 @@ Samsung Galaxy A71 (SM-A715F), Android 13, Chrome — 2026-08-13, vía ADB (`adb
 | sprint11-qa-offline-sos.png | Pruebas de dispositivo (tarea 11.7): `/sos` sin red (corte real, `adb reverse --remove` + `svc wifi disable`, 0 redes conectadas confirmado por `dumpsys connectivity`), contra el build de producción real, con estilos completos, banda "Sin conexión — estás viendo datos guardados" y la hora del sistema (13:57) visible como evidencia del momento de la captura |
 | sprint11-qa-dictado-boton.png | Pruebas de dispositivo (tarea 11.7): botón de micrófono junto al buscador de `/estudios`, re-confirmando el Sprint 5; disponibilidad real de `SpeechRecognition`/`webkitSpeechRecognition` verificada aparte por CDP (`Runtime.evaluate` en la pestaña del teléfono, no una inferencia por user-agent) |
 
+| sprint13-selector-tamano.png | Pregunta "¿Cómo preferís ver la app?" (tarea 13.1) al pie del selector de perfiles, en el dispositivo real: las dos opciones A/a con "Letra grande" preseleccionada según la preferencia de la CUENTA de María, marcada con anillo, tilde y la palabra "Elegida" —nunca solo con color—, y la aclaración "Es tu preferencia, no la del perfil que elijas" |
+| sprint13-inicio-grande.png | `/inicio` en modo GRANDE, tomada ANTES de tocar nada: es la referencia contra la que se compara que el rediseño no mueva un píxel del modo por defecto. El botón A/a ya está en el encabezado con la "A" resaltada |
+| sprint13-inicio-chica.png | El mismo `/inicio`, misma sesión y mismo perfil, en modo CHICA tras un TAP real: el título del botón SOS entra en UNA línea en vez de dos, las DOS alertas de signos vitales entran completas con su botón "Marcar todas como vistas" (en grande la segunda quedaba cortada), la bottom nav baja de 85,5px a 72px y el nombre "Viendo a Roberto Gó…" se trunca menos. La "a" del conmutador quedó resaltada |
+| sprint13-inicio-vuelta-grande.png | Vuelta a GRANDE con otro TAP en A/a, sin recargar: la pantalla queda idéntica a `sprint13-inicio-grande.png` —mismo salto de línea del SOS, mismo recorte de la segunda alerta, misma altura de nav—, que es el criterio "el modo grande no cambia ni un píxel" verificado en el dispositivo |
+
 Flujo verificado con toques e ingreso de texto reales por ADB: login de María → selección del perfil gestionado de Roberto → inicio. El camino de error (submit vacío) también se verificó en pantalla física.
 
 ## Receta de login por ADB (Chrome + password manager de Google)
@@ -443,3 +448,91 @@ Suites de cierre (sin tocar código en esta tarea): `npm run test -- --run` →
 **693/693 PASS**, `npx tsc --noEmit` limpio, `npx eslint .` limpio. Servidor
 devuelto a `npm run dev`, `adb reverse` restaurado (`tcp:3000`, `tcp:54321`),
 WiFi del teléfono reactivado.
+
+## Sprint 13 · fundaciones del modo de letra chica (tarea 13.1)
+
+**2026-08-14.** Samsung Galaxy A71, Chrome 150, `adb reverse tcp:3000`, sesión
+de María sobre el perfil gestionado de Roberto. Contrato completo del modo en
+`docs/densidad.md`.
+
+**Lo que se verificó en el dispositivo, en este orden:**
+
+1. `/inicio` en grande (`sprint13-inicio-grande.png`) como referencia previa.
+2. `/perfiles`: la pregunta nueva (`sprint13-selector-tamano.png`), y un TAP
+   real sobre "Letra chica" reorganizó el propio selector en el acto.
+3. `/inicio` en chica (`sprint13-inicio-chica.png`) — el mismo contenido, con
+   la segunda alerta y su botón entrando en pantalla.
+4. TAP en A/a de vuelta a grande (`sprint13-inicio-vuelta-grande.png`), **sin
+   recarga**, y el resultado es idéntico a la referencia del paso 1.
+
+**Sin flash, comprobado sobre el HTML servido y no por inspección visual.** Un
+`fetch("/inicio")` desde la propia pestaña del teléfono devolvió, con la
+preferencia en chica:
+
+```html
+<!DOCTYPE html><html lang="es-AR" data-tamano="chica" class="atkinson_hyperlegible…
+```
+
+El atributo viaja en los primeros 60 bytes del documento, antes del `<head>` y
+de cualquier CSS o JS: no existe una ventana en la que el navegador pueda
+pintar el tamaño equivocado. La misma comprobación sobre una ruta pública, sin
+sesión: `curl -b "tamano=chica" /login` → `data-tamano="chica"`;
+`-b "tamano=grande"` → `grande`; **sin cookie → `grande`**, que es el default
+con el que se sirven las pantallas previas al login.
+
+**La preferencia quedó en la fila de MARÍA, no en la de Roberto** (el punto
+central del sprint), verificado por SQL inmediatamente después del toque:
+
+```
+ María Gómez   | chica     ← la cuenta que mira
+ Roberto Gómez | grande    ← el perfil que se estaba mirando, intacto
+ Diego Gómez   | grande
+```
+
+**Tokens medidos por CDP en la pantalla real** (`getComputedStyle` sobre
+`<html>`, no valores del CSS leídos a mano):
+
+| | grande | chica |
+|---|---|---|
+| raíz | 18px | **18px** (no se toca) |
+| `--spacing` | 0.25rem | 0.2222rem |
+| `--spacing-tactil` | `max(48px, 2.75rem)` | `max(40px, 2.25rem)` |
+| `--spacing-sos-boton` | `max(64px, 3.75rem)` | `max(56px, 3.25rem)` |
+| `--spacing-bottom-nav` | 4.75rem | 4rem |
+| `--radius` | 0.75rem | 0.625rem |
+| cuerpo (`body`) | 18px | 16,0002px |
+| alto real del primer botón | 49,5px | **40,5px** |
+
+Los 40,5px medidos sobre un botón de verdad —no sobre el token— son el piso
+táctil del ROADMAP para el modo compacto, y los 16px del cuerpo son el piso que
+evita el zoom automático de iOS al enfocar un campo. Que la raíz siga en 18px en
+los dos modos es lo que conserva la promesa de que toda la escala crece si la
+persona agrandó la tipografía del sistema operativo.
+
+**Nota de método.** La sesión del teléfono había muerto por el `supabase db
+reset` de esta misma tarea. Se repuso **sin escribir ninguna contraseña**: se
+emitió un magic link contra la API de administración de Supabase local
+(`/auth/v1/admin/generate_link` con la `service_role` del entorno local), se
+canjeó por una sesión y se inyectó la cookie resultante en Chrome del
+dispositivo por CDP (`Network.setCookie`, con el túnel
+`adb forward tcp:9222 localabstract:chrome_devtools_remote`). Los toques sobre
+la interfaz sí fueron TAPs reales (`adb shell input tap`). El túnel de CDP se
+cerró al terminar.
+
+**Hallazgo de la tarea, sin cambio de código.** El primer toque en A/a devolvió
+"An unexpected response was received from the server". No era un bug: el
+`next dev` que estaba corriendo venía de antes de esta tarea y su propio
+indicador lo marcaba como **(stale)** — `app/layout.tsx` pasó de síncrono a
+`async` mientras el servidor estaba levantado, y el HMR no sobrevive a ese
+cambio de firma en el layout raíz. Reiniciado el servidor, la Server Action
+respondió `POST … 200 in 64ms` y no volvió a fallar. Es el mismo tipo de trampa
+que el Sprint 11 documentó con `next dev` vs `next start`: **antes de creerle a
+un error del dev server, confirmar qué proceso está sirviendo el puerto y en
+qué estado.**
+
+Suites de esta tarea: `npm run test` → **733/733** (693 previos + 40 nuevos de
+`densidad.test.ts`), `npx tsc --noEmit` limpio, `npx eslint .` limpio,
+`npm run build` limpio, `node scripts/verificar-contraste.mjs` → **196/196 en 4
+combinaciones de tema × densidad** más 3 invariantes del modo compacto,
+`scripts/test-rls.sql` **266/266 PASS** (253 previos + 13 del BLOQUE 17 nuevo),
+`scripts/test-storage-rls.sh` **27/27 PASS**, `npx supabase db reset` limpio.

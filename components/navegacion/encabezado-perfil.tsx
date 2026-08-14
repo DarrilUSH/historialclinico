@@ -17,6 +17,8 @@ import Link from "next/link"
 
 import { ArrowLeftRightIcon } from "lucide-react"
 
+import { BotonTamano } from "@/components/navegacion/boton-tamano"
+import type { Tamano } from "@/lib/densidad/tamano"
 import { colorAvatarPara, inicialesDe } from "@/lib/perfiles/avatar"
 import { cn } from "@/lib/utils"
 import type { Perfil } from "@/types/dominio"
@@ -25,12 +27,19 @@ interface EncabezadoPerfilProps {
   perfil: Perfil
   /** `permisos.esPropio` del perfil activo: decide "Tu historial" vs "Viendo a {nombre}". */
   esPropio: boolean
+  /**
+   * Modo de letra de la CUENTA logueada (Sprint 13) — no del perfil de arriba.
+   * Es la distinción central del sprint y por eso viaja como prop aparte de
+   * `perfil`: si alguna vez alguien intenta leerlo de `perfil.display_density`,
+   * la app le mostraría a María el tamaño que eligió Roberto.
+   */
+  tamano: Tamano
 }
 
-export function EncabezadoPerfil({ perfil, esPropio }: EncabezadoPerfilProps) {
+export function EncabezadoPerfil({ perfil, esPropio, tamano }: EncabezadoPerfilProps) {
   return (
     <header className="sticky top-0 z-30 border-b border-borde-sutil bg-background">
-      <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-2.5">
+      <div className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-2.5">
         <span
           className={cn(
             "flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-avatar-foreground",
@@ -44,6 +53,14 @@ export function EncabezadoPerfil({ perfil, esPropio }: EncabezadoPerfilProps) {
         <p className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
           {esPropio ? "Tu historial" : `Viendo a ${perfil.full_name}`}
         </p>
+
+        {/* Conmutador de tamaño, SIEMPRE visible (ROADMAP Sprint 13, "opción
+            A"): la persona tiene que poder achicar o agrandar la letra desde
+            donde esté, sin ir a buscar una pantalla de preferencias. Va antes
+            de "Cambiar" porque es la acción más frecuente de las dos y queda
+            más cerca del centro de la pantalla, más fácil de alcanzar con el
+            pulgar. */}
+        <BotonTamano tamano={tamano} />
 
         <Link
           href="/perfiles"

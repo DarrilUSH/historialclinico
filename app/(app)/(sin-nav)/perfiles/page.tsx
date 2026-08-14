@@ -25,8 +25,10 @@ import { LogOutIcon } from "lucide-react"
 
 import { cerrarSesion } from "@/app/(auth)/actions"
 import { Button } from "@/components/ui/button"
+import { PreguntaTamano } from "@/components/perfiles/pregunta-tamano"
 import { SelectorPerfiles, type PerfilConRelacion } from "@/components/perfiles/selector-perfiles"
 import { requerirSesion } from "@/lib/auth/guardas"
+import { obtenerTamano } from "@/lib/densidad/servidor"
 
 export const metadata: Metadata = {
   title: "Elegí un perfil — Historial Médico",
@@ -95,6 +97,13 @@ export default async function PaginaPerfiles() {
       </div>
 
       <SelectorPerfiles perfiles={perfilesConRelacion} />
+
+      {/* Conmutador de tamaño (Sprint 13). Va DESPUÉS de la grilla de perfiles
+          a propósito: la pregunta principal de esta pantalla es "¿quién sos?",
+          y la del tamaño no puede competir con ella. La preferencia es de la
+          CUENTA -`await obtenerTamano()`, que lee la fila de `auth.uid()`-, así
+          que no cambia según el perfil que se termine eligiendo. */}
+      <PreguntaTamano tamano={await obtenerTamano()} />
 
       <form action={cerrarSesion}>
         <Button

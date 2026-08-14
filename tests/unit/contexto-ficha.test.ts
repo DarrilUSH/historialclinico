@@ -88,6 +88,12 @@ const PERFIL: Perfil = {
   phone: "+54 9 2901 445566",
   date_of_birth: "1945-11-03",
   role: "elder",
+  // Sprint 13: la columna es obligatoria en la fila, pero en un perfil
+  // GESTIONADO (`user_id: null`, como éste) es inerte —nadie inicia sesión
+  // como él, así que nunca mira la app— y la base la clava en el default con
+  // `profiles_densidad_solo_con_cuenta`. No tiene ninguna incidencia sobre el
+  // contexto que arma la ficha, que es lo que prueba este archivo.
+  display_density: "grande",
   avatar_storage_path: "660e8400/avatar.jpg",
   blood_type: "O+",
   allergies: ["Penicilina", "Ibuprofeno"],

@@ -151,3 +151,14 @@ export type EstadoTomaMedicacion = Enums<"medication_intake_status">
 
 /** Acción de acceso registrada */
 export type AccionAcceso = Enums<"access_action">
+
+/**
+ * Modo de densidad visual de la interfaz (Sprint 13): `"grande"` (el diseño
+ * Senior UX por defecto) o `"chica"` (compacto).
+ *
+ * Es una preferencia de **la cuenta que mira**, no del perfil que se está
+ * mirando: sale de `profiles.display_density` de la fila cuyo `user_id` es
+ * `auth.uid()`. Se resuelve en `lib/densidad/servidor.ts` y todo el vocabulario
+ * de interfaz (glifos, etiquetas, default) vive en `lib/densidad/tamano.ts`.
+ */
+export type Tamano = Enums<"display_density">

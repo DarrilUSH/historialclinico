@@ -16,6 +16,24 @@
    `dark:` de los componentes cambian juntos, nunca por separado. */
 @custom-variant dark (&:is(.dark, .dark *));
 
+/* Densidad (Sprint 13): el atributo `data-tamano` en <html> lo escribe el
+   layout raíz DESDE EL SERVIDOR con la preferencia de la cuenta logueada
+   (`lib/densidad/servidor.ts`), así que llega ya resuelto en el HTML y no hay
+   parpadeo. Mismo molde que `dark`, y a propósito: dos ejes independientes
+   -tema y densidad- expresados igual.
+
+   `chica:` es para que el rediseño vista por vista pueda decir cosas que un
+   token global no alcanza a expresar: `chica:grid-cols-2`,
+   `chica:flex-row`, `chica:line-clamp-2`. El escalado de tipografía y
+   espaciado NO necesita esta variante -sale solo, por los tokens de la
+   sección 5-.
+
+   NO existe una variante `grande:`, y es deliberado: el modo grande es el que
+   no se toca (docs/densidad.md §4). Una utilidad `grande:algo` sería, por
+   definición, un cambio en el modo grande. Lo que se quiere expresar con ella
+   siempre se puede escribir como "base + `chica:` que la corrige". */
+@custom-variant chica (&:is([data-tamano="chica"], [data-tamano="chica"] *));
+
 /* ===========================================================================
    1. TOKENS DE COLOR - TEMA CLARO
    Todos los valores en OKLCH. Ratios verificados con
@@ -341,7 +359,176 @@
 }
 
 /* ===========================================================================
-   5. UTILIDADES PROPIAS
+   5. DENSIDAD COMPACTA — "MODO DE LETRA CHICA" (Sprint 13)
+   ---------------------------------------------------------------------------
+   Todo lo de arriba es el modo GRANDE, que es el default y NO SE TOCA: este
+   bloque no modifica una sola declaración de las secciones 1 a 4. Acá abajo
+   viven, y solo acá, los valores del modo compacto.
+
+   ── POR QUÉ SON TOKENS REDEFINIDOS Y NO UN ZOOM
+
+   La alternativa obvia era bajar la raíz (`html { font-size: 100% }`) y dejar
+   que todo el sistema, que es relativo, encogiera solo. Se descarta por tres
+   motivos:
+
+     · **Un zoom no es una escala.** Multiplicar todo por 0,89 achica igual el
+       cuerpo de texto (que casi no puede achicarse sin perder legibilidad) que
+       un titular de 58px (que puede perder 20% sin que nadie lo note). Una
+       escala compacta de verdad se APLANA: los escalones chicos ceden poco y
+       los grandes ceden mucho. Ver la tabla de abajo.
+     · **Rompería la promesa de la raíz.** `font-size: 112.5%` existe para que
+       la escala CREZCA si la persona agrandó la tipografía del sistema
+       operativo. Pisarla en el modo compacto le sacaría esa red justamente a
+       quien la configuró.
+     · **No serviría para los pisos táctiles.** `--spacing-tactil` es
+       `max(48px, 2.75rem)`: el piso absoluto está en px y un cambio de raíz no
+       lo mueve. Había que redefinirlo a mano igual.
+
+   ── QUÉ RESULTA DE ESTO SIN ESCRIBIR NI UNA CLASE NUEVA
+
+   Las utilidades de Tailwind 4 resuelven estos tokens EN TIEMPO DE USO
+   (`font-size: var(--text-base)`, `padding: calc(var(--spacing) * 4)`,
+   `border-radius: calc(var(--radius) * 1.4)`), así que redefinirlos acá
+   reorganiza la app entera con solo cambiar el atributo del <html>. Alcanza
+   con `[data-tamano="chica"]` para ganarle a `:root` en especificidad (0-1-1
+   contra 0-1-0), sin `!important` y sin depender del orden de las reglas.
+
+   El contrato completo para el rediseño vista por vista está en
+   `docs/densidad.md`. La regla corta: **nunca tocar el modo grande, piso
+   táctil de 40px en compacta.**
+   =========================================================================== */
+
+html[data-tamano="chica"] {
+  /* ESCALA TIPOGRÁFICA COMPACTA.
+     Reducción progresiva, no uniforme: -12% abajo (donde el límite es la
+     legibilidad) y hasta -24% arriba (donde el límite es el aire). El
+     resultado es que cada escalón compacto cae, más o menos, sobre el escalón
+     ANTERIOR de la escala grande -`text-lg` chica = 18px = `text-base`
+     grande-, que es lo que hace que la app se lea como la misma app y no como
+     otra.
+
+     | token      | grande | chica |   Δ  | criterio                        |
+     |------------|--------|-------|------|---------------------------------|
+     | text-xs    |  16px  |  14px | -12% | piso del modo compacto          |
+     | text-sm    |  17px  |  15px | -12% | apoyo, ayudas de campo          |
+     | text-base  |  18px  |  16px | -11% | cuerpo. NO baja de 16px (*)     |
+     | text-lg    |  21px  |  18px | -14% | = cuerpo del modo grande        |
+     | text-xl    |  24px  |  20px | -17% | título de tarjeta               |
+     | text-2xl   |  28px  |  23px | -18% | título de sección               |
+     | text-3xl   |  32px  |  26px | -19% | título de pantalla              |
+     | text-4xl   |  39px  |  31px | -21% | título grande                   |
+     | text-5xl   |  48px  |  37px | -23% | cifra destacada                 |
+     | text-6xl   |  58px  |  44px | -24% | reservado (SOS)                 |
+
+     (*) 16px es un piso DURO, no una preferencia: iOS Safari hace zoom
+     automático al enfocar un campo cuya letra mida menos de 16px, y los
+     primitivos de `components/ui/` usan `text-base`. Bajar este escalón un
+     solo píxel convierte cada formulario de la app en un salto de viewport en
+     iPhone. Si alguna vez hay que apretar más, se aprieta el espaciado.
+
+     Los interlineados bajan un escalón propio (1.6 → 1.5 en el cuerpo): la
+     caja de línea del texto base pasa de 28,8px a 24px, que es de dónde sale
+     la mayor parte de la densidad real de una lista larga. */
+  --text-xs: 0.7778rem; /* 14px */
+  --text-xs--line-height: 1.45;
+  --text-sm: 0.8333rem; /* 15px */
+  --text-sm--line-height: 1.45;
+  --text-base: 0.8889rem; /* 16px */
+  --text-base--line-height: 1.5;
+  --text-lg: 1rem; /* 18px */
+  --text-lg--line-height: 1.45;
+  --text-xl: 1.1111rem; /* 20px */
+  --text-xl--line-height: 1.35;
+  --text-2xl: 1.2778rem; /* 23px */
+  --text-2xl--line-height: 1.25;
+  --text-3xl: 1.4444rem; /* 26px */
+  --text-3xl--line-height: 1.2;
+  --text-4xl: 1.7222rem; /* 31px */
+  --text-4xl--line-height: 1.12;
+  --text-5xl: 2.0556rem; /* 37px */
+  --text-5xl--line-height: 1.08;
+  --text-6xl: 2.4444rem; /* 44px */
+  --text-6xl--line-height: 1.05;
+
+  /* UNIDAD DE ESPACIADO. Es el token del que cuelga TODA la escala de
+     espaciado de Tailwind 4: `p-4` compila a `calc(var(--spacing) * 4)`,
+     `gap-3` a `calc(var(--spacing) * 3)`, `size-10` a
+     `calc(var(--spacing) * 10)`. Redefinirlo acá comprime paddings, gaps,
+     márgenes y tamaños de ícono de toda la app de una sola vez —incluido
+     `--card-spacing` de las tarjetas de shadcn, que también es un múltiplo de
+     esta unidad—.
+
+     4,5px → 4px es -11%: el mismo orden que la tipografía, para que la
+     relación entre texto y aire no se distorsione, y encima cae exactamente
+     sobre la grilla de 4px. Un valor más agresivo acá sería un atajo: la
+     densidad que falta la aportan las tandas de rediseño reorganizando
+     grillas y listas con `chica:`, no apretando el aire hasta que los
+     controles se toquen entre sí. */
+  --spacing: 0.2222rem; /* 4px, contra 4,5px del modo grande */
+
+  /* OBJETIVOS TÁCTILES. El piso baja de 48px a 40px —el mínimo que fija el
+     ROADMAP para el modo compacto—, y se mantiene la forma `max(px, rem)`
+     para que sigan creciendo si la persona agranda la tipografía del sistema.
+
+     La escalera queda desplazada un escalón, que es lo elegante del caso: el
+     objetivo "amplio" del modo compacto (48px) es exactamente el objetivo
+     NORMAL del modo grande. Nadie termina con un control más chico que 40px
+     ni con uno que la mano no encuentre. */
+  --spacing-tactil: max(40px, 2.25rem); /* 40,5px por defecto */
+  --spacing-tactil-amplio: max(48px, 2.75rem); /* 49,5px por defecto */
+
+  /* El botón SOS también se compacta (decisión del usuario, ROADMAP Sprint
+     13), pero sigue siendo el control más grande de la app por un margen
+     amplio: 58,5px contra los 40,5px del objetivo táctil compacto. Un botón
+     de emergencia que se confunda con un botón común no sirve, y en el modo
+     compacto la distancia relativa contra el resto de los controles crece
+     (1,44× contra 1,36× en el modo grande). */
+  --spacing-sos-boton: max(56px, 3.25rem); /* 58,5px por defecto */
+
+  /* Bottom nav: 85,5px → 72px. Sigue entrando el ícono (20px) más su etiqueta
+     de texto -que nunca se saca, regla Senior UX del ROADMAP- con aire
+     suficiente. El shell de app/(app)/(con-nav)/layout.tsx reserva este mismo
+     token como padding inferior del contenido, así que el hueco se ajusta
+     solo. */
+  --spacing-bottom-nav: 4rem; /* 72px por defecto */
+
+  /* Radios: 13,5px → 11,25px. Un radio que no acompaña la reducción se ve
+     desproporcionado en una tarjeta más chica -la curva se come el contenido-.
+     Toda la escala derivada (`rounded-sm` a `rounded-4xl`) se recalcula sola
+     porque el bloque `@theme inline` de la sección 3 la define como múltiplos
+     de este token. */
+  --radius: 0.625rem;
+
+  /* COMPENSACIÓN DE CONTRASTE (la parte que no es geometría).
+     WCAG mide contraste sin mirar el tamaño salvo por el corte de "texto
+     grande", pero la percepción sí: los mismos trazos, más finos y más
+     juntos, se leen peor. Dos tokens se endurecen apenas en el modo compacto:
+
+       · `--muted-foreground`: el texto secundario pasa de 17px a 15px, que es
+         donde más se nota. Medido contra el fondo de página, sube de 6,40:1 a
+         7,39:1 en claro y de 8,34:1 a 9,41:1 en oscuro.
+       · `--borde-sutil`: la hairline que separa filas dentro de una tarjeta
+         tiene que trabajar más cuando las filas están más cerca.
+
+     No son colores nuevos: son el mismo tono y el mismo croma, con la
+     luminosidad corrida hacia el contraste. `node scripts/verificar-contraste.mjs`
+     los mide en las cuatro combinaciones de tema × densidad. */
+  --muted-foreground: oklch(0.43 0.021 165);
+  --borde-sutil: oklch(0.855 0.013 155);
+}
+
+/* La densidad y el tema son ejes independientes y los dos se escriben en el
+   mismo elemento (<html>): next-themes pone la clase `.dark` y el layout raíz
+   pone `data-tamano`. Por eso el override oscuro del compacto es un selector
+   compuesto sin descendencia, y no `.dark html[...]`. Especificidad 0-2-1,
+   le gana a `.dark` (0-1-0) y a `html[data-tamano="chica"]` (0-1-1). */
+html.dark[data-tamano="chica"] {
+  --muted-foreground: oklch(0.79 0.019 155);
+  --borde-sutil: oklch(0.39 0.017 168);
+}
+
+/* ===========================================================================
+   6. UTILIDADES PROPIAS
    =========================================================================== */
 
 /* Garantiza el objetivo táctil sin importar el contenido del control. */
@@ -372,7 +559,7 @@
 }
 
 /* ===========================================================================
-   6. CAPA BASE
+   7. CAPA BASE
    =========================================================================== */
 @layer base {
   * {
@@ -431,7 +618,7 @@
 }
 
 /* ===========================================================================
-   7. MOVIMIENTO REDUCIDO
+   8. MOVIMIENTO REDUCIDO
    El público objetivo incluye personas con vértigo, deterioro cognitivo o
    sensibilidad al movimiento. Si el sistema lo pide, se apaga todo.
    =========================================================================== */
@@ -458,6 +645,27 @@
   .dark {
     --border: oklch(0.72 0.03 168);
     --input: oklch(0.75 0.03 168);
+    --muted-foreground: oklch(0.86 0.02 155);
+  }
+
+  /* Trampa de especificidad, y por eso estas cuatro líneas existen: la
+     compensación de contraste del modo compacto (sección 5) vive en
+     `html[data-tamano="chica"]`, que con 0-1-1 le gana a `:root` (0-1-0)
+     INCLUSO adentro de este media query -las media queries no suman
+     especificidad-. Sin re-declararlo acá, pedir "más contraste" en el
+     sistema operativo y usar el modo compacto daría MENOS contraste que
+     pedirlo en el modo grande, que es exactamente lo contrario de lo pedido.
+     Los valores son los mismos de arriba: la preferencia declarada del
+     sistema manda sobre la compensación de densidad, que ya no hace falta
+     cuando el contraste está al máximo.
+
+     `--borde-sutil` no se repite: el bloque de alto contraste nunca lo tocó, y
+     el valor compacto ya es más contrastado que el base. */
+  html[data-tamano="chica"] {
+    --muted-foreground: oklch(0.38 0.025 165);
+  }
+
+  html.dark[data-tamano="chica"] {
     --muted-foreground: oklch(0.86 0.02 155);
   }
 }
