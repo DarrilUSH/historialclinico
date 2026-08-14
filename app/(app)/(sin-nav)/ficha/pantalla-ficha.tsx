@@ -39,6 +39,7 @@
  */
 
 import * as React from "react"
+import Link from "next/link"
 import { Loader2Icon, PrinterIcon, ShareIcon, SparklesIcon } from "lucide-react"
 
 import { Alerta } from "@/components/base/alerta"
@@ -152,17 +153,27 @@ export function PantallaFicha({ nombreCompleto, edadAnios }: PantallaFichaProps)
           fechaGeneracion={fechaGeneracion}
         />
 
-        <Boton
-          onClick={() => {
-            setEstado("inicial")
-            setFicha(null)
-            setFechaGeneracion(null)
-          }}
-          variant="ghost"
-          className="print:hidden"
-        >
-          Generar una ficha nueva
-        </Boton>
+        <div className="flex flex-col gap-2 print:hidden">
+          <Boton
+            onClick={() => {
+              setEstado("inicial")
+              setFicha(null)
+              setFechaGeneracion(null)
+            }}
+            variant="ghost"
+          >
+            Generar una ficha nueva
+          </Boton>
+          <Boton
+            render={<Link href="/ficha/historial" />}
+            nativeButton={false}
+            variant="ghost"
+            size="sm"
+            className="text-xs text-muted-foreground"
+          >
+            Ver fichas anteriores
+          </Boton>
+        </div>
       </div>
     )
   }

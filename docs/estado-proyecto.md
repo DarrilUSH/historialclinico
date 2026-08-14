@@ -32,7 +32,13 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 | **Checkpoint Sprint 8** | ✅ **APROBADO** (2026-08-14 ~05:15): demo modo-offline completa en el dispositivo — indicador <2s, ficha SOS entera con credencial PAMI desde cache, dos textos de frescura, fallback claro |
 | Deuda anotada para Sprint 11 | `refresh_token_not_found` tras logout imprime un stack trace por request de pestañas viejas (lib/supabase/proxy.ts `actualizarSesion`) — capturar ese código y seguir; detectado por 8.4 |
 | 8 Coberturas + SOS offline | ⬜ Pendiente |
-| 9 Signos vitales + alerta presión | ⬜ Pendiente |
+| 9.1 Carga rápida de signos (Sonnet) | ✅ Auditado y pusheado (`1df6e7a`) — 3 botones grandes por tipo, teclado numérico nativo verificado en el Galaxy, prefill de la última carga, fechas puras a medianoche local (bang pattern TS) |
+| 9.2 Umbrales y motor de alertas (Opus) | ✅ Auditado y pusheado (`8cbfdca`) — umbrales por perfil (defaults 160/100, 70/250, ±2kg/7días mediana), motor puro con borde inclusivo uniforme documentado, alertas selladas por triggers, descargo médico como CHECK, RLS 223/223 |
+| 9.3 Push y banner de alerta (Sonnet) | ✅ Auditado y pusheado (`559be5c`) — push inmediato (<15s medidos en el Galaxy), banner hasta "Ya lo vi" con sellado acknowledged_by por trigger, deep link /signos/enlace |
+| 9.4 Historial y gráficos (Sonnet) | ✅ Auditado y pusheado (`369e5ee`) — tensión con dos líneas y umbrales sombreados, marcado desde alertas persistidas (no recálculo), tap real verificado (sprint9-grafico-tension.png) |
+| 9.5 Export CSV (Haiku) | ✅ Auditado y pusheado (`847ac8a`) — descarga REAL verificada por el orquestador en el celu: BOM ef bb bf, tildes perfectas, `;`, decimales con coma (Haiku había omitido esa verificación) |
+| **Checkpoint Sprint 9** | ✅ **APROBADO** (2026-08-14 ~07:30): carga con teclado numérico → push real → banner → visto sellado → gráfico → CSV, todo verificado en dispositivo |
+| 10.1 Directorio de médicos | ⏳ En curso |
 | 10 Directorio médicos + ficha resumen IA | ⬜ Pendiente |
 | 11 PWA/manifest + **Web Share Target** + auditorías finales | ⬜ Pendiente |
 | 12 Deploy producción | ⬜ Bloqueado hasta terminar todo (autorización ya dada) |

@@ -198,6 +198,28 @@ export async function POST(): Promise<Response> {
       return json({ error: mensaje }, status)
     }
 
+    // Persistencia (Sprint 10, tarea 10.5): inserta en consultation_sheets.
+    // Best-effort — un fallo de INSERT NO detiene la generación. El cliente
+    // la recibe igual; si falla, queda el log.
+    const fichaPeristidaOFallo = await supabase
+      .from("consultation_sheets")
+      .insert({
+        profile_id: perfilId,
+        generated_by_profile_id: perfilId,
+        content: ficha,
+      })
+      .select("id")
+      .single()
+
+    if (!fichaPeristidaOFallo.error) {
+      console.log(`[ficha] Ficha persistida: ${fichaPeristidaOFallo.data?.id}`)
+    } else {
+      console.error(
+        "[ficha] Fallo al persistir la ficha (best-effort, continúa):",
+        fichaPeristidaOFallo.error.message,
+      )
+    }
+
     // Auditoría (Sprint 10, tarea 10.4): ver el encabezado del archivo.
     await registrarAcceso({
       perfilId,

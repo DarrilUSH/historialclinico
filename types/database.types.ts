@@ -214,6 +214,45 @@ export type Database = {
           },
         ]
       }
+      consultation_sheets: {
+        Row: {
+          content: Json
+          created_at: string
+          generated_by_profile_id: string
+          id: string
+          profile_id: string
+        }
+        Insert: {
+          content: Json
+          created_at?: string
+          generated_by_profile_id: string
+          id?: string
+          profile_id: string
+        }
+        Update: {
+          content?: Json
+          created_at?: string
+          generated_by_profile_id?: string
+          id?: string
+          profile_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "consultation_sheets_generated_by_profile_id_fkey"
+            columns: ["generated_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "consultation_sheets_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       doctors: {
         Row: {
           address: string | null
