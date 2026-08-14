@@ -62,6 +62,7 @@
 import { PhoneIcon } from "lucide-react"
 
 import { Tarjeta } from "@/components/base/tarjeta"
+import { FrescuraOffline } from "@/components/sos/frescura-offline"
 import { calcularEdad } from "@/lib/perfiles/edad"
 import { formatearRevisionSos } from "@/lib/sos/frescura"
 import { urlImagenCredencial } from "@/lib/sos/payload"
@@ -216,6 +217,10 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
           ? `Datos revisados el ${ultimaRevision}.`
           : "Todavía no se cargó ningún dato vital."}
       </p>
+
+      {/* Indicador de última sincronización offline (Sprint 8, tarea 8.5):
+          "Copia descargada el..." solo cuando el dispositivo está offline. */}
+      <FrescuraOffline perfilId={perfil.id} />
     </div>
   )
 }

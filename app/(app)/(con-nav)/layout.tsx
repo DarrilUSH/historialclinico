@@ -51,6 +51,7 @@
 import type { ReactNode } from "react"
 import { redirect } from "next/navigation"
 
+import { IndicadorConexion } from "@/components/base/indicador-conexion"
 import { BottomNav } from "@/components/navegacion/bottom-nav"
 import { EncabezadoPerfil } from "@/components/navegacion/encabezado-perfil"
 import { RegistroServiceWorker } from "@/components/pwa/registro-service-worker"
@@ -76,6 +77,10 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
       <RegistroServiceWorker perfilId={perfil.id} />
 
       <EncabezadoPerfil perfil={perfil} esPropio={permisos.esPropio} />
+
+      {/* Indicador global de conexión: barra visible cuando el dispositivo
+          está offline (Sprint 8, tarea 8.5). */}
+      <IndicadorConexion />
 
       {/* `pb-[...]` reserva exactamente el alto de la bottom nav fija
           (`--spacing-bottom-nav`, app/globals.css) más su safe-area: sin esto,

@@ -250,3 +250,19 @@ de permiso con red (el camino 401/403/404 → `descartar` de
 pero no se ejercitó contra el teléfono: exige revocar el permiso de María sobre
 Roberto en medio de la sesión, que es una prueba de `docs/modelo-permisos.md`
 más que de esta tarea.
+
+## Sprint 8 · indicador de estado de conexión y última sincronización (tarea 8.5) — verificación completa
+
+**2026-08-14.** Sesión de María sobre el perfil gestionado de Roberto, con `/inicio` y `/sos` precargadas offline.
+
+1. **Estado online:** `01-online-inicio.png` muestra `/inicio` con conexión normal. Sin indicador visible (el componente `IndicadorConexion` retorna `null` cuando `navigator.onLine === true`).
+
+2. **Corte de red (< 2s):** `adb reverse --remove tcp:3000` interrumpe el túnel. Espera 2 segundos y `02-offline-inicio-aviso.png` captura la barra fina de advertencia bajo el encabezado: **"Sin conexión — estás viendo datos guardados"** en color `--advertencia` con `role="status"` y `aria-live="polite"` (accesible al lector de pantalla). El aviso aparece en menos de 2 segundos, dentro del criterio de aceptación.
+
+3. **Indicador de frescura offline:** navegación a `/sos` sin red (`03-offline-sos-frescura.png`) muestra **DOS textos de frescura**:
+   - **"Datos revisados el 14/08/2026 14:38"** — de `sos_updated_at` (pregunta: ¿hace cuánto que un humano revisó estos datos?). Mostrado por `FichaSos` en el lugar usual.
+   - **"Copia descargada el 14/08/2026 04:55"** — de `generado_at` en el payload (pregunta: ¿hace cuánto que este dispositivo bajó esta copia?). Mostrado por `FrescuraOffline`, componente client que fetch `/api/sos/{perfilId}` (respondido por el SW desde `historial-medico-datos-v1`) offline, lee `generado_at` y lo formatea con `formatearRevisionSos`. El componente retorna `null` mientras está online, por eso no aparece cuando hay conexión.
+
+4. **Restauración de red:** `adb reverse tcp:3000 tcp:3000` devuelve la conexión. El indicador de desconexión desaparece al refrescar (no persiste un estado viejo offline en línea).
+
+Las dos marcas de tiempo responden preguntas distintas y son las correctas según `docs/modelo-sos.md` §6.1. El formato es el mismo en las tres pantallas SOS (ficha, edición, indicador offline) porque todas usan `formatearRevisionSos` — ninguna arma su propio `Intl.DateTimeFormat`.
