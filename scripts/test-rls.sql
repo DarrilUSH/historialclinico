@@ -2694,6 +2694,705 @@ commit;
 
 
 -- =============================================================================
+-- BLOQUE 14 — umbrales clínicos y alertas de signos vitales (tarea 9.2)
+-- -----------------------------------------------------------------------------
+-- `20260814080000_signos_umbrales.sql`. El MOTOR de evaluación es TypeScript
+-- puro y lo cubre `tests/unit/umbrales.test.ts` (43 casos: normal, borde exacto
+-- 160/100, por encima, glucemia baja y alta, ventana de peso). Este bloque
+-- cubre exactamente lo que ningún test de TypeScript puede ejercitar:
+--
+--   · **Los CHECK de coherencia** de las dos tablas, con los dientes afuera:
+--     un umbral invertido, una alerta cuyo `tipo` contradice su `regla`, y —el
+--     más importante— un mensaje SIN el descargo clínico, que el ROADMAP exige
+--     ("los umbrales son orientativos, no diagnóstico: el texto debe decirlo")
+--     y que acá es una constraint, no una convención.
+--   · **Los dos triggers de sellado**: `profile_id` derivado de la medición
+--     (es la columna que decide qué familia ve la alerta) y el par
+--     `acknowledged_at`/`acknowledged_by`, que la 9.3 va a escribir con
+--     `marcarAlertaVista`.
+--   · **La superficie expuesta**, en las dos direcciones: `can_manage` lee y
+--     marca vista, `can_upload` no ve ni marca, `anon` nada, TRUNCATE denegado,
+--     y —la decisión de diseño de esta tarea— que NADIE pueda insertar una
+--     alerta desde el cliente, ni siquiera quien tiene permiso para cargar la
+--     medición que la produciría.
+--
+-- Las mediciones se insertan CALCADAS de `registrarSigno`
+-- (`app/(app)/(con-nav)/signos/actions.ts`) y las alertas calcadas de lo que
+-- `lib/signos/registrar-alertas.ts` persiste para esos valores con los umbrales
+-- por defecto. Si el motor cambiara de opinión sobre alguno de estos casos, el
+-- que se pone en rojo es `tests/unit/umbrales.test.ts`; acá se verifica que la
+-- base acepte —y solo acepte— la forma correcta de esas filas.
+--
+-- Escenario: Rosa Medina (:p_g3), el perfil gestionado de los BLOQUES 11 a 13.
+-- María (:p_a) tiene can_manage. A Diego (:p_b) el BLOQUE 13.6 le revocó el
+-- permiso, así que se lo vuelve a otorgar con can_view + can_upload y SIN
+-- can_manage: es exactamente el rol que tiene que ver la medición y no la
+-- alerta.
+-- =============================================================================
+\echo ''
+\echo '### BLOQUE 14 — umbrales clínicos y alertas de signos vitales'
+
+-- Diego vuelve a ser el que carga: ve y sube, no administra.
+insert into public.family_permissions (owner_profile_id, granted_profile_id, can_view, can_upload, can_manage)
+values (:p_g3, :p_b, true, true, false);
+
+-- Renderizadores legibles. Sin SECURITY DEFINER: corren con los privilegios de
+-- quien los llama, así que RLS los filtra igual que a un SELECT directo.
+create function pruebas_rls.umbrales(p_perfil uuid) returns text
+language sql
+as $$
+    select coalesce(
+        (select format('sistolica=%s diastolica=%s glucemia=%s/%s peso=%s kg en %s dias',
+                       trim_scale(sistolica_max::numeric),
+                       trim_scale(diastolica_max::numeric),
+                       trim_scale(glucemia_min),
+                       trim_scale(glucemia_max),
+                       trim_scale(peso_variacion_kg),
+                       peso_ventana_dias)
+           from public.vital_sign_thresholds
+          where profile_id = p_perfil),
+        '(sin fila: rigen los defaults globales)');
+$$;
+
+create function pruebas_rls.alertas_signo(p_signo uuid) returns text
+language sql
+as $$
+    select coalesce(
+        (select string_agg(format('%s %s/%s', a.regla,
+                                  trim_scale(a.valor), trim_scale(a.umbral)),
+                           ', ' order by a.regla)
+           from public.vital_sign_alerts a
+          where a.vital_sign_id = p_signo),
+        '(sin alerta)');
+$$;
+
+create function pruebas_rls.visto(p_alerta uuid) returns text
+language sql
+as $$
+    select coalesce(
+        (select case
+                    when a.acknowledged_at is null then 'sin ver'
+                    else format('vista por %s, %s', coalesce(p.full_name, '(perfil borrado)'),
+                                case when a.acknowledged_at > now() - interval '1 minute'
+                                     then 'con la hora del servidor'
+                                     else 'con la hora que mandó el cliente' end)
+                end
+           from public.vital_sign_alerts a
+           left join public.profiles p on p.id = a.acknowledged_by
+          where a.id = p_alerta),
+        '(no existe)');
+$$;
+
+grant execute on function pruebas_rls.umbrales(uuid)      to anon, authenticated;
+grant execute on function pruebas_rls.alertas_signo(uuid) to anon, authenticated;
+
+-- Las mediciones. Calcadas del INSERT de `registrarSigno`: perfil activo, tipo
+-- del enum, columnas por tipo y `measured_at` explícito.
+insert into public.vital_signs (id, profile_id, type, systolic, diastolic, pulse, value, measured_at)
+values
+    ('a1000000-0000-4000-8000-00000000a001', :p_g3, 'blood_pressure', 170, 110, 88, null, now() - interval '5 hours'),
+    ('a1000000-0000-4000-8000-00000000a002', :p_g3, 'blood_pressure', 160, 100, 84, null, now() - interval '4 hours'),
+    ('a1000000-0000-4000-8000-00000000a003', :p_g3, 'blood_pressure', 150,  95, 78, null, now() - interval '3 hours'),
+    ('a1000000-0000-4000-8000-00000000a004', :p_g3, 'glucose', null, null, null,  65, now() - interval '2 hours'),
+    ('a1000000-0000-4000-8000-00000000a005', :p_g3, 'glucose', null, null, null, 260, now() - interval '1 hour'),
+    ('a1000000-0000-4000-8000-00000000a006', :p_g3, 'weight',  null, null, null,  80, now() - interval '3 days'),
+    ('a1000000-0000-4000-8000-00000000a007', :p_g3, 'weight',  null, null, null,  83, now() - interval '10 minutes');
+
+
+-- --- 14.1 Los umbrales: sin fila rigen los defaults -------------------------
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Un perfil sin fila de umbrales no tiene una fila vacía: no tiene fila',
+       '(sin fila: rigen los defaults globales)', pruebas_rls.umbrales(:p_g3));
+
+-- Un INSERT que solo trae el perfil completa las seis columnas con los DEFAULT
+-- de la tabla, que son los mismos números que `UMBRALES_POR_DEFECTO` de
+-- `lib/signos/umbrales.ts`. Los valores viven en dos lenguajes por necesidad y
+-- ESTE es el caso que impide que diverjan.
+insert into public.vital_sign_thresholds (profile_id) values (:p_g3);
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Los DEFAULT de la tabla son los de UMBRALES_POR_DEFECTO (lib/signos/umbrales.ts)',
+       'sistolica=160 diastolica=100 glucemia=70/250 peso=2 kg en 7 dias',
+       pruebas_rls.umbrales(:p_g3));
+
+-- Los CHECK de coherencia, uno por uno.
+do $$
+declare v text; caso record;
+begin
+    for caso in
+        select * from (values
+            ('sistolica_max menor que diastolica_max', 'sistolica_max = 90, diastolica_max = 100'),
+            ('glucemia_min mayor que glucemia_max',    'glucemia_min = 300, glucemia_max = 250'),
+            ('umbral de sistólica que alertaría siempre', 'sistolica_max = 80'),
+            ('variación de peso de 0 kg',              'peso_variacion_kg = 0'),
+            ('ventana de peso de 0 días',              'peso_ventana_dias = 0')
+        ) as t(descripcion, asignacion)
+    loop
+        begin
+            execute format('update public.vital_sign_thresholds set %s where profile_id = %L',
+                           caso.asignacion, 'f0000000-0000-4000-8000-00000000f001');
+            v := 'aceptado';
+        exception when check_violation then v := 'rechazado (23514)';
+                  when others          then v := 'error ' || sqlstate;
+        end;
+        perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+            'CHECK de coherencia: ' || caso.descripcion, 'rechazado (23514)', v);
+    end loop;
+end $$;
+
+-- Un perfil no puede tener dos configuraciones de umbrales: `profile_id` es la
+-- clave primaria, no una columna más.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.vital_sign_thresholds (profile_id)
+        values ('f0000000-0000-4000-8000-00000000f001');
+        v := 'insertada';
+    exception when unique_violation then v := 'rechazado (23505)';
+              when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'Una segunda fila de umbrales para el mismo perfil', 'rechazado (23505)', v);
+end $$;
+
+-- Un override real: el médico de Rosa acepta hasta 150/95 y quiere la alerta
+-- de peso más temprano.
+update public.vital_sign_thresholds
+   set sistolica_max = 150, diastolica_max = 95, peso_variacion_kg = 1.5
+ where profile_id = :p_g3;
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'El override por perfil convive con los defaults en las columnas que no toca',
+       'sistolica=150 diastolica=95 glucemia=70/250 peso=1.5 kg en 7 dias',
+       pruebas_rls.umbrales(:p_g3));
+
+-- Se vuelve a los defaults para que las alertas de §14.2 se lean contra
+-- 160/100 y 2 kg, que son los números del criterio de aceptación.
+delete from public.vital_sign_thresholds where profile_id = :p_g3;
+
+
+-- --- 14.2 Quién lee y quién edita los umbrales ------------------------------
+
+insert into public.vital_sign_thresholds (profile_id, sistolica_max) values (:p_g3, 155);
+
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+-- `can_view` LEE los umbrales: quien carga mediciones necesita saber contra qué
+-- se están comparando (docs/modelo-permisos.md §6.1, lectura monótona).
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'B (can_view + can_upload) LEE los umbrales del perfil',
+       'sistolica=155 diastolica=100 glucemia=70/250 peso=2 kg en 7 dias',
+       pruebas_rls.umbrales(:p_g3));
+
+-- Pero NO los edita: cambiar el umbral de alerta de una persona mayor es una
+-- decisión clínica del administrador, no "cargar el dato del día".
+do $$
+declare v text; c integer;
+begin
+    begin
+        update public.vital_sign_thresholds set sistolica_max = 200
+         where profile_id = 'f0000000-0000-4000-8000-00000000f001';
+        get diagnostics c = row_count;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'B (can_upload, sin can_manage) NO edita los umbrales  [CRITERIO DE ACEPTACIÓN]',
+        '0 filas', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.vital_sign_thresholds (profile_id)
+        values ('cccccccc-cccc-4ccc-8ccc-cccccccccccc');
+        v := 'insertada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    -- Un INSERT que no pasa el WITH CHECK de la política levanta 42501 ("new
+    -- row violates row-level security policy"), no devuelve 0 filas: no hay
+    -- fila que filtrar, hay una fila que la base se niega a escribir.
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'B tampoco crea umbrales donde no los había', 'denegado (42501)', v);
+end $$;
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        update public.vital_sign_thresholds set sistolica_max = 150
+         where profile_id = 'f0000000-0000-4000-8000-00000000f001';
+        get diagnostics c = row_count;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'A (can_manage) SÍ edita los umbrales  [CRITERIO DE ACEPTACIÓN]', '1 filas', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        delete from public.vital_sign_thresholds
+         where profile_id = 'f0000000-0000-4000-8000-00000000f001';
+        get diagnostics c = row_count;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'A borra los umbrales del perfil (vuelve a los defaults globales)', '1 filas', v);
+end $$;
+
+commit;
+
+
+-- --- 14.3 Las alertas que deja cada carga -----------------------------------
+-- Filas calcadas de lo que persiste `lib/signos/registrar-alertas.ts`.
+
+insert into public.vital_sign_alerts (vital_sign_id, profile_id, tipo, regla, valor, umbral, referencia, mensaje)
+values
+    -- 170/110: por encima de los dos umbrales.
+    ('a1000000-0000-4000-8000-00000000a001', :p_g3, 'blood_pressure', 'sistolica_alta',  170, 160, null,
+     'Presión sistólica alta: 170 mmHg (umbral de alerta: 160). Valor orientativo — no reemplaza el criterio médico.'),
+    ('a1000000-0000-4000-8000-00000000a001', :p_g3, 'blood_pressure', 'diastolica_alta', 110, 100, null,
+     'Presión diastólica alta: 110 mmHg (umbral de alerta: 100). Valor orientativo — no reemplaza el criterio médico.'),
+    -- 160/100 EXACTO: el 16/10 del ROADMAP. El umbral es inclusivo (≥), así que
+    -- deja las mismas dos alertas que 170/110.
+    ('a1000000-0000-4000-8000-00000000a002', :p_g3, 'blood_pressure', 'sistolica_alta',  160, 160, null,
+     'Presión sistólica alta: 160 mmHg (umbral de alerta: 160). Valor orientativo — no reemplaza el criterio médico.'),
+    ('a1000000-0000-4000-8000-00000000a002', :p_g3, 'blood_pressure', 'diastolica_alta', 100, 100, null,
+     'Presión diastólica alta: 100 mmHg (umbral de alerta: 100). Valor orientativo — no reemplaza el criterio médico.'),
+    -- Glucemia por debajo y por encima.
+    ('a1000000-0000-4000-8000-00000000a004', :p_g3, 'glucose', 'glucemia_baja',  65,  70, null,
+     'Glucemia baja: 65 mg/dL (umbral de alerta: 70). Valor orientativo — no reemplaza el criterio médico.'),
+    ('a1000000-0000-4000-8000-00000000a005', :p_g3, 'glucose', 'glucemia_alta', 260, 250, null,
+     'Glucemia alta: 260 mg/dL (umbral de alerta: 250). Valor orientativo — no reemplaza el criterio médico.'),
+    -- Peso: 83 kg contra una referencia de 80 kg en la ventana de 7 días.
+    ('a1000000-0000-4000-8000-00000000a007', :p_g3, 'weight', 'peso_variacion', 83, 2, 80,
+     'Peso 83 kg: 3 kg más que la referencia de los últimos 7 días (80 kg; umbral de alerta: 2 kg). Valor orientativo — no reemplaza el criterio médico.');
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Una carga de 170/110 deja las DOS alertas con su valor y su umbral  [CRITERIO DE ACEPTACIÓN]',
+       'sistolica_alta 170/160, diastolica_alta 110/100',
+       pruebas_rls.alertas_signo('a1000000-0000-4000-8000-00000000a001'));
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       '160/100 EXACTO deja las mismas dos alertas: el umbral es INCLUSIVO  [CRITERIO DE ACEPTACIÓN]',
+       'sistolica_alta 160/160, diastolica_alta 100/100',
+       pruebas_rls.alertas_signo('a1000000-0000-4000-8000-00000000a002'));
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Una carga de 150/95 no deja ninguna alerta  [CRITERIO DE ACEPTACIÓN]',
+       '(sin alerta)', pruebas_rls.alertas_signo('a1000000-0000-4000-8000-00000000a003'));
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Glucemia 65 deja una alerta de hipoglucemia', 'glucemia_baja 65/70',
+       pruebas_rls.alertas_signo('a1000000-0000-4000-8000-00000000a004'));
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Glucemia 260 deja una alerta de hiperglucemia', 'glucemia_alta 260/250',
+       pruebas_rls.alertas_signo('a1000000-0000-4000-8000-00000000a005'));
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Un salto de peso deja la alerta con la referencia contra la que se comparó',
+       'peso_variacion 83/2 ref=80',
+       coalesce((select format('%s %s/%s ref=%s', regla, trim_scale(valor),
+                               trim_scale(umbral), trim_scale(referencia))
+                   from public.vital_sign_alerts
+                  where vital_sign_id = 'a1000000-0000-4000-8000-00000000a007'),
+                '(sin alerta)'));
+
+-- Antidup: la evaluación de una medición es determinista, así que la misma
+-- regla sobre la misma medición es siempre la misma alerta. Reevaluar (un doble
+-- submit, una corrida de reparación) no puede duplicarla.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.vital_sign_alerts (vital_sign_id, profile_id, tipo, regla, valor, umbral, mensaje)
+        values ('a1000000-0000-4000-8000-00000000a001', 'f0000000-0000-4000-8000-00000000f001',
+                'blood_pressure', 'sistolica_alta', 170, 160,
+                'Presión sistólica alta: 170 mmHg (umbral de alerta: 160). Valor orientativo — no reemplaza el criterio médico.');
+        v := 'insertada';
+    exception when unique_violation then v := 'rechazado (23505)';
+              when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'La misma regla sobre la misma medición no se duplica (antidup)',
+        'rechazado (23505)', v);
+end $$;
+
+
+-- --- 14.4 Los CHECK de la alerta, con los dientes afuera --------------------
+
+-- EL DESCARGO ES UNA CONSTRAINT. Es el ROADMAP hecho base: "los umbrales son
+-- orientativos, no diagnóstico: el texto debe decirlo". Un refactor de copy que
+-- se lo olvide no puede persistir la alerta.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.vital_sign_alerts (vital_sign_id, profile_id, tipo, regla, valor, umbral, mensaje)
+        values ('a1000000-0000-4000-8000-00000000a003', 'f0000000-0000-4000-8000-00000000f001',
+                'blood_pressure', 'sistolica_alta', 150, 160,
+                'Presión sistólica alta: 150 mmHg. Consultá al médico.');
+        v := 'insertada';
+    exception when check_violation then v := 'rechazado (23514)';
+              when others          then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'Una alerta SIN el descargo clínico no se puede guardar  [CRITERIO DE ACEPTACIÓN]',
+        'rechazado (23514)', v);
+end $$;
+
+do $$
+declare v text; caso record;
+begin
+    for caso in
+        select * from (values
+            ('el tipo contradice la regla (glucemia con regla de tensión)',
+             $q$'a1000000-0000-4000-8000-00000000a003', 'f0000000-0000-4000-8000-00000000f001', 'glucose', 'sistolica_alta', 150, 160, null$q$),
+            ('una regla que no es de peso trae referencia',
+             $q$'a1000000-0000-4000-8000-00000000a003', 'f0000000-0000-4000-8000-00000000f001', 'blood_pressure', 'sistolica_alta', 150, 160, 80$q$),
+            ('la regla de peso viene SIN referencia',
+             $q$'a1000000-0000-4000-8000-00000000a006', 'f0000000-0000-4000-8000-00000000f001', 'weight', 'peso_variacion', 80, 2, null$q$),
+            ('el umbral aplicado es 0',
+             $q$'a1000000-0000-4000-8000-00000000a003', 'f0000000-0000-4000-8000-00000000f001', 'blood_pressure', 'sistolica_alta', 150, 0, null$q$)
+        ) as t(descripcion, valores)
+    loop
+        begin
+            execute format(
+                'insert into public.vital_sign_alerts (vital_sign_id, profile_id, tipo, regla, valor, umbral, referencia, mensaje) values (%s, %L)',
+                caso.valores,
+                'Texto de prueba. Valor orientativo — no reemplaza el criterio médico.');
+            v := 'aceptada';
+        exception when check_violation then v := 'rechazado (23514)';
+                  when others          then v := 'error ' || sqlstate;
+        end;
+        perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+            'CHECK de coherencia: ' || caso.descripcion, 'rechazado (23514)', v);
+    end loop;
+end $$;
+
+-- Una alerta que no cuelga de ninguna medición no tiene de quién ser: el
+-- trigger de sellado no encuentra el perfil y aborta con el mismo código que
+-- una FK rota.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.vital_sign_alerts (vital_sign_id, profile_id, tipo, regla, valor, umbral, mensaje)
+        values ('a1000000-0000-4000-8000-0000000000ff', 'f0000000-0000-4000-8000-00000000f001',
+                'blood_pressure', 'sistolica_alta', 170, 160,
+                'Texto de prueba. Valor orientativo — no reemplaza el criterio médico.');
+        v := 'insertada';
+    exception when foreign_key_violation then v := 'rechazado (23503)';
+              when others                then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'Una alerta de una medición inexistente', 'rechazado (23503)', v);
+end $$;
+
+-- EL SELLADO DEL PERFIL. `profile_id` decide qué familia ve la alerta: no puede
+-- depender de que quien escribe la mande bien. Se inserta a nombre de OTRO
+-- perfil y la base la corrige sola.
+insert into public.vital_sign_alerts (vital_sign_id, profile_id, tipo, regla, valor, umbral, mensaje)
+values ('a1000000-0000-4000-8000-00000000a003', :p_a, 'blood_pressure', 'diastolica_alta', 95, 90,
+        'Texto de prueba. Valor orientativo — no reemplaza el criterio médico.');
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'El trigger sella profile_id desde la medición e ignora el que mandó quien inserta',
+       'el perfil de la medición',
+       coalesce((select case when a.profile_id = v.profile_id
+                             then 'el perfil de la medición'
+                             else 'el que mandó el INSERT (' || a.profile_id || ')' end
+                   from public.vital_sign_alerts a
+                   join public.vital_signs v on v.id = a.vital_sign_id
+                  where a.vital_sign_id = 'a1000000-0000-4000-8000-00000000a003'),
+                '(sin alerta)'));
+
+delete from public.vital_sign_alerts
+ where vital_sign_id = 'a1000000-0000-4000-8000-00000000a003';
+
+
+-- --- 14.5 Quién ve las alertas y quién las marca vistas ---------------------
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.vital_sign_alerts;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'A (can_manage) lee las 7 alertas del perfil que administra', '7 filas', v);
+end $$;
+
+-- Escribir una alerta a mano NO: es la decisión de diseño de esta tarea. RLS
+-- puede autorizar a un autor pero no puede verificar que la alerta describa de
+-- verdad a su medición, y la 9.3 convierte cada fila en un push a la familia.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.vital_sign_alerts (vital_sign_id, profile_id, tipo, regla, valor, umbral, mensaje)
+        values ('a1000000-0000-4000-8000-00000000a003', 'f0000000-0000-4000-8000-00000000f001',
+                'blood_pressure', 'sistolica_alta', 300, 160,
+                'Presión sistólica alta: 300 mmHg (umbral de alerta: 160). Valor orientativo — no reemplaza el criterio médico.');
+        v := 'insertada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'A NO puede inventar una alerta desde el cliente  [DECISIÓN DE DISEÑO]',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        delete from public.vital_sign_alerts;
+        get diagnostics c = row_count;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'A no puede BORRAR una alerta (el registro clínico no se hace desaparecer)',
+        'denegado (42501)', v);
+end $$;
+
+-- El alcance del UPDATE no lo fija la política sino el PRIVILEGIO DE COLUMNA:
+-- `authenticated` tiene UPDATE (acknowledged_at) y nada más.
+do $$
+declare v text;
+begin
+    begin
+        update public.vital_sign_alerts set umbral = 999, mensaje = 'Otra cosa.';
+        v := 'aceptado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'A no puede reescribir el umbral ni el texto de una alerta (privilegio de columna)',
+        'denegado (42501)', v);
+end $$;
+
+-- Marcar vista: lo que la 9.3 va a hacer con `marcarAlertaVista`. El cliente
+-- manda una fecha cualquiera y la base la reemplaza por `now()`.
+do $$
+declare v text; c integer;
+begin
+    begin
+        update public.vital_sign_alerts
+           set acknowledged_at = timestamptz '2000-01-01 00:00:00-03'
+         where vital_sign_id = 'a1000000-0000-4000-8000-00000000a001'
+           and regla = 'sistolica_alta';
+        get diagnostics c = row_count;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'A marca vista la alerta de 170/110  [CONTRATO DE LA 9.3]', '1 filas', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'El trigger sella el visto con el perfil actor y la hora del servidor  [CONTRATO DE LA 9.3]',
+       'vista por María Gómez, con la hora del servidor',
+       pruebas_rls.visto((select id from public.vital_sign_alerts
+                           where vital_sign_id = 'a1000000-0000-4000-8000-00000000a001'
+                             and regla = 'sistolica_alta')));
+
+-- Una vez vista, no se puede "desver": el rastro de quién se hizo cargo no se
+-- borra. El UPDATE no falla —para que un `marcarAlertaVista` idempotente no
+-- tenga que distinguir el caso— pero no cambia nada.
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+update public.vital_sign_alerts set acknowledged_at = null
+ where vital_sign_id = 'a1000000-0000-4000-8000-00000000a001' and regla = 'sistolica_alta';
+
+commit;
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Una alerta ya vista no se puede "desver"',
+       'vista por María Gómez, con la hora del servidor',
+       pruebas_rls.visto((select id from public.vital_sign_alerts
+                           where vital_sign_id = 'a1000000-0000-4000-8000-00000000a001'
+                             and regla = 'sistolica_alta')));
+
+-- B carga las mediciones pero no administra: no ve las alertas que su propia
+-- carga genera, y tampoco puede marcarlas vistas. Es la regla de
+-- docs/modelo-permisos.md §4.3 ("los can_view y can_upload no las reciben")
+-- llevada a la tabla: quien no recibe el aviso tampoco ve la fila que lo generó.
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.vital_sign_alerts;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'B (can_upload, sin can_manage) NO ve ninguna alerta  [CRITERIO DE ACEPTACIÓN]',
+        '0 filas', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        update public.vital_sign_alerts set acknowledged_at = now()
+         where vital_sign_id = 'a1000000-0000-4000-8000-00000000a002';
+        get diagnostics c = row_count;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+              when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+        'B tampoco puede marcar vista una alerta que no ve', '0 filas', v);
+end $$;
+
+-- Y sigue viendo la MEDICIÓN: `vital_signs` es monótona en lectura. Lo que se
+-- minimiza es el escalamiento, no el dato.
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'B sí ve las mediciones que cargó (lo que no ve es el escalamiento)',
+       '7 filas', count(*) || ' filas')
+  from public.vital_signs where profile_id = :p_g3;
+
+commit;
+
+
+-- --- 14.6 La superficie de las dos tablas -----------------------------------
+
+begin;
+select set_config('request.jwt.claims', '', true);
+set local role anon;
+
+do $$
+declare v text; c integer; tabla text;
+begin
+    foreach tabla in array array['vital_sign_thresholds', 'vital_sign_alerts']
+    loop
+        begin
+            execute format('select count(*) from public.%I', tabla) into c;
+            v := c || ' filas';
+        exception when insufficient_privilege then v := 'denegado (42501)';
+                  when others                 then v := 'error ' || sqlstate;
+        end;
+        perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+            'anon lee ' || tabla, 'denegado (42501)', v);
+    end loop;
+end $$;
+
+commit;
+
+-- RLS no protege de un TRUNCATE: lo que lo frena es el `revoke all` de la
+-- migración. Vaciar `vital_sign_thresholds` borraría los umbrales que un médico
+-- ajustó para toda la base.
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text; tabla text;
+begin
+    foreach tabla in array array['vital_sign_thresholds', 'vital_sign_alerts']
+    loop
+        begin
+            execute format('truncate table public.%I cascade', tabla);
+            v := 'truncada';
+        exception when insufficient_privilege then v := 'denegado (42501)';
+                  when others                 then v := 'error ' || sqlstate;
+        end;
+        perform pruebas_rls.registrar('14. umbrales y alertas de signos',
+            'TRUNCATE de ' || tabla || ' (RLS no lo cubre)', 'denegado (42501)', v);
+    end loop;
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Privilegios de anon sobre las dos tablas nuevas', '0', count(*)::text)
+  from information_schema.role_table_grants
+ where table_schema = 'public'
+   and table_name in ('vital_sign_thresholds', 'vital_sign_alerts')
+   and grantee = 'anon';
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'authenticated tiene SOLO SELECT a nivel tabla sobre vital_sign_alerts', 'SELECT',
+       coalesce((select string_agg(distinct privilege_type, ', ' order by privilege_type)
+                   from information_schema.role_table_grants
+                  where table_schema = 'public'
+                    and table_name = 'vital_sign_alerts'
+                    and grantee = 'authenticated'),
+                '(ninguno)'));
+
+-- El UPDATE de la 9.3 existe, pero acotado a UNA columna. Si acá apareciera
+-- `mensaje` o `umbral`, la política de fila sería lo único que separa a una
+-- sesión de reescribir un registro clínico.
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'El UPDATE de authenticated sobre vital_sign_alerts llega a una sola columna',
+       'acknowledged_at',
+       coalesce((select string_agg(distinct column_name, ', ' order by column_name)
+                   from information_schema.column_privileges
+                  where table_schema = 'public'
+                    and table_name = 'vital_sign_alerts'
+                    and grantee = 'authenticated'
+                    and privilege_type = 'UPDATE'),
+                '(ninguna)'));
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Las dos tablas nuevas tienen RLS habilitada', 'vital_sign_alerts=true, vital_sign_thresholds=true',
+       coalesce((select string_agg(tablename || '=' || rowsecurity, ', ' order by tablename)
+                   from pg_tables
+                  where schemaname = 'public'
+                    and tablename in ('vital_sign_thresholds', 'vital_sign_alerts')),
+                '(no existen)'));
+
+-- Borrar la medición se lleva sus alertas: una alerta sin medición no tiene
+-- referente, y corregir una medición mal cargada es una potestad de can_manage
+-- (docs/modelo-permisos.md §4.3).
+delete from public.vital_signs where id = 'a1000000-0000-4000-8000-00000000a005';
+
+select pruebas_rls.registrar('14. umbrales y alertas de signos',
+       'Borrar la medición se lleva su alerta (ON DELETE CASCADE)',
+       '(sin alerta)', pruebas_rls.alertas_signo('a1000000-0000-4000-8000-00000000a005'));
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''

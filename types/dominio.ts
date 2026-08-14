@@ -96,6 +96,20 @@ export type SignoVitalInsert = TablesInsert<"vital_signs">
 /** Actualización de signo vital */
 export type SignoVitalUpdate = TablesUpdate<"vital_signs">
 
+/** Umbrales clínicos orientativos de un perfil (fila opcional: sin fila rigen los defaults de `lib/signos/umbrales.ts`) */
+export type UmbralesSignoVital = Tables<"vital_sign_thresholds">
+/** Inserción de umbrales por perfil */
+export type UmbralesSignoVitalInsert = TablesInsert<"vital_sign_thresholds">
+/** Actualización de umbrales por perfil */
+export type UmbralesSignoVitalUpdate = TablesUpdate<"vital_sign_thresholds">
+
+/** Alerta disparada por una medición fuera de umbral. Fuente del banner y del push de la 9.3 */
+export type AlertaSignoVital = Tables<"vital_sign_alerts">
+/** Inserción de alerta de signo vital (solo `service_role`, ver `lib/signos/registrar-alertas.ts`) */
+export type AlertaSignoVitalInsert = TablesInsert<"vital_sign_alerts">
+/** Actualización de alerta de signo vital (el cliente solo puede tocar `acknowledged_at`) */
+export type AlertaSignoVitalUpdate = TablesUpdate<"vital_sign_alerts">
+
 // Coberturas y seguros
 /** Credencial o tarjeta de cobertura médica */
 export type CredencialCobertura = Tables<"insurance_cards">
@@ -125,6 +139,9 @@ export type EstadoTurno = Enums<"appointment_status">
 
 /** Tipo de signo vital medido */
 export type TipoSignoVital = Enums<"vital_sign_type">
+
+/** Regla clínica orientativa que disparó una alerta de signos vitales */
+export type ReglaAlertaSignoVital = Enums<"vital_sign_alert_rule">
 
 /** Frecuencia de medicación */
 export type FrecuenciaMedicacion = Enums<"medication_frequency">

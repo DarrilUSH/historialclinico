@@ -932,6 +932,117 @@ export type Database = {
         }
         Relationships: []
       }
+      vital_sign_alerts: {
+        Row: {
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          created_at: string
+          id: string
+          mensaje: string
+          profile_id: string
+          referencia: number | null
+          regla: Database["public"]["Enums"]["vital_sign_alert_rule"]
+          tipo: Database["public"]["Enums"]["vital_sign_type"]
+          umbral: number
+          valor: number
+          vital_sign_id: string
+        }
+        Insert: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          created_at?: string
+          id?: string
+          mensaje: string
+          profile_id: string
+          referencia?: number | null
+          regla: Database["public"]["Enums"]["vital_sign_alert_rule"]
+          tipo: Database["public"]["Enums"]["vital_sign_type"]
+          umbral: number
+          valor: number
+          vital_sign_id: string
+        }
+        Update: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          created_at?: string
+          id?: string
+          mensaje?: string
+          profile_id?: string
+          referencia?: number | null
+          regla?: Database["public"]["Enums"]["vital_sign_alert_rule"]
+          tipo?: Database["public"]["Enums"]["vital_sign_type"]
+          umbral?: number
+          valor?: number
+          vital_sign_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vital_sign_alerts_acknowledged_by_fkey"
+            columns: ["acknowledged_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vital_sign_alerts_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vital_sign_alerts_vital_sign_id_fkey"
+            columns: ["vital_sign_id"]
+            isOneToOne: false
+            referencedRelation: "vital_signs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vital_sign_thresholds: {
+        Row: {
+          created_at: string
+          diastolica_max: number
+          glucemia_max: number
+          glucemia_min: number
+          peso_variacion_kg: number
+          peso_ventana_dias: number
+          profile_id: string
+          sistolica_max: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          diastolica_max?: number
+          glucemia_max?: number
+          glucemia_min?: number
+          peso_variacion_kg?: number
+          peso_ventana_dias?: number
+          profile_id: string
+          sistolica_max?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          diastolica_max?: number
+          glucemia_max?: number
+          glucemia_min?: number
+          peso_variacion_kg?: number
+          peso_ventana_dias?: number
+          profile_id?: string
+          sistolica_max?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vital_sign_thresholds_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vital_signs: {
         Row: {
           created_at: string
@@ -1262,6 +1373,12 @@ export type Database = {
       medication_frequency: "daily" | "interval_hours" | "as_needed"
       medication_intake_status: "pending" | "taken" | "skipped" | "missed"
       user_role: "admin" | "elder" | "family_member" | "caregiver"
+      vital_sign_alert_rule:
+        | "sistolica_alta"
+        | "diastolica_alta"
+        | "glucemia_baja"
+        | "glucemia_alta"
+        | "peso_variacion"
       vital_sign_type: "blood_pressure" | "glucose" | "weight"
     }
     CompositeTypes: {
@@ -1416,6 +1533,13 @@ export const Constants = {
       medication_frequency: ["daily", "interval_hours", "as_needed"],
       medication_intake_status: ["pending", "taken", "skipped", "missed"],
       user_role: ["admin", "elder", "family_member", "caregiver"],
+      vital_sign_alert_rule: [
+        "sistolica_alta",
+        "diastolica_alta",
+        "glucemia_baja",
+        "glucemia_alta",
+        "peso_variacion",
+      ],
       vital_sign_type: ["blood_pressure", "glucose", "weight"],
     },
   },

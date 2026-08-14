@@ -618,6 +618,38 @@ insert into public.vital_signs (
     ('660e8400-e29b-41d4-a716-446655440003'::uuid, 'weight', 79.2, 'kg', (now() - interval '1 day 09:15'), null, '660e8400-e29b-41d4-a716-446655440001'::uuid, now() - interval '1 day', now() - interval '1 day')
 on conflict do nothing;
 
+-- Alertas de umbral (vital_sign_alerts, Sprint 9.2) de la presión 165/102 de
+-- hace tres días. En la aplicación real las escribe
+-- `lib/signos/registrar-alertas.ts` justo después de la carga; acá van a mano
+-- porque el seed inserta las mediciones directamente en la base, sin pasar por
+-- `registrarSigno`. Sin ellas el seed sería incoherente —una medición fuera de
+-- umbral sin su alerta— y la 9.3 no tendría contra qué desarrollar el banner.
+--
+-- El texto es EXACTAMENTE el que produce `lib/signos/evaluar.ts` para esos
+-- valores con los umbrales por defecto (160/100): si se cambia la redacción
+-- allá, hay que cambiarla acá. El descargo no es opcional — lo exige el CHECK
+-- `vital_sign_alerts_mensaje_con_descargo`.
+--
+-- Quedan sin marcar como vistas (`acknowledged_at` NULL) a propósito: así el
+-- banner persistente aparece apenas se levanta el entorno.
+insert into public.vital_sign_alerts (
+    vital_sign_id, profile_id, tipo, regla, valor, umbral, referencia, mensaje, created_at
+)
+select v.id, v.profile_id, 'blood_pressure', datos.regla,
+       datos.valor, datos.umbral, null, datos.mensaje, v.measured_at
+  from public.vital_signs v
+ cross join (values
+        ('sistolica_alta'::public.vital_sign_alert_rule, 165, 160,
+         'Presión sistólica alta: 165 mmHg (umbral de alerta: 160). Valor orientativo — no reemplaza el criterio médico.'),
+        ('diastolica_alta'::public.vital_sign_alert_rule, 102, 100,
+         'Presión diastólica alta: 102 mmHg (umbral de alerta: 100). Valor orientativo — no reemplaza el criterio médico.')
+     ) as datos(regla, valor, umbral, mensaje)
+ where v.profile_id = '660e8400-e29b-41d4-a716-446655440003'::uuid
+   and v.type       = 'blood_pressure'
+   and v.systolic   = 165
+   and v.diastolic  = 102
+on conflict do nothing;
+
 
 -- =============================================================================
 -- 11. COBERTURA DE SALUD (insurance_cards)

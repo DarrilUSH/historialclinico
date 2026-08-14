@@ -10,6 +10,11 @@
  * `turnos/actions.ts#crearTurno`, opera SIEMPRE sobre el PERFIL ACTIVO
  * (`obtenerPerfilActivo()`), nunca sobre un `perfilId` que mande el cliente.
  *
+ * Después del `INSERT` exitoso corre el motor de umbrales clínicos de la
+ * tarea 9.2 (`lib/signos/registrar-alertas.ts`), que evalúa la medición contra
+ * `vital_sign_thresholds` y deja una fila de `vital_sign_alerts` por cada regla
+ * violada. Es **best-effort**: la carga nunca falla porque la evaluación falle.
+ *
  * Exige `upload` (`vital_signs_insert_puede_cargar`,
  * `docs/modelo-permisos.md` §6.1 y §4.2: "cargar un dato del día"). No hay
  * `actualizarSigno`/`suspenderSigno` en esta tarea -a diferencia de
@@ -22,6 +27,7 @@ import { revalidatePath } from "next/cache"
 
 import { esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { registrarAlertasDeSigno } from "@/lib/signos/registrar-alertas"
 import { esSignoTipo, TIPO_A_DB } from "@/lib/signos/tipos"
 import { validarSigno } from "@/lib/validacion/signo.schema"
 
@@ -84,19 +90,41 @@ export async function registrarSigno(
 
     const { datos } = validacion
 
-    const { error } = await supabase.from("vital_signs").insert({
-      profile_id: activo.perfil.id,
-      type: TIPO_A_DB[datos.tipo],
-      systolic: datos.systolic ?? null,
-      diastolic: datos.diastolic ?? null,
-      pulse: datos.pulse ?? null,
-      value: datos.value ?? null,
-      measured_at: datos.measuredAtIso,
-    })
+    // `.select("id")` no es cosmético: es lo que el motor de umbrales (9.2)
+    // necesita para releer la fila persistida y evaluarla. La política
+    // `vital_signs_select_puede_ver` es monótona, así que quien acaba de
+    // cargar con `can_upload` siempre puede leer lo que cargó.
+    const { data: guardado, error } = await supabase
+      .from("vital_signs")
+      .insert({
+        profile_id: activo.perfil.id,
+        type: TIPO_A_DB[datos.tipo],
+        systolic: datos.systolic ?? null,
+        diastolic: datos.diastolic ?? null,
+        pulse: datos.pulse ?? null,
+        value: datos.value ?? null,
+        measured_at: datos.measuredAtIso,
+      })
+      .select("id")
+      .single()
 
-    if (error) {
+    if (error || !guardado) {
       console.error(`[signos] Fallo al registrar una medición de ${datos.tipo}:`, error)
       return { error: ERROR_INESPERADO }
+    }
+
+    // Umbrales clínicos (tarea 9.2). BEST-EFFORT, como
+    // `generarTomasDelDiaComoServicio()` en `crearMedicacion`: la medición ya
+    // está guardada y **la carga nunca falla porque la evaluación falle**. Si
+    // esto revienta, queda el log y el dato; devolverle un error a quien acaba
+    // de cargar bien haría que reintente y termine sin la medición.
+    try {
+      await registrarAlertasDeSigno(guardado.id)
+    } catch (errorAlertas) {
+      console.error(
+        `[signos] La medición de ${datos.tipo} se guardó pero no se pudieron evaluar los umbrales:`,
+        errorAlertas,
+      )
     }
   } catch (error) {
     if (esErrorDeGuarda(error)) {

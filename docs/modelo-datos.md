@@ -47,6 +47,10 @@ profiles ◄──────────────────────�
     │
     │ 1 ─── 0..N   vital_signs.profile_id
     ├──────────────────────────────────────────────────► vital_signs
+    │                                                        │ 1 ─── 0..N
+    │ 1 ─── 0..1   vital_sign_thresholds.profile_id (PK)      ▼
+    ├──────────────────────────────────────────────────► vital_sign_alerts
+    │                                                   (vital_sign_alerts.profile_id, sellado)
     │
     │ 1 ─── 0..N   insurance_cards.profile_id
     ├──────────────────────────────────────────────────► insurance_cards
@@ -77,6 +81,10 @@ profiles ◄──────────────────────�
 | `medication_intakes` | `medication_id` | `medications` | N → 1 | `CASCADE` | La toma no existe sin su medicación |
 | `medication_intakes` | `profile_id` | `profiles` | N → 1 | `CASCADE` | Desnormalizado (ver decisión 6) |
 | `vital_signs` | `profile_id` | `profiles` | N → 1 | `CASCADE` | — |
+| `vital_sign_thresholds` | `profile_id` | `profiles` | 0..1 → 1 | `CASCADE` | Es también la PK: como mucho una fila de umbrales por perfil (ver [`modelo-signos.md`](./modelo-signos.md) §3) |
+| `vital_sign_alerts` | `vital_sign_id` | `vital_signs` | N → 1 | `CASCADE` | Una alerta sin su medición no tiene referente |
+| `vital_sign_alerts` | `profile_id` | `profiles` | N → 1 | `CASCADE` | Desnormalizado y **sellado por trigger** desde la medición: es la columna que resuelve la política de lectura |
+| `vital_sign_alerts` | `acknowledged_by` | `profiles` | N → 0..1 | `SET NULL` | El rastro de que alguien la atendió sobrevive al borrado de ese perfil |
 | `insurance_cards` | `profile_id` | `profiles` | N → 1 | `CASCADE` | — |
 | `access_logs` | `actor_user_id` | `auth.users` | N → 0..1 | `SET NULL` | El rastro sobrevive al borrado de la cuenta |
 | `access_logs` | `actor_profile_id` | `profiles` | N → 0..1 | `SET NULL` | Ídem |
@@ -99,6 +107,8 @@ erDiagram
     profiles ||--o{ medications : "toma"
     profiles ||--o{ medication_intakes : "registra"
     profiles ||--o{ vital_signs : "mide"
+    profiles ||--o| vital_sign_thresholds : "configura"
+    vital_signs ||--o{ vital_sign_alerts : "dispara"
     profiles ||--o{ insurance_cards : "tiene cobertura"
     profiles ||--o{ access_logs : "es accedido en"
     profiles ||--o{ push_subscriptions : "notifica a"
@@ -120,7 +130,8 @@ erDiagram
 | `user_role` | `admin`, `elder`, `family_member`, `caregiver` | `profiles.role` |
 | `doc_category` | `laboratory`, `imaging`, `prescription`, `consultation`, `other` | `documents.category` |
 | `appointment_status` | `pending`, `confirmed`, `completed`, `cancelled` | `appointments.status` |
-| `vital_sign_type` | `blood_pressure`, `glucose`, `weight` | `vital_signs.type` |
+| `vital_sign_type` | `blood_pressure`, `glucose`, `weight` | `vital_signs.type`, `vital_sign_alerts.tipo` |
+| `vital_sign_alert_rule` ⁺ | `sistolica_alta`, `diastolica_alta`, `glucemia_baja`, `glucemia_alta`, `peso_variacion` | `vital_sign_alerts.regla` (agregado en `20260814080000`) |
 | `insurance_card_side` | `front`, `back` | Capa de aplicación (ver decisión 8) |
 | `medication_frequency` | `daily`, `interval_hours`, `as_needed` | `medications.frequency` |
 | `medication_intake_status` | `pending`, `taken`, `skipped`, `missed` | `medication_intakes.status` |
@@ -181,6 +192,8 @@ Por qué no `jsonb`:
 - Los tipos generados por el CLI quedan precisos (`number | null`) en vez de `Json`.
 
 Costo aceptado: dos columnas nulas por fila en glucemia y peso, y una columna nula en presión. Es barato y el CHECK compensa la ambigüedad.
+
+La apuesta se cobró en el Sprint 9: los umbrales clínicos (`vital_sign_thresholds`) y las alertas (`vital_sign_alerts`) comparan y persisten números nativos, sin un solo cast. Los `CHECK` de `vital_signs` son de **plausibilidad** (¿este valor pudo haberse medido?), no de peligro (¿este valor preocupa?) — esa segunda capa vive aparte y está documentada en [`modelo-signos.md`](./modelo-signos.md) §2.
 
 Se agregó `pulse` (opcional): casi todos los tensiómetros domésticos lo informan junto con la presión y no tenerlo obligaba a tirar el dato o meterlo en `notes`.
 
@@ -263,6 +276,8 @@ Se indexaron los accesos que la aplicación hace de verdad, no todas las columna
 | `medication_intakes_toma_unica` | `medication_intakes (medication_id, scheduled_at)` único | Impide registrar dos veces la misma toma |
 | `medication_intakes_pendientes_idx` | `medication_intakes (profile_id, scheduled_at)` parcial | "¿Qué me toca tomar hoy?" |
 | `vital_signs_profile_tipo_fecha_idx` | `vital_signs (profile_id, type, measured_at DESC)` | Serie de tensión / glucemia / peso |
+| `vital_sign_alerts_una_por_regla` | `vital_sign_alerts (vital_sign_id, regla)` único | Antidup: la misma regla sobre la misma medición es siempre la misma alerta. Sirve además el lookup del historial (9.4) |
+| `vital_sign_alerts_sin_ver_idx` | `vital_sign_alerts (profile_id, created_at DESC)` parcial por `acknowledged_at IS NULL` | El banner persistente de la 9.3 |
 | `insurance_cards_una_principal_idx` | `insurance_cards (profile_id)` único parcial | Una sola cobertura principal por perfil |
 | `access_logs_profile_fecha_idx` | `access_logs (profile_id, created_at DESC)` | "Últimos 50 accesos" del titular |
 | `push_subscriptions_user_activas_idx` | `push_subscriptions (user_id)` parcial | Destinatarios de un envío push |
@@ -286,7 +301,7 @@ Los índices de FK (`family_permissions`, `doctors`, `medication_intakes.medicat
 | `0009_medicacion.sql` | Vista `v_medicacion_estado` con `dias_restantes` (las tablas y el enum de frecuencia ya están acá) | 7 |
 | `0010_cron_medicacion.sql` | Job de alerta de renovación (< 5 días) con antiduplicación de 48 h | 7 |
 | `0011_sos.sql` | Confirmación/ajuste del modelo SOS (ver decisión 10) | 8 |
-| `0012_signos_umbrales.sql` | Umbrales clínicos configurables por perfil y registro de alertas disparadas | 9 |
+| ~~`0012_signos_umbrales.sql`~~ → **`20260814080000_signos_umbrales.sql`** | **APLICADA.** Umbrales clínicos configurables por perfil (`vital_sign_thresholds`, fila opcional con defaults globales) y registro de alertas disparadas (`vital_sign_alerts`), con el enum `vital_sign_alert_rule`, los dos triggers de sellado y el `CHECK` que obliga al descargo clínico en el texto. Ver [`modelo-signos.md`](./modelo-signos.md) | 9 |
 | `0013_fichas.sql` | Historial de fichas de resumen generadas por IA | 10 |
 
 Decisiones deliberadamente **no** tomadas todavía:
