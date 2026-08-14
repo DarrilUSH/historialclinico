@@ -80,6 +80,7 @@ import {
 
 import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
+import { puntosRombo, puntosTriangulo } from "@/components/graficos/formas-punto"
 import type { PuntoSerie, SerieMetrica } from "@/lib/laboratorio/series"
 import { cn } from "@/lib/utils"
 
@@ -161,15 +162,6 @@ interface PuntoGrafico {
   valor: number
   punto: PuntoSerie
   indice: number
-}
-
-function puntosTriangulo(cx: number, cy: number, r: number): string {
-  const alto = r * 1.7
-  return `${cx},${cy - alto * 0.62} ${cx - r},${cy + alto * 0.38} ${cx + r},${cy + alto * 0.38}`
-}
-
-function puntosRombo(cx: number, cy: number, r: number): string {
-  return `${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}`
 }
 
 interface OpcionesPunto {

@@ -21,13 +21,19 @@
  * `vital_sign_alerts` sin ver del perfil activo. Solo se pide -y solo lo deja
  * leer RLS- a quien administra el perfil (`can_manage`, el mismo conjunto que
  * recibió el push que trajo hasta acá vía `/signos/enlace`).
+ *
+ * Junto al título, el link "Ver historial" (Sprint 9, tarea 9.4) lleva a
+ * `/signos/historial` -el gráfico de la serie de cada signo con banda de
+ * referencia sombreada-. Visible para cualquier permiso, sin condición: leer
+ * el historial no exige `can_upload` (a diferencia de los tres botones de
+ * carga) y la propia pantalla de destino se degrada sola sin mediciones.
  */
 
 import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { PlusIcon } from "lucide-react"
+import { ChartLineIcon, PlusIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
@@ -72,7 +78,16 @@ export default async function PaginaSignos() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
-      <h1 className="text-2xl font-semibold tracking-tight text-balance">Signos vitales</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight text-balance">Signos vitales</h1>
+        <Link
+          href="/signos/historial"
+          className="inline-flex shrink-0 items-center gap-1.5 text-sm font-medium text-primary transition-colors hover:underline"
+        >
+          <ChartLineIcon className="size-4" aria-hidden="true" />
+          Ver historial
+        </Link>
+      </div>
 
       <BannerAlertasSignos alertas={alertasSinVer} />
 

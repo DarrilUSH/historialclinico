@@ -16,7 +16,9 @@ import "server-only"
  */
 
 import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
+import type { FilaVitalSignParaSerie } from "@/lib/signos/series"
 import { DB_A_TIPO, TIPO_A_DB, TIPOS_SIGNO, type SignoTipo } from "@/lib/signos/tipos"
+import { combinarUmbrales, type UmbralesSignos } from "@/lib/signos/umbrales"
 
 export interface MedicionSigno {
   id: string
@@ -116,4 +118,72 @@ export async function obtenerUltimasMedicionesPorTipo(
     agrupado[tipo] = data ? data.map(filaAMedicion) : []
   })
   return agrupado
+}
+
+/**
+ * TODO el historial de UN tipo de signo para `perfilId`, ordenado ascendente
+ * -fuente de `lib/signos/series.ts#construirSerieSigno` para
+ * `/signos/historial` (tarea 9.4)-.
+ *
+ * Sin corte de fecha ni límite: el recorte por período
+ * (`?periodo=30d|90d|todo`) lo aplica la función PURA de `series.ts`, no esta
+ * consulta -ver el encabezado de `lib/signos/periodo.ts` para el porqué de
+ * esa separación-. `porTipo` de `obtenerUltimasMedicionesPorTipo` no alcanza
+ * acá porque esa función trae solo las últimas N mediciones (para el listado
+ * de `/signos`); el gráfico necesita la serie completa.
+ */
+export async function obtenerHistorialSigno(
+  supabase: ClienteSupabaseServidor,
+  perfilId: string,
+  tipo: SignoTipo,
+): Promise<FilaVitalSignParaSerie[]> {
+  const { data, error } = await supabase
+    .from("vital_signs")
+    .select("id, systolic, diastolic, value, measured_at")
+    .eq("profile_id", perfilId)
+    .eq("type", TIPO_A_DB[tipo])
+    .order("measured_at", { ascending: true })
+
+  if (error) {
+    console.error(`[signos] Fallo al leer el historial de ${tipo}:`, error)
+    return []
+  }
+
+  return (data ?? []).map((fila) => ({
+    id: fila.id,
+    measuredAt: fila.measured_at,
+    systolic: fila.systolic,
+    diastolic: fila.diastolic,
+    value: fila.value,
+  }))
+}
+
+/**
+ * Los umbrales VIGENTES del perfil, ya resueltos (defaults + fila propia si
+ * existe) -fuente de la banda de referencia sombreada de `/signos/historial`
+ * (tarea 9.4, `docs/modelo-signos.md` §11: "la banda describe el criterio
+ * vigente, no el pasado")-.
+ *
+ * Corre con el cliente de la SESIÓN (no `service_role`): la política de
+ * `SELECT` de `vital_sign_thresholds` es `puede_ver_perfil` -titular,
+ * `can_view`, `can_upload` o `can_manage`-, el mismo conjunto amplio que
+ * puede entrar a `/signos/historial`. Defensivo ante error de lectura -mismo
+ * criterio que el resto de este archivo-: sin fila propia ni error legible,
+ * caen los defaults globales, nunca una pantalla rota.
+ */
+export async function obtenerUmbralesDelPerfil(
+  supabase: ClienteSupabaseServidor,
+  perfilId: string,
+): Promise<UmbralesSignos> {
+  const { data, error } = await supabase
+    .from("vital_sign_thresholds")
+    .select("sistolica_max, diastolica_max, glucemia_min, glucemia_max, peso_variacion_kg, peso_ventana_dias")
+    .eq("profile_id", perfilId)
+    .maybeSingle()
+
+  if (error) {
+    console.error(`[signos] Fallo al leer los umbrales del perfil ${perfilId}:`, error)
+    return combinarUmbrales(null)
+  }
+  return combinarUmbrales(data)
 }
