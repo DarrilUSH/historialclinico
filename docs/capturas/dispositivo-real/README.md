@@ -20,6 +20,14 @@ Samsung Galaxy A71 (SM-A715F), Android 13, Chrome — 2026-08-13, vía ADB (`adb
 | sprint10-medico-llamar.png | Tocar "Llamar" en la tarjeta del Dr. Rodríguez abre el discador nativo de Android con `+54 2901 23-4000` precargado -el mismo teléfono guardado en `doctors.phone`, sin reformatear-, confirmando que el `tel:` dispara el discador real y no un link muerto |
 | sprint11-instalar-menu.png | Menú ⋮ de Chrome sobre `/inicio` (build de producción, `next start`) con **"Instalar y crear acceso directo"** presente -el criterio de instalabilidad de Chrome, equivalente al "Instalar aplicación" que pide el ROADMAP, pasa- |
 | sprint11-offline-pantalla.png | `/offline` **actualizada** (tarea 11.3) en el dispositivo real, build de producción: bajo el botón grande "Abrir mi ficha SOS" aparece el bloque nuevo "También quedan guardadas las últimas versiones de estas pantallas, tal como las viste la última vez que tuviste señal" con los tres accesos **Coberturas / Turnos / Medicación**, y la aclaración de que las miniaturas de credencial no se ven sin red (§3.4 de `docs/offline.md`) |
+| sprint11-qa-camara-nativa.png | Pruebas de dispositivo (tarea 11.7): tocar "Sacar foto" en `/estudios/nuevo` abre la cámara nativa de Samsung directo, sin selector intermedio -re-confirma el Sprint 4-. Recortada a la barra de controles de la cámara (configuración, flash, temporizador, relación de aspecto, HDR) para no exponer el living del dueño del dispositivo que quedaba de fondo en el visor |
+| sprint11-qa-push-bandeja.png | Pruebas de dispositivo (tarea 11.7): notificación real "Prueba de recordatorios" en la bandeja del sistema, entregada en el mismo minuto del toque en "Enviar prueba (dev)" -consistente con los <15s de la tarea 9.3-, con una suscripción real repuesta por la UI (Desactivar → Activar) en vez de por SQL |
+| sprint11-qa-deeplink-turnos.png | Pruebas de dispositivo (tarea 11.7): tocar la notificación real del push de prueba aterriza en `/turnos` -la URL del payload, no `/inicio`-, con la sesión de María sobre Roberto intacta |
+| sprint11-qa-enlace-medicacion.png | Pruebas de dispositivo (tarea 11.7): `/medicacion/enlace?perfil=<uuid-roberto>` por URL directa, partiendo del perfil PROPIO de María, cambia el perfil activo a Roberto y aterriza en `/medicacion` mostrando su Enalapril y Glucophage -el bug que la ruta existe para evitar, probado de punta a punta- |
+| sprint11-qa-enlace-signos.png | Pruebas de dispositivo (tarea 11.7): `/signos/enlace?perfil=<uuid-roberto>` por URL directa, mismo patrón: cambia el perfil activo desde María y aterriza en `/signos` con el banner de alertas de Roberto visible |
+| sprint11-qa-instalar-menu.png | Pruebas de dispositivo (tarea 11.7): re-confirmación del menú "Instalar y crear acceso dire..." de la tarea 11.1, contra un build de producción real (`next build && npm run start` recién corridos en esta tarea, después de detectar que el servidor había quedado en `next dev`) |
+| sprint11-qa-offline-sos.png | Pruebas de dispositivo (tarea 11.7): `/sos` sin red (corte real, `adb reverse --remove` + `svc wifi disable`, 0 redes conectadas confirmado por `dumpsys connectivity`), contra el build de producción real, con estilos completos, banda "Sin conexión — estás viendo datos guardados" y la hora del sistema (13:57) visible como evidencia del momento de la captura |
+| sprint11-qa-dictado-boton.png | Pruebas de dispositivo (tarea 11.7): botón de micrófono junto al buscador de `/estudios`, re-confirmando el Sprint 5; disponibilidad real de `SpeechRecognition`/`webkitSpeechRecognition` verificada aparte por CDP (`Runtime.evaluate` en la pestaña del teléfono, no una inferencia por user-agent) |
 
 Flujo verificado con toques e ingreso de texto reales por ADB: login de María → selección del perfil gestionado de Roberto → inicio. El camino de error (submit vacío) también se verificó en pantalla física.
 
@@ -400,3 +408,38 @@ El pendiente de arriba se cerró en la misma auditoría de la tarea (login por A
 Se dejó corriendo **`prod`** (`npm run start`) en el puerto 3000, a propósito y en contra de la costumbre de restaurar `dev` al final: la verificación pendiente necesita el build de producción levantado. Para volver al desarrollo normal: detener `prod` y levantar `dev` (`.claude/launch.json` ya tiene las dos entradas).
 
 Suites de esta tarea: `npm run test` → **684/684** (654 previos + 30 nuevos entre `sw-offline` y `actualizacion-sw`), `npx tsc --noEmit` limpio, `npx eslint .` limpio (`public/sw.js` incluido, verificado aparte con `--no-ignore`), `node scripts/verificar-contraste.mjs` **98/98**, `npm run build` limpio, `scripts/test-rls.sql` **234/234 PASS** y `scripts/test-storage-rls.sh` **20/20 PASS** (sin migraciones nuevas en esta tarea: se corrieron igual para no asumir "no tocó nada" sin comprobarlo).
+
+## Sprint 11 · pruebas de los seis flujos en dispositivo real (tarea 11.7)
+
+**2026-08-14.** Checklist completo en `docs/pruebas-dispositivo.md` — acá solo
+el resumen y lo que no encajaba en la tabla de capturas de arriba.
+
+Los seis flujos del ROADMAP (cámara, push, deep links, instalación PWA, modo
+avión, dictado por voz) quedaron **OK**, cuatro con evidencia nueva de hoy
+(cámara, push, deep links, dictado) y dos citando evidencia previa más
+re-confirmación contra el build actual (instalación PWA, modo avión).
+
+**Hallazgo de la propia tarea:** pese a la nota de arriba ("se dejó corriendo
+`prod` a propósito"), el servidor en el puerto 3000 al empezar esta tarea
+resultó ser `next dev` (confirmado por `Get-CimInstance Win32_Process | select
+CommandLine`, no por heurísticas sobre el HTML). Se detectó porque `/sos` sin
+red abrió con todos los datos pero **sin CSS** — los estáticos de `next dev`
+se sirven con `Cache-Control: no-cache, must-revalidate`, y
+`esEstaticoGuardable` en `public/sw.js` (línea 487) exige `immutable` antes de
+cachear un `/_next/static/**`, a propósito. No es un bug: es esa guarda
+funcionando. Se corrigió con `npm run build && npm run start` limpios (Cache-
+Control confirmado `immutable` por `curl -I`) y se rehicieron los flujos 4 y 5
+contra ese build real. Detalle completo, con la tarea derivada de documentar
+el chequeo de `CommandLine`, en `docs/pruebas-dispositivo.md`.
+
+La suscripción de push quedó **repuesta por la UI real** (banner "Desactivar"
+→ "Activar recordatorios" con TAP real por ADB, coordenadas de `uiautomator
+dump`) en vez de por SQL como en 7.4/9.3 — un intento previo con
+`element.click()` vía CDP no alcanzó a disparar `pushManager.subscribe`
+porque Chrome no lo cuenta como gesto de usuario; el TAP real sí. Se dejó
+activa a propósito como checkpoint para el Sprint 12.
+
+Suites de cierre (sin tocar código en esta tarea): `npm run test -- --run` →
+**693/693 PASS**, `npx tsc --noEmit` limpio, `npx eslint .` limpio. Servidor
+devuelto a `npm run dev`, `adb reverse` restaurado (`tcp:3000`, `tcp:54321`),
+WiFi del teléfono reactivado.
