@@ -387,6 +387,14 @@ Los puntos 2, 3 y 4 de arriba cubren **todo el mecanismo** que esas capturas ilu
 
 **Para completarlo** (10 segundos de trabajo humano): iniciar sesión en el teléfono con la receta de login de más arriba y dejar el server `prod` levantado. Después: visitar las cuatro rutas con red, cortar (`adb reverse --remove tcp:3000` + `adb shell svc wifi disable`), capturar, restaurar, tocar `public/sw.js`, rebuild y recargar para que aparezca el aviso.
 
+### COMPLETADO por el orquestador en la auditoría (2026-08-14 ~11:30)
+
+El pendiente de arriba se cerró en la misma auditoría de la tarea (login por ADB con la receta, sobre el build de producción):
+
+1. `sprint11-offline-turnos.png` y `sprint11-offline-medicacion.png` — las dos rutas nuevas abren SIN red (túnel removido + WiFi apagado) con su última copia completa y el banner "Sin conexión" arriba. `/sos` y `/coberturas` ya tenían evidencia previa del Sprint 8.
+2. `sprint11-aviso-actualizacion.png` — con un bump descartable de `VERSION` (v2→v3, revertido tras la prueba, sin commitear) + rebuild + restart: la barra **"Hay una versión nueva — Actualizar"** apareció sobre la bottom nav al recargar. Tocarla produjo la recarga ÚNICA con la **sesión intacta** (seguía María sobre el perfil de Roberto, con el banner de alertas de 9.3 renderizado) y el aviso no volvió a aparecer.
+3. El push post-actualización quedó cubierto por el mecanismo verificado en los puntos 2-3 de arriba (el worker viejo retiene los eventos hasta el reload; la suscripción sigue viva en la base) — la entrega real de push con worker nuevo se re-verifica en el smoke de producción del Sprint 12.
+
 ### Coordinación de servidores
 
 Se dejó corriendo **`prod`** (`npm run start`) en el puerto 3000, a propósito y en contra de la costumbre de restaurar `dev` al final: la verificación pendiente necesita el build de producción levantado. Para volver al desarrollo normal: detener `prod` y levantar `dev` (`.claude/launch.json` ya tiene las dos entradas).
