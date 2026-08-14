@@ -246,3 +246,18 @@ En Windows 11, acceder via `%APPDATA%\` o `Set-Location $PROFILE` en PowerShell.
 - **Sprint 1:** Primeras pantallas de UI con shadcn/ui. Revisión de charset UTF-8 en BD de desarrollo (Supabase).
 - **Sprint 2:** Instalación de Docker Desktop (manual del usuario) para habilitar `supabase start` y `supabase link`. Actualizar sección **Supabase** con el resultado.
 - **Sprint 3+:** Impeccable, UI UX Pro Max (decisión comparativa con Taste Skill), Vercel Agent Skills, Emil Kowalski Skills. Agregar nuevo apartado "§Sprint 3 — Herramientas de auditoria y pulido".
+
+## Capas de variables de entorno (reordenadas el 2026-08-14, auditoría 8.4)
+
+**Incidente que motivó el cambio:** `.env.local` guardaba las claves del proyecto Supabase CLOUD y Next.js carga `.env.local` en TODOS los modos — `next dev` las tapaba con `.env.development.local`, pero `next start` no, así que el primer build de producción local quedó apuntando a la nube real (solo llegó un intento de login fallido; sin lecturas ni escrituras de datos). Detectado y corregido en la auditoría de la tarea 8.4.
+
+**Esquema vigente:**
+
+| Archivo | Contenido | Lo carga |
+|---|---|---|
+| `.env.development.local` | Claves demo del stack Supabase local | solo `next dev` (gana sobre `.env.local`) |
+| `.env.local` | Supabase LOCAL (demo) + `GEMINI_API_KEY`/`GEMINI_MODEL_ID` + VAPID + `CRON_SECRET` | `next dev` y `next start` |
+| `.env.cloud-respaldo` | Copia completa con las claves del Supabase CLOUD de producción | **nadie** (Next no reconoce el nombre; git lo ignora). Fuente de las env vars de Vercel en el Sprint 12 |
+| `.env.example` | Plantilla versionada sin valores | — |
+
+Regla: **ninguna clave de producción en un archivo que Next auto-cargue.** Las claves cloud entran a producción por el panel de Vercel (Sprint 12), nunca por archivos locales. La cirugía la hizo `scripts/separar-claves-cloud.mjs` (reutilizable si el esquema se vuelve a desordenar; imprime solo nombres de variables, jamás valores).
