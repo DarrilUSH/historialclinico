@@ -24,7 +24,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { CreditCardIcon, HeartPulseIcon, PillIcon } from "lucide-react"
+import { ActivityIcon, CreditCardIcon, HeartPulseIcon, PillIcon } from "lucide-react"
 
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
 import { BotonSos } from "@/components/inicio/boton-sos"
@@ -105,6 +105,30 @@ export default async function PaginaInicio() {
           <span className="text-sm text-muted-foreground">
             {textoResumenTomas(tomasDeHoy.length, tomasPendientesHoy)}
           </span>
+        </span>
+      </Link>
+
+      {/*
+        Acceso a /signos (Sprint 9, tarea 9.1). Mismo patrón que la card de
+        Coberturas de abajo: sin fetch propio -"Card simple", ni contador ni
+        consulta a la base, el resumen con los últimos valores vive en la
+        pantalla de destino-, igual para cualquier permiso: Diego (`can_view`)
+        también puede ver los signos vitales de Roberto, solo que sin los
+        botones de carga dentro de la pantalla.
+      */}
+      <Link
+        href="/signos"
+        className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
+      >
+        <span
+          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+          aria-hidden="true"
+        >
+          <ActivityIcon className="size-5" />
+        </span>
+        <span className="flex flex-col text-left">
+          <span className="text-base font-semibold text-foreground">Signos vitales</span>
+          <span className="text-sm text-muted-foreground">Cargar tensión, glucemia y peso</span>
         </span>
       </Link>
 

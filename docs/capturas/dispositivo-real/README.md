@@ -68,6 +68,7 @@ Después se tocó (TAP real, `adb shell input tap`, no un click simulado) el pun
 | sprint8-offline-credencial-grande.png | Tocar la credencial abre la imagen sola a pantalla completa, **también desde el caché**: la navegación a `/api/credenciales/.../imagen` cae en la estrategia de imagen y no en la pantalla offline |
 | sprint8-offline-pantalla.png | `/estudios` sin red: **pantalla "Estás sin conexión"** con diseño completo, en español, explicando qué sí está guardado y con el botón grande "Abrir mi ficha SOS" — no el dinosaurio de Chrome. La barra de direcciones sigue mostrando `/estudios`: el worker responde `/offline` sin cambiar la URL |
 | sprint6-recordatorio.png | **Recordatorio de turno PROGRAMADO** (tarea 6.4), expandido en la bandeja: "Turno de Cardiología en 3 horas / Hoy a las 17:54 · Dr. Carlos Rodríguez · Hospital Regional Ushuaia · Venir en ayunas de 8 horas". No lo disparó ningún botón de la app: lo generó `pg_cron` sobre un turno cargado a 2h55m y lo entregó el barrido de `/api/push/procesar-recordatorios`. Debajo se ven los otros dos recordatorios reales que salieron en el mismo barrido para los turnos del seed ("Turno de Cardiología pasado mañana", "Turno de Endocrinología en una semana") |
+| sprint9-carga-tension.png | `/signos/nuevo?tipo=tension` (tarea 9.1) en el dispositivo real, con el **teclado numérico nativo de Android abierto** sobre el campo "Sistólica" (solo dígitos 1-9/0, sin letras, `Sig.` para pasar de campo) — confirma que `inputMode="numeric"` de `CampoNumero` dispara el teclado correcto, criterio de aceptación del roadmap. Los tres campos vienen precargados con la ÚLTIMA carga del mismo tipo del seed (Sistólica 139, Diastólica 81, Pulso 75, el mismo valor que ya se ve en la tarjeta más reciente de `/signos`) |
 
 ## Sprint 6 · Web Push (tarea 6.3) — verificación completa
 
@@ -270,3 +271,16 @@ Evidencia (sesión de María sobre el perfil de Roberto):
 Las dos marcas de tiempo responden preguntas distintas (`docs/modelo-sos.md` §6.1) y las tres pantallas SOS formatean con `formatearRevisionSos` — ninguna arma su propio `Intl.DateTimeFormat`.
 
 **Checkpoint del Sprint 8: APROBADO** con esta secuencia (cobertura + SOS cargados → offline → ficha y credencial legibles → fallback claro en el resto → refresco al volver la red).
+
+## Sprint 9 · carga rápida de tensión, glucemia y peso (tarea 9.1) — verificación completa
+
+**2026-08-14.** Sesión viva de María sobre el perfil gestionado de Roberto (la misma sesión de cierres anteriores, sin volver a loguearse), `adb reverse tcp:3000 tcp:3000`.
+
+1. `/signos` muestra las mediciones del seed agrupadas por tipo, últimos valores primero: "Tensión arterial" con 139/81 mmHg (75 lat/min) "ayer" y 140/83 mmHg (74 lat/min) "hace 2 días", más los tres accesos grandes "Cargar tensión" / "Cargar glucemia" / "Cargar peso" — sin dropdown, criterio Senior UX del roadmap.
+2. Tocar "Cargar tensión" abre `/signos/nuevo?tipo=tension` con Sistólica **autofocada** y el **teclado numérico nativo de Android** abierto de entrada (`sprint9-carga-tension.png`): solo dígitos y `Sig.`, ninguna tecla de letras.
+3. Los tres campos (Sistólica, Diastólica, Pulso) llegaron precargados con la ÚLTIMA carga del mismo tipo (139 / 81 / 75, calcado de la tarjeta más reciente de `/signos`) — el prefill del roadmap funcionando con datos reales, no simulados.
+4. Fecha y hora llegaron precargadas con "ahora" en los pickers **nativos** de Android (`14/08/2026`, `5:33 a.m.`), editables.
+5. Enviar el formulario tal cual (sin tocar nada, el caso "3 toques y 4 números" del criterio de aceptación: tocar "Cargar tensión" en `/signos`, tocar "Sig." una vez para pasar de campo, tocar el botón de guardar) redirigió a `/signos?cargado=1` y la medición nueva apareció primera en la lista, con "hoy a las 05:33" y "14 de agosto de 2026 · 05:33 hs" — `tiempoRelativo` y el formato absoluto de `lib/turnos/formato.ts` reutilizados sin cambios.
+6. La fila de prueba se borró después por SQL (`delete from vital_signs where id = '62292e5c-…'`) para dejar el seed de Roberto (2 tensiones, 1 glucemia, 1 peso) como estaba documentado en `scripts/seed.md` antes de la corrida.
+
+No se re-verificó el teclado decimal de "Peso" en pantalla física (cubierto por `tests/unit/signo-schema.test.ts` y por inspección de `components/signos/formulario-signo.tsx#decimal`, que fija `decimal={tipo === "peso"}`), ni el camino de error de la base (sistólica 400) en el dispositivo — ese camino se verificó por SQL directo (ver el commit de la tarea) y por los 26 tests unitarios del schema, que cubren cada rango CHECK uno por uno.
