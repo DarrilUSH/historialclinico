@@ -60,7 +60,16 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 - **Sprint 12 (deploy) EN PAUSA por pedido explícito del usuario** (2026-08-14): "no hagas el deploy... voy a necesitar que hagamos un trabajo más". Nada se subió a Vercel ni a Supabase cloud.
 - Suites finales: RLS **253/253** (idempotente ×2) · Storage **27/27** · Vitest **693/693** · tsc/build/eslint limpios · contraste **98/98 AA**.
 - Informes de auditoría: seguridad (sin hallazgos altos), accesibilidad (sin críticos/altos), performance (desviación LCP documentada), pruebas de dispositivo (6/6).
-- Ítems que esperan el deploy: WebAPK + share-sheet, LCP en prod, push con VAPID de producción, legales Ley 25.326 (tarea 12.1, no arrancada).
+- Ítems que esperan el deploy: WebAPK + share-sheet, LCP en prod, push con VAPID de producción.
+
+## SPRINT 12 (DEPLOY) — EN CURSO, BLOQUEADO EN LOS PASOS QUE REQUIEREN LAS CLAVES DEL USUARIO (2026-08-14 ~19:00)
+
+- **12.1 legales (Ley 25.326)**: ✅ auditada y pusheada (`6bf02e6`) — /privacidad, /terminos, consentimiento con checkbox obligatorio en registro + al dar acceso familiar, tabla `consents` append-only (arnés 281/281). Sprint 13 (modo letra chica) ✅ completo antes de esto.
+- **Vercel**: el proyecto estaba importado como framework "Other" (buildeba vacío → 404). Corregido con `vercel.json` (`framework: nextjs`, commit `cce460f`). Ahora buildea Next.js de verdad. El dominio ya está OK (apex→www→Production). Producción da **500 esperado**: falta cargar las env vars y aplicar el esquema.
+- **Supabase cloud** (`nbypcqhojmixlxvkflrp`): proyecto existe, base VACÍA. Las 18 migraciones están listas para `supabase db push`.
+- **BLOQUEO**: los pasos que faltan requieren las claves del usuario y NO los puede hacer el asistente (regla de seguridad: no ingresar API keys/tokens/secretos en formularios, ni siquiera con autorización). Documentado en detalle en **`docs/deploy-instrucciones.md`** (4 pasos, ~15 min): (1) `supabase login`+`link`+`db push`; (2) pegar `.env.cloud-respaldo` en las env vars de Vercel; (3) redeploy; (4) configurar los crons de prod en el SQL editor con el CRON_SECRET.
+- **Claves cloud**: viven en `.env.cloud-respaldo` (local, git-ignoreado). Las 10 env vars están ahí completas.
+- **Pendiente para cuando el usuario complete el deploy**: smoke tests contra prod (12.5), configurar_cron (12.4, parte del paso 4), y la DECISIÓN de cerrar el registro público (mitigación de abuso de cuota Gemini).
 | 12 Deploy producción | ⬜ Bloqueado hasta terminar todo (autorización ya dada) |
 
 ## Cómo retomar (checklist de arranque de sesión)
