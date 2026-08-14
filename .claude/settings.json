@@ -15,7 +15,10 @@
       "Write(./.env.local)",
       "Write(./.env.*.local)",
       "Write(./.env.development)",
-      "Write(./.env.production)"
+      "Write(./.env.production)",
+      "Read(./.env.cloud-respaldo)",
+      "Edit(./.env.cloud-respaldo)",
+      "Write(./.env.cloud-respaldo)"
     ]
   }
 }
