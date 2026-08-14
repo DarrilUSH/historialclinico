@@ -18,6 +18,26 @@
  * La raíz de esta pantalla es un `<div>`, no un `<main>`: ese landmark ya lo
  * pone el layout una sola vez para las cuatro pantallas con nav (dos `<main>`
  * anidados son inválidos y confunden a un lector de pantalla).
+ *
+ * ## Modo chica (Sprint 13, tarea 13.2)
+ *
+ * Las seis cards de acceso directo (Medicación, Signos vitales, Coberturas,
+ * Médicos, Ficha para el médico, Ficha SOS) pasan de columna apilada a una
+ * GRILLA de 2 columnas compactas -ícono + título, sin la bajada explicativa
+ * larga, que es ayuda contextual y no dato clínico (docs/densidad.md §4,
+ * regla 5: "la densidad no saca contenido", pero una ayuda no es contenido-.
+ * Se factorizan en `TarjetaAcceso` (más abajo en este mismo archivo) para que
+ * las seis compartan la MISMA clase base y el MISMO override `chica:`, en vez
+ * de repetir seis veces la chance de que una quede desalineada de las otras
+ * cinco.
+ *
+ * El envoltorio de la grilla (`flex flex-col gap-8` en grande, `chica:grid
+ * chica:grid-cols-2` en compacta) usa el MISMO `gap-8` que tenían las cards
+ * como hijos sueltos del contenedor padre en el modo grande: agruparlas en un
+ * solo `<div>` no mueve un píxel de esa disposición, porque el gap del padre
+ * ahora se aplica una vez antes del grupo y una vez después (en vez de una
+ * vez entre cada card), y el gap interno del grupo repone exactamente esas
+ * separaciones que faltan.
  */
 
 import type { Metadata } from "next"
@@ -29,6 +49,7 @@ import {
   ClipboardListIcon,
   CreditCardIcon,
   HeartPulseIcon,
+  type LucideIcon,
   PillIcon,
   StethoscopeIcon,
 } from "lucide-react"
@@ -78,13 +99,14 @@ export default async function PaginaInicio() {
     : []
 
   return (
-    <div className="flex w-full flex-1 flex-col items-center justify-center gap-8 px-4 py-12 text-center">
+    <div className="flex w-full flex-1 flex-col items-center justify-center gap-8 px-4 py-12 text-center chica:gap-5 chica:py-6">
       {/*
         Botón SOS (Sprint 8, tarea 8.3): primera cosa bajo el encabezado del
         perfil (que renderiza el layout, no esta página), arriba incluso del
         saludo. Ver el comentario de cabecera de `boton-sos.tsx` para el
         criterio de "menos de 2 toques desde cualquier pantalla" y por qué no
-        suma un quinto ítem a la bottom nav.
+        suma un quinto ítem a la bottom nav. Se compacta solo (token
+        `--spacing-sos-boton`); sigue full-width en los dos modos.
       */}
       <BotonSos />
 
@@ -94,7 +116,9 @@ export default async function PaginaInicio() {
         prominente de la pantalla- y arriba del saludo, para que quien abre la
         app vea de entrada que hay algo sin ver, sin tener que entrar a
         `/signos` primero. `BannerAlertasSignos` ya devuelve `null` con la
-        lista vacía, así que no hace falta un `if` acá.
+        lista vacía, así que no hace falta un `if` acá. En chica queda más
+        denso -ver el propio componente-, sin recortar ni una palabra del
+        texto clínico de cada alerta.
       */}
       <BannerAlertasSignos alertas={alertasSinVer} className="w-full max-w-sm" />
 
@@ -106,164 +130,114 @@ export default async function PaginaInicio() {
         <p className="text-base text-muted-foreground">{descripcionRelacion(permisos)}</p>
       </div>
 
-      {/* Próximo turno (Sprint 6, tarea 6.3) */}
+      {/* Próximo turno (Sprint 6, tarea 6.3). En chica, `TarjetaTurno` se
+          reorganiza a card horizontal -fecha a la izquierda, datos a la
+          derecha- desde adentro del propio componente (`components/turnos/tarjeta-turno.tsx`),
+          así la mejora alcanza también a `/turnos` sin duplicar código acá. */}
       <ProximoTurno />
 
-      {/*
-        Acceso a /medicacion (Sprint 7, tarea 7.2). Sin slot propio en la
-        bottom nav todavía -llega en el Sprint 9-, así que por ahora el
-        camino de entrada es esta card simple: sin fetch propio (a
-        diferencia de `ProximoTurno`, que sí resuelve datos), es solo un
-        acceso directo, igual para cualquier permiso -Diego (`can_view`)
-        también puede ver la medicación de Roberto, solo que sin botones de
-        edición dentro de la pantalla-.
-      */}
-      <Link
-        href="/medicacion"
-        className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
-      >
-        <span
-          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-          aria-hidden="true"
-        >
-          <PillIcon className="size-5" />
-        </span>
-        <span className="flex flex-col text-left">
-          <span className="text-base font-semibold text-foreground">Medicación</span>
-          <span className="text-sm text-muted-foreground">
-            {textoResumenTomas(tomasDeHoy.length, tomasPendientesHoy)}
-          </span>
-        </span>
-      </Link>
+      {/* Grilla de accesos directos (Sprint 7 a 10): en grande, columna
+          apilada de siempre. En chica, grilla de 2 columnas de tiles
+          compactos -ver el comentario de cabecera de este archivo-. */}
+      <div className="flex w-full max-w-sm flex-col gap-8 chica:grid chica:max-w-none chica:grid-cols-2 chica:gap-3">
+        {/*
+          Acceso a /medicacion (Sprint 7, tarea 7.2). Sin slot propio en la
+          bottom nav todavía -llega en el Sprint 9-, así que por ahora el
+          camino de entrada es esta card simple: sin fetch propio (a
+          diferencia de `ProximoTurno`, que sí resuelve datos), es solo un
+          acceso directo, igual para cualquier permiso -Diego (`can_view`)
+          también puede ver la medicación de Roberto, solo que sin botones de
+          edición dentro de la pantalla-.
+        */}
+        <TarjetaAcceso
+          href="/medicacion"
+          Icono={PillIcon}
+          titulo="Medicación"
+          descripcion={textoResumenTomas(tomasDeHoy.length, tomasPendientesHoy)}
+        />
 
-      {/*
-        Acceso a /signos (Sprint 9, tarea 9.1). Mismo patrón que la card de
-        Coberturas de abajo: sin fetch propio -"Card simple", ni contador ni
-        consulta a la base, el resumen con los últimos valores vive en la
-        pantalla de destino-, igual para cualquier permiso: Diego (`can_view`)
-        también puede ver los signos vitales de Roberto, solo que sin los
-        botones de carga dentro de la pantalla.
-      */}
-      <Link
-        href="/signos"
-        className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
-      >
-        <span
-          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-          aria-hidden="true"
-        >
-          <ActivityIcon className="size-5" />
-        </span>
-        <span className="flex flex-col text-left">
-          <span className="text-base font-semibold text-foreground">Signos vitales</span>
-          <span className="text-sm text-muted-foreground">Cargar tensión, glucemia y peso</span>
-        </span>
-      </Link>
+        {/*
+          Acceso a /signos (Sprint 9, tarea 9.1). Mismo patrón que la card de
+          Coberturas de abajo: sin fetch propio -"Card simple", ni contador ni
+          consulta a la base, el resumen con los últimos valores vive en la
+          pantalla de destino-, igual para cualquier permiso: Diego (`can_view`)
+          también puede ver los signos vitales de Roberto, solo que sin los
+          botones de carga dentro de la pantalla.
+        */}
+        <TarjetaAcceso
+          href="/signos"
+          Icono={ActivityIcon}
+          titulo="Signos vitales"
+          descripcion="Cargar tensión, glucemia y peso"
+        />
 
-      {/*
-        Acceso a /coberturas (Sprint 8, tarea 8.1). Mismo patrón que la card
-        de Medicación de arriba: sin fetch propio -es un acceso directo, no
-        un resumen-, igual para cualquier permiso. "Card simple", como pide
-        el criterio de la tarea: sin contador ni consulta a la base.
-      */}
-      <Link
-        href="/coberturas"
-        className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
-      >
-        <span
-          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-          aria-hidden="true"
-        >
-          <CreditCardIcon className="size-5" />
-        </span>
-        <span className="flex flex-col text-left">
-          <span className="text-base font-semibold text-foreground">Coberturas</span>
-          <span className="text-sm text-muted-foreground">Obra social, prepaga y credenciales</span>
-        </span>
-      </Link>
+        {/*
+          Acceso a /coberturas (Sprint 8, tarea 8.1). Mismo patrón que la card
+          de Medicación de arriba: sin fetch propio -es un acceso directo, no
+          un resumen-, igual para cualquier permiso. "Card simple", como pide
+          el criterio de la tarea: sin contador ni consulta a la base.
+        */}
+        <TarjetaAcceso
+          href="/coberturas"
+          Icono={CreditCardIcon}
+          titulo="Coberturas"
+          descripcion="Obra social, prepaga y credenciales"
+        />
 
-      {/*
-        Acceso a /medicos (Sprint 10, tarea 10.1). Mismo patrón que la card
-        de Coberturas de arriba: sin fetch propio -es un acceso directo, no
-        un resumen-, igual para cualquier permiso. Sin slot propio en la
-        bottom nav (Sprint 10 no tiene uno libre, mismo motivo que
-        `/medicacion` y `/coberturas`).
-      */}
-      <Link
-        href="/medicos"
-        className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
-      >
-        <span
-          className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-          aria-hidden="true"
-        >
-          <StethoscopeIcon className="size-5" />
-        </span>
-        <span className="flex flex-col text-left">
-          <span className="text-base font-semibold text-foreground">Médicos</span>
-          <span className="text-sm text-muted-foreground">Directorio de profesionales y contacto</span>
-        </span>
-      </Link>
+        {/*
+          Acceso a /medicos (Sprint 10, tarea 10.1). Mismo patrón que la card
+          de Coberturas de arriba: sin fetch propio -es un acceso directo, no
+          un resumen-, igual para cualquier permiso. Sin slot propio en la
+          bottom nav (Sprint 10 no tiene uno libre, mismo motivo que
+          `/medicacion` y `/coberturas`).
+        */}
+        <TarjetaAcceso
+          href="/medicos"
+          Icono={StethoscopeIcon}
+          titulo="Médicos"
+          descripcion="Directorio de profesionales y contacto"
+        />
 
-      {/*
-        Acceso a /ficha (Sprint 10, tarea 10.4): la hoja de resumen para
-        consulta, generada por IA a partir del contexto clínico minimizado
-        (tarea 10.2). Gateada por `canUpload` -mismo piso mínimo que exige
-        `POST /api/ficha/generar`, ver el encabezado de
-        `app/api/ficha/generar/route.ts`-: un `can_view` puro que forzara la
-        URL igual rebotaría a `/inicio` sin ver el botón "Generar ficha"
-        (`app/(app)/(sin-nav)/ficha/page.tsx`), así que ni se le ofrece la
-        card.
-      */}
-      {permisos.canUpload && (
-        <Link
-          href="/ficha"
-          className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
-        >
-          <span
-            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-            aria-hidden="true"
-          >
-            <ClipboardListIcon className="size-5" />
-          </span>
-          <span className="flex flex-col text-left">
-            <span className="text-base font-semibold text-foreground">Ficha para el médico</span>
-            <span className="text-sm text-muted-foreground">
-              Resumen de una página para imprimir o compartir
-            </span>
-          </span>
-        </Link>
-      )}
+        {/*
+          Acceso a /ficha (Sprint 10, tarea 10.4): la hoja de resumen para
+          consulta, generada por IA a partir del contexto clínico minimizado
+          (tarea 10.2). Gateada por `canUpload` -mismo piso mínimo que exige
+          `POST /api/ficha/generar`, ver el encabezado de
+          `app/api/ficha/generar/route.ts`-: un `can_view` puro que forzara la
+          URL igual rebotaría a `/inicio` sin ver el botón "Generar ficha"
+          (`app/(app)/(sin-nav)/ficha/page.tsx`), así que ni se le ofrece la
+          card.
+        */}
+        {permisos.canUpload && (
+          <TarjetaAcceso
+            href="/ficha"
+            Icono={ClipboardListIcon}
+            titulo="Ficha para el médico"
+            descripcion="Resumen de una página para imprimir o compartir"
+          />
+        )}
 
-      {/*
-        Acceso a /perfil/sos (Sprint 8, tarea 8.2): la pantalla de EDICIÓN de
-        los datos vitales. La entrada GRANDE a la ficha de lectura llega con
-        el botón SOS de la tarea 8.3 (`components/inicio/boton-sos.tsx`) y no
-        es esta card.
+        {/*
+          Acceso a /perfil/sos (Sprint 8, tarea 8.2): la pantalla de EDICIÓN de
+          los datos vitales. La entrada GRANDE a la ficha de lectura llega con
+          el botón SOS de la tarea 8.3 (`components/inicio/boton-sos.tsx`) y no
+          es esta card.
 
-        A diferencia de las dos de arriba, esta SÍ depende del permiso:
-        `/perfil/sos` exige `can_manage` (espeja
-        `profiles_update_administrador`, nota ② de docs/modelo-permisos.md) y
-        redirige a `/inicio` a quien no lo tenga. Mostrarle la card a un
-        `can_view` sería ofrecerle un camino que rebota.
-      */}
-      {permisos.canManage && (
-        <Link
-          href="/perfil/sos"
-          className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
-        >
-          <span
-            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
-            aria-hidden="true"
-          >
-            <HeartPulseIcon className="size-5" />
-          </span>
-          <span className="flex flex-col text-left">
-            <span className="text-base font-semibold text-foreground">Ficha SOS</span>
-            <span className="text-sm text-muted-foreground">Editar datos vitales</span>
-          </span>
-        </Link>
-      )}
+          A diferencia de las de arriba, esta SÍ depende del permiso:
+          `/perfil/sos` exige `can_manage` (espeja
+          `profiles_update_administrador`, nota ② de docs/modelo-permisos.md) y
+          redirige a `/inicio` a quien no lo tenga. Mostrarle la card a un
+          `can_view` sería ofrecerle un camino que rebota.
+        */}
+        {permisos.canManage && (
+          <TarjetaAcceso
+            href="/perfil/sos"
+            Icono={HeartPulseIcon}
+            titulo="Ficha SOS"
+            descripcion="Editar datos vitales"
+          />
+        )}
+      </div>
 
       {/*
         El banner de recordatorios se renderiza SIEMPRE desde el servidor y
@@ -321,4 +295,56 @@ function textoResumenTomas(totalHoy: number, pendientes: number): string {
     return "Todas las tomas de hoy están registradas"
   }
   return `${pendientes} ${pendientes === 1 ? "toma pendiente" : "tomas pendientes"} hoy`
+}
+
+/**
+ * Una card de acceso directo de `/inicio` (Medicación, Signos vitales,
+ * Coberturas, Médicos, Ficha para el médico, Ficha SOS). Factorizada en el
+ * Sprint 13 (tarea 13.2) para que las seis compartan EXACTAMENTE la misma
+ * clase base y el mismo rediseño `chica:` -antes eran seis bloques JSX
+ * copiados a mano, la clase de bug que esta extracción evita-.
+ *
+ * En grande: fila con ícono a la izquierda, título y bajada apilados a la
+ * derecha -sin cambios, es literalmente el markup que ya existía-.
+ *
+ * En chica: tile vertical -ícono arriba, título centrado abajo- SIN la
+ * bajada. La bajada es ayuda contextual ("Obra social, prepaga y
+ * credenciales"), no un dato clínico: ocultarla en el modo compacto respeta
+ * la regla 5 de docs/densidad.md §4 ("la densidad no saca contenido") porque
+ * esa regla protege datos, no texto de ayuda, y el destino de la card sigue
+ * mostrando el detalle completo.
+ */
+function TarjetaAcceso({
+  href,
+  Icono,
+  titulo,
+  descripcion,
+}: {
+  href: string
+  Icono: LucideIcon
+  titulo: string
+  descripcion: string
+}) {
+  return (
+    <Link
+      href={href}
+      className={cn(
+        CLASE_TARJETA_BASE,
+        CLASE_TARJETA_INTERACTIVA,
+        "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)",
+        "chica:max-w-none chica:flex-col chica:justify-center chica:gap-1.5 chica:px-3 chica:py-4 chica:text-center",
+      )}
+    >
+      <span
+        className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+        aria-hidden="true"
+      >
+        <Icono className="size-5" />
+      </span>
+      <span className="flex flex-col text-left chica:items-center chica:text-center">
+        <span className="text-base font-semibold text-foreground">{titulo}</span>
+        <span className="text-sm text-muted-foreground chica:hidden">{descripcion}</span>
+      </span>
+    </Link>
+  )
 }

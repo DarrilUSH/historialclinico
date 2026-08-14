@@ -39,7 +39,7 @@ interface EncabezadoPerfilProps {
 export function EncabezadoPerfil({ perfil, esPropio, tamano }: EncabezadoPerfilProps) {
   return (
     <header className="sticky top-0 z-30 border-b border-borde-sutil bg-background">
-      <div className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-2.5">
+      <div className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-2.5 chica:gap-1.5 chica:px-3 chica:py-2">
         <span
           className={cn(
             "flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-avatar-foreground",
@@ -64,7 +64,7 @@ export function EncabezadoPerfil({ perfil, esPropio, tamano }: EncabezadoPerfilP
 
         <Link
           href="/perfiles"
-          className="objetivo-tactil inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-primary transition-colors duration-150 ease-salida hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="objetivo-tactil inline-flex shrink-0 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-primary transition-colors duration-150 ease-salida hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 chica:gap-1 chica:px-2"
         >
           <ArrowLeftRightIcon className="size-4" aria-hidden="true" />
           Cambiar

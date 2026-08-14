@@ -80,6 +80,7 @@ export function BotonTamano({ tamano }: BotonTamanoProps) {
         "objetivo-tactil inline-flex shrink-0 items-baseline justify-center gap-0.5 rounded-lg px-2",
         "font-semibold transition-colors duration-150 ease-salida",
         "hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+        "chica:px-1.5",
       )}
     >
       {/* Las dos letras son una imagen hecha de tipografía -la "A" grande y la

@@ -80,7 +80,7 @@ export async function ProximoTurno() {
       ) : (
         /* Sin turno */
         <>
-          <Tarjeta className="flex flex-col items-center gap-4 px-(--card-spacing) py-8 text-center">
+          <Tarjeta className="flex flex-col items-center gap-4 px-(--card-spacing) py-8 text-center chica:gap-3 chica:py-6">
             <CalendarIcon className="size-12 text-muted-foreground" aria-hidden="true" />
             <div>
               <p className="text-lg font-semibold text-foreground">No tenés turnos programados</p>

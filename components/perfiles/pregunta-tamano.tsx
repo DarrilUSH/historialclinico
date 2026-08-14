@@ -46,10 +46,17 @@ export function PreguntaTamano({ tamano }: PreguntaTamanoProps) {
   return (
     <section
       aria-labelledby="titulo-pregunta-tamano"
-      className="flex w-full max-w-2xl flex-col items-center gap-4"
+      className="flex w-full max-w-2xl flex-col items-center gap-4 chica:gap-2.5"
     >
-      <div className="flex flex-col items-center gap-1 text-center">
-        <h2 id="titulo-pregunta-tamano" className="text-xl font-semibold text-foreground">
+      {/* Más discreta en chica -título un escalón más chico, menos aire-,
+          pero SIGUE VISIBLE (ROADMAP Sprint 13, "opción A"): quien ya activó
+          el modo compacto sigue teniendo que poder verla y cambiarla, no
+          hace falta ir a buscarla a un menú. */}
+      <div className="flex flex-col items-center gap-1 text-center chica:gap-0.5">
+        <h2
+          id="titulo-pregunta-tamano"
+          className="text-xl font-semibold text-foreground chica:text-lg"
+        >
           ¿Cómo preferís ver la app?
         </h2>
         <p className="text-sm text-muted-foreground">
@@ -67,7 +74,7 @@ export function PreguntaTamano({ tamano }: PreguntaTamanoProps) {
       <div
         role="group"
         aria-labelledby="titulo-pregunta-tamano"
-        className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2"
+        className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 chica:gap-2"
       >
         {TAMANOS.map((modo) => {
           const elegido = modo === tamano
@@ -81,6 +88,7 @@ export function PreguntaTamano({ tamano }: PreguntaTamanoProps) {
                   "flex w-full min-h-tactil-amplio flex-col items-start gap-1 rounded-xl border bg-card p-4 text-left",
                   "transition-[border-color,box-shadow] duration-[var(--duracion-media)] ease-salida",
                   "hover:border-primary focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                  "chica:min-h-tactil chica:gap-0.5 chica:p-3",
                   elegido
                     ? "border-primary shadow-suave ring-1 ring-primary"
                     : "border-border",

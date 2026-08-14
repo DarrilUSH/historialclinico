@@ -33,8 +33,40 @@ Samsung Galaxy A71 (SM-A715F), Android 13, Chrome — 2026-08-13, vía ADB (`adb
 | sprint13-inicio-grande.png | `/inicio` en modo GRANDE, tomada ANTES de tocar nada: es la referencia contra la que se compara que el rediseño no mueva un píxel del modo por defecto. El botón A/a ya está en el encabezado con la "A" resaltada |
 | sprint13-inicio-chica.png | El mismo `/inicio`, misma sesión y mismo perfil, en modo CHICA tras un TAP real: el título del botón SOS entra en UNA línea en vez de dos, las DOS alertas de signos vitales entran completas con su botón "Marcar todas como vistas" (en grande la segunda quedaba cortada), la bottom nav baja de 85,5px a 72px y el nombre "Viendo a Roberto Gó…" se trunca menos. La "a" del conmutador quedó resaltada |
 | sprint13-inicio-vuelta-grande.png | Vuelta a GRANDE con otro TAP en A/a, sin recargar: la pantalla queda idéntica a `sprint13-inicio-grande.png` —mismo salto de línea del SOS, mismo recorte de la segunda alerta, misma altura de nav—, que es el criterio "el modo grande no cambia ni un píxel" verificado en el dispositivo |
+| sprint13-t1-grande-antes-inicio.png | Tanda 1 (13.2, shell + inicio + navegación): baseline de `/inicio` en GRANDE, tomada ANTES de tocar un solo archivo de esta tanda — sesión de María sobre Roberto, banner de 2 alertas de signos vitales visible |
+| sprint13-t1-grande-antes-perfiles.png | Baseline de `/perfiles` en GRANDE, ANTES de tocar nada: grilla de 2 perfiles (María "Tu perfil", Roberto "Gestionado por vos") |
+| sprint13-t1-grande-despues-inicio.png | `/inicio` en GRANDE, tomada DESPUÉS del rediseño completo de la tanda: comparada contra `sprint13-t1-grande-antes-inicio.png` es idéntica al píxel — mismo encabezado, mismo SOS, mismo banner, mismo turno apilado, mismas 6 cards de acceso en columna con su bajada completa. Cero diferencias |
+| sprint13-t1-grande-despues-perfiles.png | `/perfiles` en GRANDE, DESPUÉS: idéntica a `sprint13-t1-grande-antes-perfiles.png` — mismo tamaño de avatar (96px), mismo `min-h-48`, misma pregunta de tamaño sin comprimir |
+| sprint13-t1-chica-inicio.png | `/inicio` en CHICA tras el rediseño (tarea 13.2), tramo superior: el encabezado ahora muestra "Viendo a Roberto Gómez" COMPLETO (sin truncar, confirmado además por `scrollWidth === clientWidth` vía CDP), el banner de alertas entra con las DOS alertas completas MÁS el botón "Marcar todas como vistas" en la misma pantalla sin scrollear (en grande hacía falta scrollear para ver el segundo botón) |
+| sprint13-t1-chica-inicio-turno.png | Próximo turno reorganizado a card horizontal: fecha ("16 De Agosto De 2026"), hora ("14:55 hs"), "en 2 días" y el badge "Pendiente" en una columna angosta a la izquierda con un divisor vertical, especialidad/médico/lugar a la derecha — los tres botones de acción (Cómo llegar / Pedir viaje / Al calendario / Editar) siguen debajo a ancho completo, sin recortar ninguno |
+| sprint13-t1-chica-inicio-grilla.png | Grilla de 2 columnas de las 6 cards de acceso (Medicación, Signos vitales, Coberturas, Médicos, Ficha para el médico, Ficha SOS): ícono + título en una sola línea cada una, sin la bajada explicativa larga (es ayuda contextual, no dato clínico) — confirmado sin truncar por CDP (`scrollWidth === clientWidth` en las 6) |
+| sprint13-t1-chica-perfiles.png | `/perfiles` en CHICA: los dos perfiles con avatar más chico (64px) y `min-h-36` en vez de `min-h-48`, y la pregunta de tamaño más discreta (título `text-lg` en vez de `text-xl`, botones más ajustados) pero SIGUE VISIBLE, con "Letra chica" marcada Elegida |
 
 Flujo verificado con toques e ingreso de texto reales por ADB: login de María → selección del perfil gestionado de Roberto → inicio. El camino de error (submit vacío) también se verificó en pantalla física.
+
+## Sprint 13 · tarea 13.2 — Tanda 1: shell, inicio y navegación compactos — verificación completa
+
+**2026-08-14.** Sesión viva de María sobre el perfil gestionado de Roberto (la misma sesión de sprints anteriores, sin volver a loguearse), `adb reverse tcp:3000 tcp:3000` seguía activo.
+
+**Regla de oro verificada con capturas antes/después.** `/inicio` y `/perfiles` en modo GRANDE se capturaron ANTES de tocar un solo archivo (`sprint13-t1-grande-antes-*.png`) y de nuevo DESPUÉS de terminar el rediseño completo (`sprint13-t1-grande-despues-*.png`), con la misma sesión y el mismo perfil activo. Comparadas una contra otra: cero diferencias — mismo encabezado, mismo botón SOS, mismo banner de alertas, mismo próximo turno apilado, mismas 6 cards de acceso en columna con su bajada completa, misma grilla de perfiles a tamaño completo. Todos los cambios de esta tanda quedaron detrás de la variante `chica:` o del atributo `data-tamano="chica"`, tal como exige `docs/densidad.md` §4 regla 1.
+
+**Rediseño verificado en CHICA, con un TAP real en el botón A/a** (no simulado): `/inicio` reorganiza las 6 cards de acceso directo (Medicación, Signos vitales, Coberturas, Médicos, Ficha para el médico, Ficha SOS) en una grilla de 2 columnas de tiles compactos —ícono + título, sin la bajada larga—, factorizados en un único componente `TarjetaAcceso` (`app/(app)/(con-nav)/inicio/page.tsx`) para que las seis compartan exactamente el mismo rediseño. El próximo turno se reorganiza a una card horizontal —fecha/hora/badge en una columna angosta a la izquierda con un divisor, especialidad/médico/lugar a la derecha— implementada directamente en `components/turnos/tarjeta-turno.tsx` (compartido con `/turnos`, que se benefició del mismo cambio sin duplicar código, aunque esa pantalla es de la Tanda 3). El banner de alertas de signos vitales queda más denso (menos padding, sin recortar ni una palabra del texto clínico de cada alerta). El selector de perfiles (`/perfiles`) muestra perfiles más chicos (avatar 64px en vez de 96px) y la pregunta "¿Cómo preferís ver la app?" más discreta pero siempre visible.
+
+**Medición real de touch targets vía CDP** (`adb forward tcp:9222 localabstract:chrome_devtools_remote` + `Runtime.evaluate` con WebSocket nativo de Node 24, sin librerías): con la sesión en CHICA y `window.innerWidth === 411` (el ancho CSS real del Galaxy A71, confirmando que el rediseño se verificó en el viewport físico y no en una emulación de escritorio):
+
+| Elemento | Medición real | Piso exigido |
+|---|---|---|
+| Tile de la grilla de accesos (6) | 183,7 × 106px | ≥40px |
+| Botón SOS | 379,4 × 58,5px | ≥40px (token `--spacing-sos-boton` compacto) |
+| Cada ítem de la bottom nav (4) | 102,9 × 72px | ≥40px |
+| Botón "Cambiar" del encabezado | 93,3 × 40,5px | ≥40px — exacto al piso `--spacing-tactil` compacto |
+| Conmutador A/a del encabezado | 40,5 × 40,5px | ≥40px — exacto al piso |
+| Tarjeta de perfil (`/perfiles`) | 379,4 × 182,2px | ≥40px |
+| Opción de tamaño (`/perfiles`) | 379,4 × 78–95px | ≥40px |
+
+Los siete dieron igual o por encima del piso de 40px. Además, `document.documentElement.scrollWidth === document.documentElement.clientWidth` (411 = 411) confirmó **sin scroll horizontal** en `/inicio` y en `/turnos`, y los 6 títulos de la grilla más el nombre del encabezado ("Viendo a Roberto Gómez") dieron `scrollWidth === clientWidth` elemento por elemento, es decir **cero truncamiento** en el ancho real del dispositivo — no una suposición sobre 412px, sino la medición contra los 411px reales que reportó el propio navegador del teléfono.
+
+**Suites completas corridas sobre el código de esta tanda:** `node scripts/verificar-contraste.mjs` → 196/196 pares PASS, 0 fallas (sin tokens de color nuevos, esta tanda es puramente estructural); `npx tsc --noEmit` limpio; `npm run test` → 733/733 tests; `npm run build` → build de producción exitoso, 44 rutas; `npx eslint` sobre los 8 archivos tocados, limpio.
 
 ## Receta de login por ADB (Chrome + password manager de Google)
 

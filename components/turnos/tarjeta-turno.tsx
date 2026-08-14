@@ -22,6 +22,23 @@
  * evita `components/base/tarjeta.tsx#TarjetaInteractiva` para el caso
  * `<button>` dentro de `<Link>`-. Por eso "Editar" es un botón chico y
  * explícito en el pie, no toda la superficie de la tarjeta.
+ *
+ * ## Modo chica (Sprint 13, tarea 13.2): cabecera horizontal
+ *
+ * En grande, la cabecera es dos bloques apilados -fecha/hora arriba (con el
+ * badge de estado flotando a la derecha por `justify-between`), especialidad
+ * /médico/lugar debajo-. En chica se reorganiza a DOS COLUMNAS: fecha y hora
+ * a la izquierda (con el badge debajo, en la misma columna angosta),
+ * especialidad/médico/lugar a la derecha. El pie de acciones (Cómo llegar /
+ * Pedir viaje / Editar) sigue debajo, a ancho completo en los dos modos -son
+ * los controles interactivos, no se comprimen horizontalmente-.
+ *
+ * El cambio es puramente de EJE (columna → fila): el orden de los elementos
+ * en el DOM no se toca, así que el orden de lectura de un lector de pantalla
+ * es el mismo en los dos modos (fecha, hora, cuánto falta, estado,
+ * especialidad, médico, lugar, acciones). Compartido por `/inicio`
+ * (`components/inicio/proximo-turno.tsx`) y por la lista completa de
+ * `/turnos`: un solo lugar para el rediseño, sin duplicar el componente.
  */
 
 import Link from "next/link"
@@ -64,49 +81,56 @@ export function TarjetaTurno({ turno, puedeEditar, ahora = new Date() }: Tarjeta
 
   return (
     <Tarjeta className={cn("gap-3 px-(--card-spacing)", cancelado && "opacity-60")}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex flex-col gap-0.5">
-          <p
-            className={cn(
-              "text-xl font-semibold text-balance text-foreground capitalize",
-              cancelado && "line-through decoration-2",
-            )}
-          >
-            {formatearFechaLargaTurno(turno.appointment_date)}
-          </p>
-          <p
-            className={cn(
-              "numeros-clinicos text-2xl font-bold text-foreground",
-              cancelado && "line-through decoration-2",
-            )}
-          >
-            {formatearHoraTurno(turno.appointment_date)} hs
-          </p>
-          <p className="text-sm text-muted-foreground">{tiempoRelativo(turno.appointment_date, ahora)}</p>
+      <div className="flex flex-col gap-3 chica:flex-row chica:items-stretch">
+        <div className="flex flex-wrap items-start justify-between gap-3 chica:w-[38%] chica:shrink-0 chica:flex-col chica:flex-nowrap chica:items-start chica:justify-start chica:gap-2 chica:border-r chica:border-borde-sutil chica:pr-3">
+          <div className="flex flex-col gap-0.5">
+            <p
+              className={cn(
+                "text-xl font-semibold text-balance text-foreground capitalize",
+                cancelado && "line-through decoration-2",
+              )}
+            >
+              {formatearFechaLargaTurno(turno.appointment_date)}
+            </p>
+            <p
+              className={cn(
+                "numeros-clinicos text-2xl font-bold text-foreground",
+                cancelado && "line-through decoration-2",
+              )}
+            >
+              {formatearHoraTurno(turno.appointment_date)} hs
+            </p>
+            <p className="text-sm text-muted-foreground">{tiempoRelativo(turno.appointment_date, ahora)}</p>
+          </div>
+
+          <BadgeEstadoTurno estado={turno.status} />
         </div>
 
-        <BadgeEstadoTurno estado={turno.status} />
-      </div>
-
-      <div className={cn("flex flex-col gap-1.5", cancelado && "line-through decoration-2")}>
-        <p className="flex items-center gap-2 text-lg font-medium text-foreground">
-          <StethoscopeIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />
-          {turno.specialty}
-        </p>
-
-        {turno.doctor_name && (
-          <p className="flex items-center gap-2 text-base text-muted-foreground">
-            <UserRoundIcon className="size-4 shrink-0" aria-hidden="true" />
-            {turno.doctor_name}
+        <div
+          className={cn(
+            "flex flex-col gap-1.5 chica:min-w-0 chica:flex-1 chica:justify-center",
+            cancelado && "line-through decoration-2",
+          )}
+        >
+          <p className="flex items-center gap-2 text-lg font-medium text-foreground">
+            <StethoscopeIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />
+            {turno.specialty}
           </p>
-        )}
 
-        {lugar && (
-          <p className="flex items-center gap-2 text-base text-muted-foreground">
-            <MapPinIcon className="size-4 shrink-0" aria-hidden="true" />
-            {lugar}
-          </p>
-        )}
+          {turno.doctor_name && (
+            <p className="flex items-center gap-2 text-base text-muted-foreground">
+              <UserRoundIcon className="size-4 shrink-0" aria-hidden="true" />
+              {turno.doctor_name}
+            </p>
+          )}
+
+          {lugar && (
+            <p className="flex items-center gap-2 text-base text-muted-foreground">
+              <MapPinIcon className="size-4 shrink-0" aria-hidden="true" />
+              {lugar}
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Botones de logística + Editar */}

@@ -78,13 +78,13 @@ export function BannerAlertasSignos({
       estatica
       className={className}
     >
-      <ul className="mt-2 flex flex-col gap-3">
+      <ul className="mt-2 flex flex-col gap-3 chica:mt-1.5 chica:gap-2">
         {alertas.map((alerta) => (
           <FilaAlerta key={alerta.id} alerta={alerta} />
         ))}
       </ul>
       {!esUna && (
-        <div className="mt-3">
+        <div className="mt-3 chica:mt-2">
           <BotonMarcarTodas ids={alertas.map((alerta) => alerta.id)} />
         </div>
       )}
@@ -96,7 +96,10 @@ function FilaAlerta({ alerta }: { alerta: AlertaSinVer }) {
   const [estado, enviar, pendiente] = useActionState(marcarAlertaVista, ESTADO_INICIAL)
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-advertencia/30 bg-background/60 p-3">
+    <li className="flex flex-col gap-2 rounded-lg border border-advertencia/30 bg-background/60 p-3 chica:gap-1.5 chica:p-2">
+      {/* El mensaje clínico NUNCA se recorta -ni `truncate` ni `line-clamp`-
+          en ningún modo: docs/densidad.md §4 regla 5. Lo que se aprieta en
+          chica es el aire alrededor (el `<li>` de arriba), no el texto. */}
       <p>{alerta.mensaje}</p>
       {estado.error && (
         <Alerta variante="error" className="text-sm">

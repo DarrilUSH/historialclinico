@@ -46,7 +46,7 @@ export function SelectorPerfiles({ perfiles }: SelectorPerfilesProps) {
   }
 
   return (
-    <div className="grid w-full max-w-2xl grid-cols-1 gap-5 sm:grid-cols-2">
+    <div className="grid w-full max-w-2xl grid-cols-1 gap-5 sm:grid-cols-2 chica:gap-3">
       {perfiles.map(({ perfil, esPropio, canUpload, canManage }) => (
         <form key={perfil.id} action={elegirPerfil.bind(null, perfil.id)}>
           <TarjetaPerfil
@@ -76,11 +76,17 @@ function TarjetaPerfil({
         "hover:-translate-y-0.5 hover:border-primary hover:shadow-elevada",
         "active:translate-y-0 active:scale-[0.99]",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+        // Modo chica (Sprint 13, tarea 13.2): perfiles más chicos -menos
+        // padding, avatar más chico, menor alto mínimo- para que entren más
+        // sin scroll. El nombre y el badge de relación no se tocan: siguen
+        // completos, solo el aire alrededor se aprieta.
+        "chica:min-h-36 chica:gap-2.5 chica:p-5",
       )}
     >
       <span
         className={cn(
           "flex size-24 shrink-0 items-center justify-center rounded-full text-3xl font-semibold text-avatar-foreground",
+          "chica:size-16 chica:text-xl",
           colorAvatarPara(perfil.id),
         )}
         aria-hidden="true"
