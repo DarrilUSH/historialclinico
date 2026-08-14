@@ -15,12 +15,19 @@
  * filas → serie NO pasó por el servidor -es pura, corre bien en el cliente-,
  * así que cambiar de signo o de período es instantáneo, sin ningún viaje de
  * red.
+ *
+ * `GraficoSigno` se carga con `next/dynamic({ ssr: false })` (Sprint 11,
+ * tarea 11.6), mismo motivo y mismo esqueleto compartido
+ * (`EsqueletoGrafico`) que `PanelTendencias` documenta para `GraficoMetrica`:
+ * Recharts queda fuera del First Load JS de esta pantalla, sin CLS al
+ * terminar de bajar el chunk porque el esqueleto ya reserva su alto.
  */
 
 import * as React from "react"
+import dynamic from "next/dynamic"
 
 import { BotonExportar } from "@/components/signos/boton-exportar"
-import { GraficoSigno } from "@/components/signos/grafico-signo"
+import { EsqueletoGrafico } from "@/components/graficos/esqueleto-grafico"
 import { SelectorPeriodoSigno } from "@/components/signos/selector-periodo-signo"
 import { SelectorSignoTipo } from "@/components/signos/selector-signo-tipo"
 import { parsearPeriodoSignos, type PeriodoSignos } from "@/lib/signos/periodo"
@@ -31,6 +38,11 @@ import {
 } from "@/lib/signos/series"
 import { TIPOS_SIGNO, type SignoTipo } from "@/lib/signos/tipos"
 import type { UmbralesSignos } from "@/lib/signos/umbrales"
+
+const GraficoSigno = dynamic(
+  () => import("@/components/signos/grafico-signo").then((mod) => mod.GraficoSigno),
+  { ssr: false, loading: () => <EsqueletoGrafico /> },
+)
 
 export interface PanelHistorialSignosProps {
   historial: Record<SignoTipo, FilaVitalSignParaSerie[]>

@@ -33,8 +33,7 @@ import {
   StethoscopeIcon,
 } from "lucide-react"
 
-import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
-import { BotonInstalar } from "@/components/pwa/boton-instalar"
+import { AccionesDiferidasInicio } from "@/components/inicio/acciones-diferidas"
 import { BotonSos } from "@/components/inicio/boton-sos"
 import { ProximoTurno } from "@/components/inicio/proximo-turno"
 import { CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA } from "@/components/base/tarjeta"
@@ -277,16 +276,17 @@ export default async function PaginaInicio() {
         la migración de RLS). Cambiar de perfil no tiene que ofrecer activar
         de nuevo lo que ya está activo.
       */}
-      <ActivarNotificaciones />
-
       {/*
-        Botón de instalación de la PWA (Sprint 11, tarea 11.1): discreto, al
-        final de la pantalla, y solo visible si el navegador entregó
-        `beforeinstallprompt` y la app todavía no corre instalada. En iOS
-        (sin ese evento) y con la app ya instalada, `BotonInstalar` devuelve
-        `null` — ver su encabezado.
+        `ActivarNotificaciones` (Sprint 6.3) y `BotonInstalar` (Sprint 11.1,
+        discreto, al final de la pantalla, solo visible si el navegador
+        entregó `beforeinstallprompt` y la app todavía no corre instalada —
+        en iOS, sin ese evento, y con la app ya instalada, devuelve `null`)
+        viven detrás de `AccionesDiferidasInicio` desde la tarea 11.6: el
+        mismo componente, cargado con `next/dynamic({ ssr: false })` para
+        sacar su JS del First Load de esta pantalla — ver el encabezado de
+        `components/inicio/acciones-diferidas.tsx`.
       */}
-      <BotonInstalar />
+      <AccionesDiferidasInicio />
     </div>
   )
 }

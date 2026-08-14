@@ -12,15 +12,31 @@
  * `app/(app)/(con-nav)/estudios/tendencias/page.tsx` (Server Component,
  * dentro del `<Suspense key={periodo}>`): este componente nunca toca
  * Supabase.
+ *
+ * `GraficoMetrica` se carga con `next/dynamic({ ssr: false })` (Sprint 11,
+ * tarea 11.6): es el único punto de la app que importa Recharts para esta
+ * pantalla, y este ya es un Client Component -el `ssr: false` funciona acá
+ * porque el `dynamic()` vive dentro de un archivo "use client", no en el
+ * Server Component que arma `page.tsx` (ver `node_modules/next/dist/docs/…
+ * /lazy-loading.md`: sin eso no hay code splitting real). Con `EsqueletoGrafico`
+ * como `loading`, el hueco que deja mientras baja el chunk tiene el mismo
+ * alto que el gráfico real, así que no hay salto de layout (CLS) cuando
+ * termina de cargar.
  */
 
 import * as React from "react"
+import dynamic from "next/dynamic"
 
-import { GraficoMetrica } from "@/components/estudios/grafico-metrica"
+import { EsqueletoGrafico } from "@/components/graficos/esqueleto-grafico"
 import { SelectorMetrica } from "@/components/estudios/selector-metrica"
 import { TarjetaUltimoValor } from "@/components/estudios/tarjeta-ultimo-valor"
 import type { MetricaDisponible, SerieMetrica } from "@/lib/laboratorio/series"
 import { resumenUltimoValor } from "@/lib/laboratorio/ultimo-valor"
+
+const GraficoMetrica = dynamic(
+  () => import("@/components/estudios/grafico-metrica").then((mod) => mod.GraficoMetrica),
+  { ssr: false, loading: () => <EsqueletoGrafico /> },
+)
 
 export interface PanelTendenciasProps {
   series: SerieMetrica[]
