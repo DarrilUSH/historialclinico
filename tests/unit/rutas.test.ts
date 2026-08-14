@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest"
 
 import {
+  RUTA_CRON_ALERTAS_MEDICACION,
   RUTA_CRON_RECORDATORIOS,
   destinoSeguro,
   esRutaDeApi,
@@ -50,12 +51,21 @@ describe("lib/auth/rutas.ts", () => {
     expect(esRutaPublica("/api/push/procesar-recordatorios", EN_PROD)).toBe(true)
   })
 
-  it("la excepción del barrido NO abre el resto de /api/push", () => {
+  it("el barrido de alertas de medicación también es público en producción", () => {
+    // Sprint 7.4: gemelo del anterior. Lo llama el mismo pg_cron con el mismo
+    // header `x-cron-secret` contra la misma variable CRON_SECRET.
+    expect(esRutaPublica(RUTA_CRON_ALERTAS_MEDICACION, EN_PROD)).toBe(true)
+    expect(esRutaPublica("/api/push/procesar-alertas-medicacion", EN_PROD)).toBe(true)
+  })
+
+  it("las excepciones de los barridos NO abren el resto de /api/push", () => {
     // `/api/push/probar` sigue exigiendo sesión: manda notificaciones a la
     // cuenta que llama y necesita saber quién es.
     expect(esRutaPrivada("/api/push/probar", EN_PROD)).toBe(true)
     expect(esRutaPrivada("/api/push", EN_PROD)).toBe(true)
     expect(esRutaPrivada("/api/push/procesar-recordatorios-falso", EN_PROD)).toBe(true)
+    expect(esRutaPrivada("/api/push/procesar-alertas", EN_PROD)).toBe(true)
+    expect(esRutaPrivada("/api/push/procesar-alertas-medicacion-falso", EN_PROD)).toBe(true)
   })
 
   it("la barra final no cambia la clasificación", () => {

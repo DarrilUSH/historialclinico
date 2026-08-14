@@ -60,6 +60,7 @@ Después se tocó (TAP real, `adb shell input tap`, no un click simulado) el pun
 | sprint6-maps.png | La URL de Cómo llegar abre Google Maps con el destino de Ushuaia cargado y ruta calculada (verificación del orquestador por intent; permiso de ubicación NO concedido) |
 | sprint6-push.png | **Notificación Web Push real en la bandeja del sistema** (tarea 6.3): "Prueba de recordatorios / Si ves esto en la pantalla del celular, las notificaciones funcionan", con el origen `localhost:3000`, el ícono grande de la app (cruz blanca sobre verde `--primary`) a la derecha y la silueta monocroma del `badge` a la izquierda. Salió de FCM: el circuito completo —clave VAPID, cifrado aes128gcm, Push Service de Google, service worker, bandeja de Android— funcionando de punta a punta |
 | sprint7-medicacion.png | `/medicacion` (tareas 7.2/7.3) en el perfil gestionado de Roberto: botón grande "Agregar medicación", tarjeta de Enalapril con presentación, dosis ("1 comprimido — Cada 24 horas"), panel de stock prominente ("90 días de stock · se acaba el 11 de noviembre") y acciones Editar/Suspender; Glucophage asomando debajo y bottom nav fija. Capturada por el orquestador en el cierre del 2026-08-13; sin tomas de hoy visibles porque la base estaba en estado seed (las tomas las materializa el cron o el alta) |
+| sprint7-alerta-renovacion.png | **Alertas de renovación de receta PROGRAMADAS** (tarea 7.4), dos en la bandeja: "A Roberto le quedan 4 días de Enalapril / Quedan 4 comprimidos · Conviene pedir la renovación de la receta." y la de Glucophage ("Quedan 8 comprimidos"). Nadie tocó ningún botón: las encoló `generar_alertas_medicacion()` sobre `v_medicacion_estado.necesita_renovacion` y las entregó el barrido de `/api/push/procesar-alertas-medicacion` — la segunda, por el circuito completo `pg_cron → pg_net → endpoint`. Que **se apilen** en vez de reemplazarse es lo correcto: el `tag` es `medicacion-{id}` y son dos medicaciones distintas |
 | sprint6-recordatorio.png | **Recordatorio de turno PROGRAMADO** (tarea 6.4), expandido en la bandeja: "Turno de Cardiología en 3 horas / Hoy a las 17:54 · Dr. Carlos Rodríguez · Hospital Regional Ushuaia · Venir en ayunas de 8 horas". No lo disparó ningún botón de la app: lo generó `pg_cron` sobre un turno cargado a 2h55m y lo entregó el barrido de `/api/push/procesar-recordatorios`. Debajo se ven los otros dos recordatorios reales que salieron en el mismo barrido para los turnos del seed ("Turno de Cardiología pasado mañana", "Turno de Endocrinología en una semana") |
 
 ## Sprint 6 · Web Push (tarea 6.3) — verificación completa
@@ -108,3 +109,48 @@ Un detalle que la prueba dejó a la vista y quedó anotado como límite conocido
 `docs/recordatorios.md` §9: la notificación abre `/turnos`, que muestra los
 turnos del **perfil activo**. María tenía activo su propio perfil, así que
 aterrizó en una lista vacía aunque el aviso era de un turno de Roberto.
+
+## Sprint 7 · alerta preventiva de renovación de receta (tarea 7.4) — verificación completa
+
+**2026-08-14.** Como en 6.4, nadie tocó ningún botón: los avisos los generó y los
+mandó el sistema.
+
+Antes de empezar hubo que reponer la suscripción push: un `supabase db reset`
+había dejado `push_subscriptions` con la fila ficticia del seed y nada más,
+mientras el navegador del teléfono conservaba su `PushSubscription` viva (el
+navegador no se entera de que la base se borró — el banner de `/inicio` seguiría
+diciendo "Notificaciones activadas" y no llegaría nada). Se leyó del propio
+navegador por CDP (`adb forward tcp:9222 localabstract:chrome_devtools_remote` +
+`Runtime.evaluate` de `pushManager.getSubscription()`) y se reinsertó en la base.
+Es el caso 3 de `docs/push.md` §7 visto desde el otro lado, y vale como
+recordatorio: **después de cada `db reset` la suscripción del teléfono queda
+huérfana** y hay que desactivar/activar desde el banner (o reponerla así).
+
+1. Enalapril de Roberto bajado a **4 días** de stock (`stock_units = 4`, 1 toma
+   por día) → `generar_alertas_medicacion()` encoló **1**.
+2. `POST /api/push/procesar-alertas-medicacion` con el header `x-cron-secret` →
+   `{"procesados":1,"entregas":1,"fallos":0}` y **la notificación apareció en el
+   teléfono**.
+3. Segundo y tercer barrido → `{"procesados":0,...}`. **No reenvía.**
+4. Sin header, y con un secreto incorrecto → `401` las dos veces.
+5. Glucophage bajado a 4 días y el **job completo**:
+   `disparar_alertas_medicacion()` devolvió `generadas=1 pendientes=1
+   request_id=1`, y `net._http_response` quedó con `200` y
+   `{"procesados":1,"entregas":1,"fallos":0}`. Llegó la segunda notificación
+   (`sprint7-alerta-renovacion.png`).
+6. Las dos conviven en la bandeja en vez de reemplazarse: el `tag` es
+   `medicacion-{id}` y son dos medicaciones distintas.
+
+El destinatario fue María, que tiene `can_manage` sobre Roberto; Roberto no tiene
+cuenta propia. `fallos=0` porque la suscripción ficticia del seed se revocó
+durante la prueba y se restauró después — en las corridas de 6.4 esa fila era la
+que aportaba el `fallos=1`.
+
+**Lo que quedó sin verificar en pantalla:** el banner de `/medicacion` y el
+aterrizaje del deep link con la sesión abierta. El `db reset` invalidó la sesión
+del teléfono y volver a entrar exige tipear la contraseña del seed (receta de
+login más arriba en este mismo archivo), cosa que la sesión de trabajo no hizo.
+La cadena de redirección sí se verificó sin sesión y es la correcta:
+`/medicacion?perfil=<uuid>` → `307` a
+`/login?desde=%2Fmedicacion%3Fperfil%3D<uuid>`, es decir el parámetro sobrevive
+al login y la persona aterriza donde apuntaba la notificación.

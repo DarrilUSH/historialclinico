@@ -1930,6 +1930,444 @@ select pruebas_rls.registrar('11. medicación',
 
 
 -- =============================================================================
+-- BLOQUE 12 — alerta preventiva de renovación de receta (tarea 7.4)
+-- -----------------------------------------------------------------------------
+-- `20260813070000_alertas_medicacion.sql` cierra el Sprint 7. Este bloque
+-- verifica las tres cosas que ninguna prueba de TypeScript puede ejercitar:
+--
+--   · **El umbral y la antiduplicación de 48 horas.** Son los dos criterios de
+--     aceptación literales del ROADMAP ("con stock para 4 días llega push; con
+--     stock para 6 días no llega nada; correr el job dos veces seguidas no
+--     duplica la notificación"), y los dos viven enteramente en SQL.
+--   · **El ciclo de la cola**: reclamar con lease, cerrar, y la caducidad
+--     cuando alguien repone el stock antes de que el aviso salga.
+--   · **La superficie expuesta**: a diferencia de `appointment_reminders`, esta
+--     tabla SÍ tiene una política de lectura (los `can_manage` ven sus
+--     alertas), así que hay que probar las dos direcciones — que el
+--     administrador lee y que el `can_view`/`can_upload` no—, además del
+--     TRUNCATE, que RLS no cubre.
+--
+-- Reutiliza las medicaciones del BLOQUE 11 sobre el perfil gestionado :p_g3
+-- (Rosa Medina), donde en este punto del script A tiene can_manage y B tiene
+-- can_view + can_upload pero NO can_manage — exactamente el par que hace falta.
+-- La limpieza final se lleva el perfil y, por CASCADE, sus medicaciones y sus
+-- alertas.
+--
+-- Estado heredado del BLOQUE 11 que este bloque usa a propósito:
+--   d001 "Metformina de prueba" — daily 2 horarios, stock 59 → 29 días.
+--   d002 "Ibuprofeno de prueba" — cada 8hs (3 tomas/día), stock 60 → 20 días.
+--   d005 "Sin stock de prueba"  — daily 1 horario, stock 0 → 0 días, y por lo
+--        tanto YA necesita renovación. Sirve para probar que un barrido toma
+--        más de una alerta.
+-- =============================================================================
+\echo '### BLOQUE 12 — alerta preventiva de renovación de receta'
+
+-- Renderizador legible: el estado de la alerta de una medicación, con los días
+-- que se registraron al encolarla.
+create function pruebas_rls.alerta(p_med uuid) returns text
+language sql
+as $$
+    select coalesce(
+        (select format('%s dias=%s', a.estado, a.dias_restantes)
+           from public.medication_renewal_alerts a
+          where a.medication_id = p_med
+          order by a.created_at desc
+          limit 1),
+        '(sin alerta)');
+$$;
+
+create function pruebas_rls.alertas_de(p_med uuid) returns text
+language sql
+as $$
+    select count(*)::text
+      from public.medication_renewal_alerts a
+     where a.medication_id = p_med;
+$$;
+
+
+-- --- 12.1 El umbral: 4 días avisa, 6 días no --------------------------------
+-- El umbral NO se escribe en la migración de alertas: sale de
+-- `v_medicacion_estado.necesita_renovacion`. Estos dos casos verifican que la
+-- alerta respeta esa columna y no una copia del `< 5`.
+
+-- 8 unidades ÷ 2 tomas por día = 4 días.
+update public.medications set stock_units = 8
+ where id = 'd0000000-0000-4000-8000-00000000d001';
+-- 18 unidades ÷ 3 tomas por día = 6 días.
+update public.medications set stock_units = 18
+ where id = 'd0000000-0000-4000-8000-00000000d002';
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'La vista enciende necesita_renovacion con 4 días y no con 6',
+       'Ibuprofeno=false/6, Metformina=true/4',
+       coalesce((select string_agg(split_part(name, ' ', 1) || '=' ||
+                                   necesita_renovacion || '/' || dias_restantes,
+                                   ', ' order by name)
+                   from public.v_medicacion_estado
+                  where medication_id in ('d0000000-0000-4000-8000-00000000d001',
+                                          'd0000000-0000-4000-8000-00000000d002')),
+                '(no aparecen)'));
+
+-- Encola d001 (4 días) y d005 (0 días, heredada del BLOQUE 11). NO d002.
+select pruebas_rls.registrar('12. alertas medicación',
+       'Generar encola las que necesitan renovación (4 días y 0 días)  [CRITERIO DE ACEPTACIÓN]',
+       '2', public.generar_alertas_medicacion()::text);
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'La medicación con 4 días de stock quedó en la cola  [CRITERIO DE ACEPTACIÓN]',
+       'pendiente dias=4', pruebas_rls.alerta('d0000000-0000-4000-8000-00000000d001'));
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'La medicación con 6 días de stock NO genera nada  [CRITERIO DE ACEPTACIÓN]',
+       '(sin alerta)', pruebas_rls.alerta('d0000000-0000-4000-8000-00000000d002'));
+
+-- El borde exacto del umbral: `necesita_renovacion` es `dias_restantes < 5`, así
+-- que 5 días justos NO avisa. Un `<=` en cualquier lado rompería este caso.
+update public.medications set stock_units = 15
+ where id = 'd0000000-0000-4000-8000-00000000d002';
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Con 5 días justos tampoco avisa (el umbral es < 5, no <= 5)',
+       '(sin alerta)',
+       (select pruebas_rls.alerta('d0000000-0000-4000-8000-00000000d002')
+          from (select public.generar_alertas_medicacion()) as _));
+
+
+-- --- 12.2 La antiduplicación de 48 horas ------------------------------------
+-- El criterio de aceptación literal del ROADMAP. La ventana es deslizante (un
+-- predicado sobre `created_at`), no un cubo de calendario: correrla de nuevo un
+-- segundo después no puede encolar otra vez.
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Correr el generador dos veces seguidas no encola nada nuevo  [CRITERIO DE ACEPTACIÓN]',
+       '0', public.generar_alertas_medicacion()::text);
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Y la medicación sigue teniendo UNA sola alerta  [CRITERIO DE ACEPTACIÓN]',
+       '1', pruebas_rls.alertas_de('d0000000-0000-4000-8000-00000000d001'));
+
+-- La segunda capa de la antiduplicación: el índice único parcial. Aunque el
+-- predicado de 48hs no estuviera (o dos corridas simultáneas lo pasaran a la
+-- vez), la base no permite dos alertas VIVAS de la misma medicación.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.medication_renewal_alerts (medication_id, profile_id, dias_restantes)
+        values ('d0000000-0000-4000-8000-00000000d001',
+                'f0000000-0000-4000-8000-00000000f001', 4);
+        v := 'insertada';
+    exception when unique_violation then v := 'rechazado (23505)';
+             when others            then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'Una segunda alerta VIVA de la misma medicación la rechaza el índice único',
+        'rechazado (23505)', v);
+end $$;
+
+
+-- --- 12.3 El barrido: lease de 10 minutos y cierre --------------------------
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Reclamar toma las dos alertas debidas y devuelve los datos del texto',
+       'Rosa/Metformina de prueba/4, Rosa/Sin stock de prueba/0',
+       coalesce((select string_agg(split_part(nombre_perfil, ' ', 1) || '/' ||
+                                   nombre || '/' || dias_restantes, ', ' order by nombre)
+                   from public.reclamar_alertas_medicacion(10)),
+                '(cola vacía)'));
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Reclamar dejó la alerta en enviando (lease tomado, no enviado)',
+       'enviando dias=4', pruebas_rls.alerta('d0000000-0000-4000-8000-00000000d001'));
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Un segundo barrido inmediato NO se lleva la misma alerta (lease vivo)',
+       '0', (select count(*)::text from public.reclamar_alertas_medicacion(10)));
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Cerrar la alerta la marca como enviada', 'true',
+       public.cerrar_alerta_medicacion(
+           (select id from public.medication_renewal_alerts
+             where medication_id = 'd0000000-0000-4000-8000-00000000d001'),
+           1, 0)::text);
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Cerrarla de nuevo no pisa nada y devuelve false (idempotente)', 'false',
+       public.cerrar_alerta_medicacion(
+           (select id from public.medication_renewal_alerts
+             where medication_id = 'd0000000-0000-4000-8000-00000000d001'),
+           99, 99)::text);
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'La alerta cerrada guarda el resumen de entregas',
+       'enviado entregas=1 fallos=0 con-sent-at',
+       coalesce((select format('%s entregas=%s fallos=%s %s', estado, entregas, fallos,
+                               case when sent_at is not null then 'con-sent-at'
+                                    else 'SIN sent_at' end)
+                   from public.medication_renewal_alerts
+                  where medication_id = 'd0000000-0000-4000-8000-00000000d001'),
+                '(sin alerta)'));
+
+
+-- --- 12.4 Reponer el stock caduca la alerta que no salió --------------------
+-- Mandar "conviene renovar la receta" un rato después de que alguien cargó la
+-- caja nueva es la clase de aviso que enseña a ignorar los avisos.
+
+-- 12 ÷ 3 tomas por día = 4 días → se encola.
+update public.medications set stock_units = 12
+ where id = 'd0000000-0000-4000-8000-00000000d002';
+select public.generar_alertas_medicacion();
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'La medicación que baja a 4 días entra en la cola',
+       'pendiente dias=4', pruebas_rls.alerta('d0000000-0000-4000-8000-00000000d002'));
+
+-- Alguien carga la caja nueva antes de que el barrido pase.
+update public.medications set stock_units = 60
+ where id = 'd0000000-0000-4000-8000-00000000d002';
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Reponer el stock deja la alerta pendiente como omitida, no la manda',
+       'omitido dias=4',
+       (select pruebas_rls.alerta('d0000000-0000-4000-8000-00000000d002')
+          from (select public.generar_alertas_medicacion()) as _));
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Y el barrido ya no la reclama', '0',
+       (select count(*)::text from public.reclamar_alertas_medicacion(10)));
+
+-- La ventana de 48hs cuenta TAMBIÉN las omitidas: reponer y volver a bajar el
+-- stock el mismo día no puede disparar dos avisos seguidos.
+update public.medications set stock_units = 12
+ where id = 'd0000000-0000-4000-8000-00000000d002';
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Volver a bajar el stock enseguida no reabre el aviso (las omitidas cuentan para las 48hs)',
+       '0', public.generar_alertas_medicacion()::text);
+
+
+-- --- 12.5 Quién lee la tabla ------------------------------------------------
+-- A diferencia de `appointment_reminders`, acá hay una política de SELECT: los
+-- administradores del perfil (los mismos que reciben el push) ven sus alertas.
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.medication_renewal_alerts;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'A (can_manage sobre el perfil) lee las alertas de sus medicaciones',
+        '3 filas', v);
+end $$;
+
+-- Escribir NO: no hay política de INSERT/UPDATE/DELETE, y `authenticated` solo
+-- tiene el privilegio SELECT. Una sesión que pudiera borrar sus alertas
+-- desarmaría la antiduplicación y podría hacerse mandar el mismo aviso en loop.
+do $$
+declare v text; c integer;
+begin
+    begin
+        delete from public.medication_renewal_alerts;
+        get diagnostics c = row_count;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'A no puede BORRAR sus alertas (desarmaría la antiduplicación)',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.medication_renewal_alerts (medication_id, profile_id, dias_restantes)
+        values ('d0000000-0000-4000-8000-00000000d002',
+                'f0000000-0000-4000-8000-00000000f001', 0);
+        v := 'insertada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'A no puede INSERTAR una alerta a mano', 'denegado (42501)', v);
+end $$;
+
+commit;
+
+-- B tiene can_view + can_upload sobre el mismo perfil desde el BLOQUE 11, pero
+-- NO can_manage. Es la regla de docs/modelo-permisos.md §4.3 aplicada a la
+-- tabla: quien no recibe el aviso tampoco ve la fila que lo generó.
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.medication_renewal_alerts;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'B (can_view + can_upload, sin can_manage) NO ve ninguna alerta',
+        '0 filas', v);
+end $$;
+
+commit;
+
+
+-- --- 12.6 La superficie de la infraestructura -------------------------------
+
+-- RLS no protege de un TRUNCATE: vaciar la tabla desarmaría la antiduplicación
+-- de toda la base. Lo que lo frena es el `revoke all ... from anon,
+-- authenticated` de la migración, y esto lo prueba con los dientes afuera.
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        truncate table public.medication_renewal_alerts;
+        v := 'truncada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'TRUNCATE de la tabla de alertas (RLS no lo cubre)', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.generar_alertas_medicacion();
+        v := 'ejecutado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'A ejecuta generar_alertas_medicacion() (barre toda la base)',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.reclamar_alertas_medicacion(5);
+        v := 'ejecutado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'A ejecuta reclamar_alertas_medicacion() (podría mandar avisos ajenos)',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.disparar_alertas_medicacion();
+        v := 'ejecutado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'A ejecuta disparar_alertas_medicacion()', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.configurar_cron_alertas_medicacion('http://atacante.example');
+        v := 'ejecutado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'A ejecuta configurar_cron_alertas_medicacion() (escribe el Vault)',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', '', true);
+set local role anon;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.medication_renewal_alerts;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('12. alertas medicación',
+        'anon lee medication_renewal_alerts', 'denegado (42501)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Privilegios de anon sobre la tabla de alertas', '0', count(*)::text)
+  from information_schema.role_table_grants
+ where table_schema = 'public'
+   and table_name = 'medication_renewal_alerts'
+   and grantee = 'anon';
+
+-- `authenticated` tiene SELECT y nada más: la política de lectura sin el
+-- privilegio de escritura. Si acá apareciera INSERT/UPDATE/DELETE, la ausencia
+-- de políticas de escritura sería lo único que separa a una sesión de la cola.
+select pruebas_rls.registrar('12. alertas medicación',
+       'authenticated tiene SOLO SELECT sobre la tabla de alertas', 'SELECT',
+       coalesce((select string_agg(distinct privilege_type, ', ' order by privilege_type)
+                   from information_schema.role_table_grants
+                  where table_schema = 'public'
+                    and table_name = 'medication_renewal_alerts'
+                    and grantee = 'authenticated'),
+                '(ninguno)'));
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'Funciones del job ejecutables por anon o authenticated', '0', count(*)::text)
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public'
+   and p.proname in ('generar_alertas_medicacion', 'reclamar_alertas_medicacion',
+                     'cerrar_alerta_medicacion', 'configurar_cron_alertas_medicacion',
+                     'disparar_alertas_medicacion')
+   and (has_function_privilege('anon', p.oid, 'execute')
+        or has_function_privilege('authenticated', p.oid, 'execute'));
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'medication_renewal_alerts tiene RLS habilitada', 'true',
+       coalesce((select rowsecurity::text from pg_tables
+                  where schemaname = 'public' and tablename = 'medication_renewal_alerts'),
+                '(la tabla no existe)'));
+
+select pruebas_rls.registrar('12. alertas medicación',
+       'El job de alertas está programado dos veces por día en pg_cron',
+       '10 12,21 * * *',
+       coalesce((select schedule from cron.job where jobname = 'alertas-medicacion'),
+                '(el job no existe)'));
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''

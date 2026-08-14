@@ -69,6 +69,18 @@ export const RUTA_SERVICE_WORKER = "/sw.js"
 export const RUTA_CRON_RECORDATORIOS = "/api/push/procesar-recordatorios"
 
 /**
+ * Barrido de alertas de renovación de receta (Sprint 7.4). Misma excepción y
+ * mismo razonamiento que `RUTA_CRON_RECORDATORIOS`, del que es gemelo: lo llama
+ * `pg_cron` a través de `pg_net`, dos veces por día, y se autentica con el
+ * mismo header `x-cron-secret` contra la misma variable `CRON_SECRET`.
+ *
+ * Se declara con nombre propio en vez de hacer pública toda la rama
+ * `/api/push/`: `/api/push/probar` y `/api/push/suscribir` tienen que seguir
+ * exigiendo sesión, y una regla por prefijo se las llevaría puestas.
+ */
+export const RUTA_CRON_ALERTAS_MEDICACION = "/api/push/procesar-alertas-medicacion"
+
+/**
  * Rutas públicas: se sirven con o sin sesión. Cada entrada cubre la ruta
  * exacta y sus subrutas (`/recuperar` cubre `/recuperar/confirmar`), salvo
  * `/` que se compara exacta —si no, cubriría toda la aplicación—.
@@ -80,6 +92,7 @@ export const RUTAS_PUBLICAS = [
   "/recuperar",
   RUTA_SERVICE_WORKER,
   RUTA_CRON_RECORDATORIOS,
+  RUTA_CRON_ALERTAS_MEDICACION,
 ] as const
 
 /**

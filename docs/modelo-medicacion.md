@@ -3,6 +3,10 @@
 > Sprint 7, tarea 7.1. Migración: `supabase/migrations/20260813060000_medicacion_estado.sql`.
 > Tablas base: `20260812200000_schema_inicial.sql` §4.7 y §4.8. Permisos:
 > `docs/modelo-permisos.md` §6 (matriz) y §7.3 (notas ⑨ y ⑩).
+>
+> **§12 documenta la tarea 7.4** (alerta preventiva de renovación de receta,
+> migración `20260813070000_alertas_medicacion.sql`) y es la única fuente de
+> verdad de esa funcionalidad.
 
 Este documento cierra el **diseño** de la medicación: qué se calcula, con qué
 fórmula, quién puede escribir qué y qué contrato queda para las tareas 7.2 a
@@ -443,19 +447,28 @@ public sin search_path fijado"* del arnés.
 
 ### 7.4 — Alerta preventiva de renovación
 
+**Construida.** El contrato se cumplió tal como estaba escrito y el detalle vive
+en el §12 de este mismo documento. Lo que decía acá, para que se vea qué se
+sostuvo y qué no:
+
 - La condición es **una columna**, no una fórmula reimplementada:
-  `select * from v_medicacion_estado where necesita_renovacion`.
+  `select * from v_medicacion_estado where necesita_renovacion`. ✔
 - El umbral (5 días) vive en la vista. Cambiarlo es una migración, no un
-  `find & replace`.
+  `find & replace`. ✔
 - Los destinatarios se resuelven con `public.destinatarios_de_avisos(profile_id)`,
   igual que los recordatorios de turnos (`docs/recordatorios.md` §"Quién
-  recibe"): titular + `can_manage`, nunca un `can_view`.
+  recibe"): titular + `can_manage`, nunca un `can_view`. ✔ —se reusó la función
+  de 6.4 sin tocarla—.
 - La antiduplicación de 48 hs necesita su propia tabla de infraestructura, con
   el mismo patrón `UNIQUE` + `ON CONFLICT DO NOTHING` de
-  `appointment_reminders`. **No** alcanza con mirar `updated_at`.
+  `appointment_reminders`. **No** alcanza con mirar `updated_at`. ✔ **con una
+  corrección**: un `UNIQUE` a secas tampoco alcanza, porque "quedan menos de 5
+  días" no es un evento discreto como la ventana de un turno sino un estado que
+  se sostiene en el tiempo. Hicieron falta **dos capas** (§12.2).
 - Ojo con `stock_units IS NULL`: `necesita_renovacion` es `false` y no dispara
   nada. Es correcto —no se puede alertar sobre un stock que nadie cargó— pero
-  conviene que la interfaz invite a cargarlo.
+  conviene que la interfaz invite a cargarlo. ✔ —la tarjeta muestra
+  *"Sin stock cargado. Editá la medicación para agregarlo…"*—.
 
 ### 7.5 — Vinculación de la receta
 
@@ -501,6 +514,9 @@ Qué cubre:
 El bloque es autolimpiante: usa un perfil gestionado propio y una fecha
 sintética lejana (2099-06-15) para la grilla, y borra ambos al terminar.
 
+El **BLOQUE 12** (33 casos) cubre la alerta preventiva que se apoya en todo esto;
+está detallado en §12.11.
+
 ---
 
 ## 11. Límites conocidos
@@ -520,3 +536,318 @@ sintética lejana (2099-06-15) para la grilla, y borra ambos al terminar.
 5. **Los intervalos que no dividen a 24** tienen una toma menos por día en la
    grilla que la que proyecta la vista (§7.3). Documentado y acotado a
    intervalos que el producto no usa.
+
+---
+
+## 12. La alerta preventiva de renovación (tarea 7.4)
+
+> Migración: `supabase/migrations/20260813070000_alertas_medicacion.sql`.
+> Verificado en un Samsung Galaxy A71 real el 2026-08-14: captura en
+> `docs/capturas/dispositivo-real/sprint7-alerta-renovacion.png`.
+
+Cierra el Sprint 7: cuando a una medicación le quedan menos de 5 días de stock,
+quien la administra recibe un aviso push a tiempo para pedir la receta, y el
+listado de `/medicacion` muestra un banner arriba de todo. Sin que nadie tenga
+que acordarse de mirar.
+
+### 12.1 Qué se construyó
+
+| Pieza | Archivo |
+|---|---|
+| Tabla, funciones, privilegios y el job | `supabase/migrations/20260813070000_alertas_medicacion.sql` |
+| Barrido de la cola | `app/api/push/procesar-alertas-medicacion/route.ts` |
+| Texto del aviso (puro) | `lib/medicacion/alertas.ts` |
+| Cantidades y plurales (puro, compartido con la interfaz) | `lib/medicacion/unidades.ts` |
+| Banner del listado | `components/medicacion/banner-renovacion.tsx` |
+| Deep link al perfil de la medicación | `app/(app)/(con-nav)/medicacion/enlace/route.ts` |
+| Excepción de ruta pública | `lib/auth/rutas.ts` → `RUTA_CRON_ALERTAS_MEDICACION` |
+| Tests del texto | `tests/unit/alertas-medicacion.test.ts`, `tests/unit/medicacion-unidades.test.ts` |
+| Aislamiento y lógica verificados | `scripts/test-rls.sql` → BLOQUE 12 (33 casos) |
+
+**No hay Edge Function.** El ROADMAP proponía
+`supabase/functions/alertas-medicacion/index.ts`; se descartó por los mismos
+motivos que ya dejó escritos `docs/recordatorios.md` §1 al cerrar el Sprint 6
+—*"el Sprint 7 y el 9 van a copiar esta forma"*, decía textualmente—: el envío
+Web Push del proyecto es `web-push`, que es Node, y una Edge Function corre en
+Deno. La forma es la misma de 6.4:
+
+```
+pg_cron  (10 12,21 * * *)
+   └─ public.disparar_alertas_medicacion()
+         ├─ generar_alertas_medicacion()        ← umbral + antidup de 48hs
+         └─ net.http_post(URL, header x-cron-secret)      [pg_net, asíncrono]
+               └─ POST /api/push/procesar-alertas-medicacion   [Node]
+                     ├─ reclamar_alertas_medicacion()    ← FOR UPDATE SKIP LOCKED
+                     ├─ destinatarios_de_avisos()        ← LA MISMA de 6.4
+                     ├─ enviarPushAUsuario()             ← lib/push/servidor.ts
+                     └─ cerrar_alerta_medicacion()
+```
+
+**El endpoint es nuevo y no una extensión del de recordatorios.** Los leases son
+independientes y los topes por corrida también: mezclarlos haría que una cola de
+mil recordatorios consuma el presupuesto de las alertas y las deje para la
+corrida siguiente, que acá es 12 horas después y no 15 minutos. Además
+`/api/push/procesar-recordatorios` es el único camino verificado contra un
+teléfono real y no había ninguna razón para tocarlo.
+
+### 12.2 La antiduplicación de 48 horas: dos capas, y por qué
+
+Es la parte con contenido propio de esta tarea, y la diferencia de fondo con
+`appointment_reminders`.
+
+El aviso de un turno es un evento **discreto**: la ventana de 24hs de un turno
+ocurre una vez y nunca más, así que `UNIQUE (appointment_id, ventana)` expresa la
+antiduplicación entera, sin reloj.
+
+"Quedan menos de 5 días de stock" no es un evento: es un **estado que se
+sostiene**. Se mantiene verdadero día tras día hasta que alguien carga la caja
+nueva (§5 de este documento: *"la alerta no se apaga sola"*). Un
+`UNIQUE (medication_id)` avisaría **una sola vez en la vida de la medicación**; el
+ROADMAP pide avisar cada 48 horas mientras el estado dure. La regla es una
+**ventana deslizante**, y se implementa así:
+
+| Capa | Qué es | Qué problema resuelve |
+|---|---|---|
+| **1. La regla de producto** | el predicado `not exists (… where created_at > now() - interval '48 hours')` de `generar_alertas_medicacion()` | avisar cada 48 hs contadas desde el **último aviso real** |
+| **2. La garantía estructural** | el índice único **parcial** `medication_renewal_alerts_una_viva` sobre `(medication_id) where estado in ('pendiente','enviando')` | dos corridas **simultáneas** que pasan el predicado a la vez |
+
+Hicieron falta las dos. La capa 1 sola es correcta en la corrida secuencial —el
+criterio de aceptación literal, *"correr el job dos veces seguidas no duplica"*—
+pero depende de que dos transacciones nunca se solapen, que es exactamente lo que
+un `if` no puede garantizar. La capa 2 sola no sabe nada de las 48 horas.
+
+**Por qué no un cubo de calendario.** `floor(epoch/172800)` habría sido
+expresable como un `UNIQUE` de una sola línea, sin reloj. Se descartó: los cubos
+son fijos, así que dos avisos que caen a ambos lados de un borde salen con
+minutos de diferencia — el caso preciso que el criterio de aceptación prohíbe.
+
+**Corolario del índice parcial:** nunca hay dos alertas vivas de la misma
+medicación. Si el barrido estuvo caído, la vieja sigue `pendiente` y no se apila
+una nueva encima; sale una sola cuando el barrido vuelva, con los días restantes
+releídos de la vista en ese momento (§12.4).
+
+### 12.3 Los cuatro estados
+
+| estado | qué significa |
+|---|---|
+| `pendiente` | debido y sin entregar. Es la cola. |
+| `enviando` | un barrido lo tomó (lease de 10 minutos) |
+| `enviado` | se intentó la entrega a todos los destinatarios |
+| `omitido` | el stock se repuso, o la medicación se suspendió o dejó de estar vigente, antes de que el aviso saliera |
+
+`omitido` **no se borra**, y eso es deliberado: una fila borrada dejaría de contar
+para la ventana de 48 horas, y una medicación que cruza el umbral, se repone y
+vuelve a cruzarlo el mismo día produciría dos avisos seguidos.
+
+La caducidad la hace el generador en cada corrida y **no un trigger**: el criterio
+es "ya no cumple `necesita_renovacion`", una condición sobre una vista que depende
+del reloj. Un trigger sobre `medications` no se dispararía cuando la condición
+deja de cumplirse por el paso del tiempo, solo cuando alguien escribe.
+
+### 12.4 Los días restantes se releen, no se guardan
+
+`medication_renewal_alerts.dias_restantes` guarda cuántos días quedaban **al
+encolar**: es registro histórico de por qué se disparó el aviso.
+
+El texto que sale usa, en cambio, el valor que `reclamar_alertas_medicacion()`
+lee de `v_medicacion_estado` **en el momento del barrido**. Si la alerta esperó en
+la cola porque la app estuvo caída, decir "quedan 4 días" cuando ya quedan 2 es la
+misma clase de error que `docs/recordatorios.md` §6 describe para los turnos ("en
+3 horas" para un turno que es en 40 minutos).
+
+### 12.5 Dos veces por día, y a qué hora
+
+`10 12,21 * * *` → **09:10 y 18:10 de Ushuaia** (`pg_cron` interpreta UTC y
+Argentina está en UTC−3 continuo desde 2009, sin horario de verano).
+
+- **Por qué no cada 15 minutos como los turnos.** La ventana de 3hs de un turno es
+  un instante que hay que perseguir; acá el evento dura días. Adelantar el aviso
+  15 minutos no le cambia nada a quien tiene que pasar por la farmacia, y serían
+  96 barridos diarios para emitir como mucho un aviso cada 48 horas.
+- **Por qué dos y no una.** Con una sola corrida diaria, una app caída en ese
+  minuto atrasa el aviso 24 horas — sobre un stock que dura menos de 5 días, eso
+  es el 20% del margen. Con dos, el peor caso es 12 horas. La antiduplicación es
+  independiente de la frecuencia, así que duplicar las corridas no puede duplicar
+  los avisos.
+- **Por qué esas horas.** Las dos caen con farmacias y consultorios abiertos, que
+  es lo único que hace accionable un aviso en el momento en que se lee. Y las
+  09:10 caen después de la toma de las 8:00 —el horario más común del producto—,
+  así que el stock que se mira ya está descontado.
+
+### 12.6 El texto
+
+```
+A Roberto le quedan 4 días de Enalapril
+Quedan 4 comprimidos · Conviene pedir la renovación de la receta.
+```
+
+- **El nombre de pila va en el título.** Un recordatorio de turno puede decir
+  "Turno de Cardiología en 3 horas" sin nombrar a nadie; acá no, porque una
+  cuidadora puede administrar tres perfiles con varias medicaciones cada uno y
+  "Quedan 4 días de Enalapril" la obliga a abrir la app para saber de quién. Se
+  usa el **primer nombre** y no el completo porque Android corta el título en una
+  línea y con el apellido se pierde justamente el final, que es el remedio.
+- **`dias_restantes = 0` no es "se acabó"**, es "no alcanza ni para el día de hoy"
+  (§2.2): puede quedar un comprimido suelto con una dosis de dos. El título de ese
+  caso es *"A Roberto no le queda Enalapril para hoy"*.
+- **No dice "~4 días".** `floor()` ya es el redondeo conservador, así que "4"
+  significa "al menos 4 días completos"; el "~" sugeriría una imprecisión que no
+  existe y agrega un símbolo que hay que descifrar.
+- **No es alarmista.** "Conviene pedir la renovación", no "¡Urgente!". Quedan
+  días —ese es el punto entero de que la alerta sea *preventiva*— y una app que le
+  grita a una persona mayor por algo que puede resolver mañana se termina
+  silenciando.
+- **`tag = medicacion-{id}`**, la convención ya declarada en `lib/push/servidor.ts`.
+  Es la antiduplicación del lado del dispositivo: si un lease vencido hiciera
+  repetir un envío, el segundo reemplaza al primero en la pantalla. Dos
+  medicaciones distintas tienen tags distintos y **se apilan**, que es lo correcto.
+
+### 12.7 El banner de `/medicacion`
+
+`components/medicacion/banner-renovacion.tsx`, arriba del listado, cuando hay al
+menos una medicación con `necesita_renovacion`.
+
+**No duplica la advertencia de la tarjeta** (tarea 7.2, que pinta la caja de stock
+y agrega "Quedan pocos días — conviene pedir la renovación de la receta"). La
+tarjeta responde *"¿cómo está esta medicación?"*; el banner responde *"¿tengo algo
+que hacer hoy?"*, que con cinco medicaciones cargadas obliga a recorrer cinco
+tarjetas desplazándose. El banner enumera **cuáles** son y linkea a cada una; la
+tarjeta sigue siendo la que explica el detalle.
+
+El link es un **ancla** (`#medicacion-{id}`) y no una ruta porque
+`/medicacion/{id}` no existe —el módulo tiene `page.tsx`, `nuevo/` y
+`[id]/editar/`— y mandar a la pantalla de edición a alguien que solo quiere ver
+cuánto queda es peor que no linkear.
+
+**El banner no lee `medication_renewal_alerts`.** Se arma de la misma consulta a
+`v_medicacion_estado` que la página ya hacía: cero queries agregadas. Esa tabla es
+la cola del push, no la fuente de verdad de la pantalla — si lo fuera, el banner
+tardaría hasta 12 horas en aparecer.
+
+### 12.8 El deep link aterriza en el perfil de la medicación
+
+La url del payload es `/medicacion?perfil={profile_id}`. Sin eso, María tocando el
+aviso de un remedio de Roberto aterriza en **su propia** medicación, una lista
+donde el remedio del que le acaban de avisar no está — el bug que la tarea
+correctiva 6.6 resolvió para los turnos.
+
+Es el patrón que `docs/recordatorios.md` §10 dejó descripto anticipando este caso:
+`medicacion/page.tsx` reenvía a `medicacion/enlace/route.ts` (un Server Component
+no puede escribir cookies), y ese handler llama a `cambiarPerfilDesdeParametro`,
+que revalida `requerirPermiso(perfilId, "view")` contra la base. Ante un uuid
+inválido, inexistente o sin permiso **redirige exactamente igual** que en el caso
+feliz, para no convertir el enlace en un oráculo de ids ajenos.
+
+### 12.9 Quién lee la tabla
+
+Acá `medication_renewal_alerts` **se aparta** de `appointment_reminders`, que tiene
+RLS habilitada y cero políticas: un aviso de renovación es un dato con sentido para
+la familia (*"¿ya nos avisaron de la Metformina?"*), mientras que un recordatorio de
+turno no agrega nada sobre el turno que la persona ya ve.
+
+- **Leen** los `can_manage` del perfil (`puede_administrar_perfil`), que son
+  exactamente los mismos que reciben el push. Un `can_view` no ve ninguna de las
+  dos cosas.
+- **Nadie escribe desde el cliente**: no hay política de INSERT/UPDATE/DELETE y
+  `authenticated` tiene únicamente el privilegio `SELECT`. Una sesión que pudiera
+  borrar sus alertas desarmaría la antiduplicación y podría hacerse mandar el
+  mismo aviso en loop.
+- **El `revoke all … from anon, authenticated` está**, y no es decorativo: toda
+  tabla nueva de `public` nace con TRUNCATE para los dos roles públicos por el
+  default de Supabase, y **RLS no protege de un TRUNCATE**. Es la lección que
+  documenta `docs/recordatorios.md` §7, y el BLOQUE 12 la prueba con los dientes
+  afuera.
+
+### 12.10 Configuración (una vez por entorno)
+
+El secreto compartido es **uno solo**: la variable `CRON_SECRET` de la aplicación,
+la misma que usa el barrido de turnos. Guardarla dos veces en el Vault serían dos
+copias que pueden divergir en silencio, y el síntoma de una divergencia es un 401
+que nadie mira hasta que falta un aviso. Por eso la función de configuración de
+esta tarea recibe **solo la URL**:
+
+```sql
+-- 1) El secreto y la URL de turnos (docs/recordatorios.md §4.2), si no están ya:
+select public.configurar_cron_recordatorios(
+    'http://host.docker.internal:3000/api/push/procesar-recordatorios',
+    '<el mismo valor de CRON_SECRET>');
+
+-- 2) La URL de las alertas de medicación:
+select public.configurar_cron_alertas_medicacion(
+    'http://host.docker.internal:3000/api/push/procesar-alertas-medicacion');
+```
+
+En producción, la misma segunda llamada con `https://<dominio>/api/push/procesar-alertas-medicacion`.
+
+Si el Vault no está configurado el job **degrada en vez de fallar**: encola las
+filas igual y avisa con un `warning`, así un `supabase db reset` a mitad de
+desarrollo no deja el job en rojo dos veces por día.
+
+### 12.11 Cómo se verifica
+
+```sql
+select jobid, jobname, schedule, active from cron.job;
+--  3 | alertas-medicacion | 10 12,21 * * * | t
+
+-- Forzar una corrida completa (genera + POST por pg_net):
+select public.disparar_alertas_medicacion();
+-- generadas=1 pendientes=1 request_id=1
+
+-- pg_net es asíncrono: la respuesta se consulta después.
+select id, status_code, content from net._http_response order by id desc limit 3;
+--  1 | 200 | {"procesados":1,"entregas":1,"fallos":0}
+
+-- La cola:
+select m.name, a.dias_restantes, a.estado, a.entregas, a.fallos, a.created_at
+  from public.medication_renewal_alerts a
+  join public.medications m on m.id = a.medication_id
+ order by a.created_at desc;
+```
+
+O directo al endpoint, sin pasar por la base:
+
+```bash
+curl -X POST http://localhost:3000/api/push/procesar-alertas-medicacion \
+     -H "x-cron-secret: $CRON_SECRET"
+```
+
+**BLOQUE 12 de `scripts/test-rls.sql`** — 33 casos. Cubre los tres criterios de
+aceptación literales del ROADMAP (4 días encola, 6 días no, doble corrida no
+duplica), el borde exacto del umbral (5 días justos **no** avisa: es `< 5`, no
+`<= 5`), el índice único parcial, el lease y el cierre idempotente, la caducidad
+por reposición de stock, que las omitidas cuentan para las 48 horas, las dos
+direcciones de la política de lectura, el TRUNCATE denegado y la superficie de
+las cinco funciones.
+
+**Verificación en dispositivo real (2026-08-14).** Samsung Galaxy A71, Android,
+Chrome, contra el `next dev` de la máquina de desarrollo por
+`adb reverse tcp:3000 tcp:3000`:
+
+1. Enalapril de Roberto bajado a 4 días de stock → el generador encoló 1.
+2. `POST /api/push/procesar-alertas-medicacion` → `{"procesados":1,"entregas":1,"fallos":0}`.
+3. **La notificación llegó al teléfono** con el texto correcto
+   (`sprint7-alerta-renovacion.png`). El destinatario fue María, que tiene
+   `can_manage` sobre Roberto — Roberto no tiene cuenta propia.
+4. Segundo y tercer barrido → `{"procesados":0,…}`: **no reenvía**.
+5. Sin header o con un secreto incorrecto → `401`.
+6. Glucophage bajado a 4 días y el **job completo**
+   (`disparar_alertas_medicacion()` → `pg_net` → endpoint) → `net._http_response`
+   con `200` y una entrega. Llegó la segunda notificación y **las dos se apilan**
+   en la pantalla: tags distintos, como corresponde a dos medicaciones distintas.
+
+### 12.12 Límites conocidos
+
+1. **El banner no distingue "ya te avisamos" de "todavía no".** Muestra el estado
+   del stock, no el de la cola. Es deliberado (§12.7): atarlo a la tabla lo haría
+   aparecer hasta 12 horas tarde. La política de lectura de §12.9 deja la puerta
+   abierta a una pantalla futura que sí quiera mostrar el historial de avisos.
+2. **La alerta no distingue quién tiene la receta a mano.** Avisa a todos los
+   `can_manage` por igual; si dos familiares administran el mismo perfil, los dos
+   reciben el aviso y pueden terminar pidiendo la receta dos veces. Resolverlo
+   requiere un estado compartido de "yo me encargo" que este producto todavía no
+   tiene.
+3. **`as_needed` nunca alerta** (§3). Correcto —no hay un denominador honesto—
+   pero significa que un ibuprofeno que se está por acabar no avisa nunca.
+4. **En producción falta correr `configurar_cron_alertas_medicacion()`** con la
+   URL real. Es parte de la tarea "Jobs de producción" del Sprint 12, junto con la
+   de turnos.

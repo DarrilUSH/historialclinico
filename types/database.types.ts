@@ -626,6 +626,67 @@ export type Database = {
           },
         ]
       }
+      medication_renewal_alerts: {
+        Row: {
+          claimed_at: string | null
+          created_at: string
+          dias_restantes: number
+          entregas: number | null
+          estado: string
+          fallos: number | null
+          id: string
+          medication_id: string
+          profile_id: string
+          sent_at: string | null
+        }
+        Insert: {
+          claimed_at?: string | null
+          created_at?: string
+          dias_restantes: number
+          entregas?: number | null
+          estado?: string
+          fallos?: number | null
+          id?: string
+          medication_id: string
+          profile_id: string
+          sent_at?: string | null
+        }
+        Update: {
+          claimed_at?: string | null
+          created_at?: string
+          dias_restantes?: number
+          entregas?: number | null
+          estado?: string
+          fallos?: number | null
+          id?: string
+          medication_id?: string
+          profile_id?: string
+          sent_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "medication_renewal_alerts_medication_id_fkey"
+            columns: ["medication_id"]
+            isOneToOne: false
+            referencedRelation: "medications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "medication_renewal_alerts_medication_id_fkey"
+            columns: ["medication_id"]
+            isOneToOne: false
+            referencedRelation: "v_medicacion_estado"
+            referencedColumns: ["medication_id"]
+          },
+          {
+            foreignKeyName: "medication_renewal_alerts_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       medications: {
         Row: {
           active_ingredient: string | null
@@ -981,9 +1042,17 @@ export type Database = {
       }
     }
     Functions: {
+      cerrar_alerta_medicacion: {
+        Args: { p_entregas: number; p_fallos: number; p_id: string }
+        Returns: boolean
+      }
       cerrar_recordatorio_turno: {
         Args: { p_entregas: number; p_fallos: number; p_id: string }
         Returns: boolean
+      }
+      configurar_cron_alertas_medicacion: {
+        Args: { p_url: string }
+        Returns: undefined
       }
       configurar_cron_recordatorios: {
         Args: { p_secreto: string; p_url: string }
@@ -1063,10 +1132,12 @@ export type Database = {
         Args: { p_profile_id: string }
         Returns: string[]
       }
+      disparar_alertas_medicacion: { Args: never; Returns: string }
       disparar_recordatorios_turnos: { Args: never; Returns: string }
       es_perfil_gestionado: { Args: { perfil: string }; Returns: boolean }
       es_sesion_de_usuario: { Args: never; Returns: boolean }
       es_titular: { Args: { perfil: string }; Returns: boolean }
+      generar_alertas_medicacion: { Args: never; Returns: number }
       generar_recordatorios_pendientes: { Args: never; Returns: number }
       generar_tomas_del_dia: { Args: { fecha?: string }; Returns: number }
       nombres_de_perfiles_vinculados: {
@@ -1087,6 +1158,19 @@ export type Database = {
       puede_cargar_en_perfil: { Args: { perfil: string }; Returns: boolean }
       puede_otorgar_permisos: { Args: { perfil: string }; Returns: boolean }
       puede_ver_perfil: { Args: { perfil: string }; Returns: boolean }
+      reclamar_alertas_medicacion: {
+        Args: { p_limite?: number }
+        Returns: {
+          alerta_id: string
+          dias_restantes: number
+          dose_unit: string
+          medication_id: string
+          nombre: string
+          nombre_perfil: string
+          profile_id: string
+          stock_units: number
+        }[]
+      }
       reclamar_recordatorios_turnos: {
         Args: { p_limite?: number }
         Returns: {

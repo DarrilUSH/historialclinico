@@ -27,6 +27,7 @@ import { AlarmClockIcon, FileTextIcon, PackageIcon, PillIcon, TriangleAlertIcon 
 import { Alerta } from "@/components/base/alerta"
 import { Tarjeta } from "@/components/base/tarjeta"
 import { AccionesMedicacionActiva, BotonReactivar } from "@/components/medicacion/acciones-medicacion"
+import { textoCantidadConUnidad } from "@/lib/medicacion/unidades"
 import type { Database } from "@/types/database.types"
 
 type FilaVistaMedicacion = Database["public"]["Views"]["v_medicacion_estado"]["Row"]
@@ -43,10 +44,15 @@ function formatearFecha(fechaIso: string): string {
   return FORMATO_FECHA_CORTA.format(new Date(`${fechaIso}T00:00:00Z`))
 }
 
+/**
+ * `dose_unit` se guarda en SINGULAR (default `'comprimido'`) porque su uso
+ * primario es la dosis por toma. Concatenarlo tal cual con el stock producía
+ * "90 comprimido disponibles"; `textoCantidadConUnidad`
+ * (`lib/medicacion/unidades.ts`) es la única forma correcta de unir una
+ * cantidad con esa columna, y la comparte con el texto de las alertas push.
+ */
 function textoDosis(dosis: number | null, unidad: string | null): string {
-  const cantidad = dosis ?? 0
-  const texto = Number.isInteger(cantidad) ? String(cantidad) : String(cantidad).replace(".", ",")
-  return `${texto} ${unidad ?? ""}`.trim()
+  return textoCantidadConUnidad(dosis, unidad)
 }
 
 function textoFrecuencia(
@@ -156,7 +162,10 @@ export function TarjetaMedicacionActiva({
             )}
           </div>
           <p className="text-sm text-muted-foreground">
-            {textoDosis(medicacion.stock_units, medicacion.dose_unit)} disponibles
+            {/* El adjetivo concuerda con la cantidad, igual que la unidad:
+                "1 comprimido disponible", "90 comprimidos disponibles". */}
+            {textoDosis(medicacion.stock_units, medicacion.dose_unit)}{" "}
+            {medicacion.stock_units === 1 ? "disponible" : "disponibles"}
             {medicacion.fecha_estimada_fin && (
               <> · se acaba el {formatearFecha(medicacion.fecha_estimada_fin)}</>
             )}
