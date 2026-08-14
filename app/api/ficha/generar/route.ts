@@ -53,10 +53,25 @@
  * (`lib/ficha/generar.ts`), que ocurre cuando DOS respuestas seguidas de
  * Gemini no pasan `FichaGeneradaSchema` -ya se reintentó una vez adentro de
  * `generarFichaConsulta`, así que acá no hay una tercera oportunidad-.
+ *
+ * ## Auditoría: `exportar_ficha`, agregada en la tarea 10.4
+ *
+ * La tarea 10.3 (este archivo, en su forma original) no escribía en
+ * `access_logs`: su criterio de aceptación no lo pedía. El criterio que SÍ lo
+ * exige es el de la tarea 10.4 ("generar la ficha registra `exportar_ficha`
+ * en `access_logs`", ROADMAP_SPRINTS.md línea 647), así que la llamada a
+ * `registrarAcceso` se agrega acá, no en `lib/ficha/generar.ts` -ese módulo
+ * no toca cookies ni auditoría, ver su propio encabezado-. Mismo criterio que
+ * `ver_credencial` en `app/api/credenciales/[id]/url/route.ts`: se audita
+ * DESPUÉS de generar con éxito, nunca un intento fallido ni un permiso
+ * denegado, y es best-effort -`registrarAcceso` nunca lanza (cabecera de
+ * `lib/auditoria.ts`), así que un fallo de auditoría no le esconde la ficha
+ * recién generada a la persona.
  */
 
 import { NextResponse } from "next/server"
 
+import { ACCION, registrarAcceso } from "@/lib/auditoria"
 import { type ErrorGuarda, esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
 import { construirContextoClinico } from "@/lib/ficha/contexto"
 import { FichaInvalidaError, generarFichaConsulta } from "@/lib/ficha/generar"
@@ -182,6 +197,13 @@ export async function POST(): Promise<Response> {
       const { status, mensaje } = respuestaDeErrorGemini(error)
       return json({ error: mensaje }, status)
     }
+
+    // Auditoría (Sprint 10, tarea 10.4): ver el encabezado del archivo.
+    await registrarAcceso({
+      perfilId,
+      accion: ACCION.exportar_ficha,
+      recursoTipo: "ficha",
+    })
 
     return json({ ficha }, 200)
   } catch (error) {

@@ -24,7 +24,14 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { ActivityIcon, CreditCardIcon, HeartPulseIcon, PillIcon, StethoscopeIcon } from "lucide-react"
+import {
+  ActivityIcon,
+  ClipboardListIcon,
+  CreditCardIcon,
+  HeartPulseIcon,
+  PillIcon,
+  StethoscopeIcon,
+} from "lucide-react"
 
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
 import { BotonSos } from "@/components/inicio/boton-sos"
@@ -197,6 +204,36 @@ export default async function PaginaInicio() {
           <span className="text-sm text-muted-foreground">Directorio de profesionales y contacto</span>
         </span>
       </Link>
+
+      {/*
+        Acceso a /ficha (Sprint 10, tarea 10.4): la hoja de resumen para
+        consulta, generada por IA a partir del contexto clínico minimizado
+        (tarea 10.2). Gateada por `canUpload` -mismo piso mínimo que exige
+        `POST /api/ficha/generar`, ver el encabezado de
+        `app/api/ficha/generar/route.ts`-: un `can_view` puro que forzara la
+        URL igual rebotaría a `/inicio` sin ver el botón "Generar ficha"
+        (`app/(app)/(sin-nav)/ficha/page.tsx`), así que ni se le ofrece la
+        card.
+      */}
+      {permisos.canUpload && (
+        <Link
+          href="/ficha"
+          className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)")}
+        >
+          <span
+            className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+            aria-hidden="true"
+          >
+            <ClipboardListIcon className="size-5" />
+          </span>
+          <span className="flex flex-col text-left">
+            <span className="text-base font-semibold text-foreground">Ficha para el médico</span>
+            <span className="text-sm text-muted-foreground">
+              Resumen de una página para imprimir o compartir
+            </span>
+          </span>
+        </Link>
+      )}
 
       {/*
         Acceso a /perfil/sos (Sprint 8, tarea 8.2): la pantalla de EDICIÓN de

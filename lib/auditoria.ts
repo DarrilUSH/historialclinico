@@ -55,7 +55,7 @@ import "server-only"
  * | `ver_documento`      | Detalle de estudio (`app/(app)/documentos/[id]`), una fila por apertura | Sprint 4 |
  * | `descargar_archivo`  | Emisión de signed URL del bucket `documentos-medicos` | Sprint 4 |
  * | `ver_credencial`     | Apertura de la foto de una credencial de cobertura | Sprint 8 |
- * | `exportar_ficha`     | Generación de la ficha SOS imprimible | Sprint 6 |
+ * | `exportar_ficha`     | `POST /api/ficha/generar` — generación de la hoja de resumen para consulta | ✅ Sprint 10 |
  * | `otorgar_permiso` / `revocar_permiso` | `app/(app)/(con-nav)/familia/actions.ts` | pendiente (fuera del alcance de esta tarea) |
  *
  * **Deuda declarada: no existe `subir_documento`.** El enum `access_action`

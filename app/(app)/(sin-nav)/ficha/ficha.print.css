@@ -1,0 +1,94 @@
+/**
+ * Estilos de impresión de la hoja de consulta (Sprint 10, tarea 10.4).
+ *
+ * CSS global importado por `page.tsx` (ver el comentario de ese archivo sobre
+ * por qué un import "global" acá es seguro): todo selector va calificado bajo
+ * `.hoja-consulta` -la raíz de `components/ficha/hoja-consulta.tsx`- para no
+ * filtrar ninguna regla a otra pantalla de la app, aunque Next.js empaquete
+ * este archivo junto con el resto de los estilos.
+ *
+ * ## Por qué acá SÍ hay colores literales (`#000`, `#fff`)
+ *
+ * `docs/design-system.md` §8 prohíbe colores literales en componentes: la app
+ * responde a tokens y al tema claro/oscuro. Esa regla es sobre PANTALLA. El
+ * papel no tiene tema oscuro: si la persona imprime con el sistema operativo
+ * en modo oscuro, `--foreground` sería un verde casi blanco sobre `--card`
+ * verde casi negro -ilegible en una hoja, y carísimo en cartuchos de color si
+ * el navegador además imprime los fondos-. `@media print` fuerza texto negro
+ * sobre blanco sin importar el tema activo, que es exactamente lo que pide el
+ * criterio de aceptación del roadmap ("colores print-safe").
+ *
+ * ## `@page` y la raíz en `pt`: por qué se achica `<html>` y no `.hoja-consulta`
+ *
+ * Casi todos los tamaños de `components/ficha/hoja-consulta.tsx` son
+ * utilidades de Tailwind (`text-base`, `text-lg`, `text-2xl`, `gap-5`,
+ * `p-6`...) que resuelven en `rem`, es decir **relativas a la raíz del
+ * documento, no al padre**. Un `font-size` puesto en `.hoja-consulta` no
+ * cambia nada: cada hijo con su propia clase `text-*` sigue leyendo el `rem`
+ * de `<html>`, no el de su contenedor -esto se probó en la verificación de la
+ * tarea: fijarlo en `.hoja-consulta` daba una hoja de DOS páginas, idéntica a
+ * no tener la regla-. Bajar la raíz entera dentro de `@media print` escala
+ * texto Y espaciado (gaps, padding) en la misma proporción de una sola vez,
+ * sin reescribir cada clase de Tailwind del componente con una variante
+ * `print:` propia.
+ *
+ * `10pt` de raíz es MENOR que el piso de 16px que impone
+ * `docs/design-system.md` §4 ("el sistema se niega a tener texto chico") -esa
+ * regla es sobre PANTALLA, pensada para un teléfono a distancia de brazo con
+ * luz variable. Un texto de cuerpo entre 9 y 11pt es el estándar de
+ * legibilidad de un documento IMPRESO leído de cerca (recibos, resúmenes de
+ * obra social, la letra de cualquier receta médica de papel), y es lo que
+ * permite que el contenido típico del seed -seis secciones, preguntas y
+ * aviso- entre en una sola hoja A4 sin recortar nada.
+ */
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  /* Ver el bloque de arriba: escala TODA la tipografía y el espaciado de la
+     hoja (Tailwind resuelve sus `rem` contra esta raíz), no solo el texto. */
+  html {
+    font-size: 10pt;
+  }
+
+  body {
+    line-height: 1.3;
+  }
+
+  /* Reset de "se ve como tarjeta en pantalla" → hoja de papel sin bordes ni
+     sombra, y sin el padding propio de la tarjeta (la hoja ya tiene el
+     margen del `@page` de arriba). */
+  .hoja-consulta {
+    margin: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    padding: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
+
+  /* Texto negro sobre fondo blanco en TODO el árbol de la hoja, sin importar
+     el tema activo -ver el bloque de arriba sobre colores literales-. */
+  .hoja-consulta,
+  .hoja-consulta * {
+    color: #000 !important;
+    background: transparent !important;
+  }
+
+  .hoja-consulta-aviso {
+    border: 1px solid #000 !important;
+  }
+
+  .hoja-consulta-notas-linea {
+    border-bottom: 1px dashed #000 !important;
+  }
+}
