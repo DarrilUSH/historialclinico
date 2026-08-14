@@ -941,6 +941,39 @@ export type Database = {
           },
         ]
       }
+      shared_uploads_temp: {
+        Row: {
+          created_at: string
+          expires_at: string
+          file_size_bytes: number
+          id: string
+          mime_type: string
+          original_filename: string
+          storage_path: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string
+          file_size_bytes: number
+          id?: string
+          mime_type: string
+          original_filename: string
+          storage_path: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          file_size_bytes?: number
+          id?: string
+          mime_type?: string
+          original_filename?: string
+          storage_path?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       storage_purge_queue: {
         Row: {
           bucket: string

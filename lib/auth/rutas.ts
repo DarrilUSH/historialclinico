@@ -119,6 +119,33 @@ export const RUTA_OFFLINE = "/offline"
 export const RUTA_MANIFEST = "/manifest.webmanifest"
 
 /**
+ * Receptor del Web Share Target (Sprint 11, tarea 11.2): `share_target.action`
+ * en `app/manifest.ts`. Quien llega acá es el SISTEMA OPERATIVO haciendo un
+ * POST multipart de nivel superior (navegación real del navegador, disparada
+ * al elegir "Historial Médico" en la hoja de compartir de Android) — no un
+ * `fetch` de script. Eso importa para la clasificación:
+ *
+ * Es "pública" en el mismo sentido que `RUTA_CRON_RECORDATORIOS`: **"no la
+ * autentica el proxy con un 401 JSON", NO "cualquiera puede usarla sin
+ * sesión"**. La diferencia con los CRON es la autenticación en sí: acá SÍ es
+ * la cookie de sesión de Supabase (`app/api/compartir/route.ts` llama a
+ * `supabase.auth.getUser()` como primer paso), pero declarar esta ruta bajo
+ * la regla genérica de `/api` (401 JSON sin sesión, ver `esRutaDeApi` en
+ * `proxy.ts`) le mostraría ese JSON crudo a la persona como pantalla de
+ * aterrizaje después de compartir un archivo desde otra app — no hay forma
+ * de "reintentar" ni de loguearse desde ahí, y el archivo que el sistema
+ * operativo acaba de entregar se pierde sin ninguna explicación.
+ *
+ * Por eso el Route Handler hace su PROPIA redirección amable
+ * (`303 → /login?desde=/compartir`) cuando no hay sesión, igual que
+ * cualquier pantalla — documentado ahí mismo, incluyendo que el archivo SÍ se
+ * pierde en ese camino (el sistema operativo permite volver a compartir sin
+ * fricción, así que no vale la pena la complejidad de retenerlo a través de
+ * un login). `tests/unit/rutas.test.ts` cubre esta excepción.
+ */
+export const RUTA_COMPARTIR = "/api/compartir"
+
+/**
  * Rutas públicas: se sirven con o sin sesión. Cada entrada cubre la ruta
  * exacta y sus subrutas (`/recuperar` cubre `/recuperar/confirmar`), salvo
  * `/` que se compara exacta —si no, cubriría toda la aplicación—.
@@ -133,6 +160,7 @@ export const RUTAS_PUBLICAS = [
   RUTA_MANIFEST,
   RUTA_CRON_RECORDATORIOS,
   RUTA_CRON_ALERTAS_MEDICACION,
+  RUTA_COMPARTIR,
 ] as const
 
 /**

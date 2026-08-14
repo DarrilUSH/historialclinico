@@ -42,11 +42,19 @@ if (typeof window !== 'undefined') {
 /**
  * Buckets privados del producto. Los literales tienen que coincidir con los de
  * `20260812230000_storage.sql` y con los que encola `public.encolar_purga_storage()`.
+ *
+ * `compartidosTemp` es distinto a los otros tres (Sprint 11, tarea 11.2,
+ * `20260814100000_share_target_temporal.sql`): no tiene NINGUNA política de
+ * `storage.objects` -ni siquiera para `authenticated`-, así que solo se puede
+ * tocar con este módulo. No participa de `encolar_purga_storage()` porque sus
+ * objetos nunca cuelgan de una fila de `documents`/`insurance_cards`/`profiles`;
+ * la purga la maneja `lib/documentos/compartir-temporal.ts` directamente.
  */
 export const BUCKETS = {
   documentos: 'documentos-medicos',
   credenciales: 'credenciales-cobertura',
   avatares: 'avatares',
+  compartidosTemp: 'compartidos-temp',
 } as const;
 
 export type Bucket = (typeof BUCKETS)[keyof typeof BUCKETS];
@@ -187,6 +195,46 @@ export async function descargarObjeto(bucket: Bucket, path: string): Promise<Obj
   }
 
   return { datos: data, tipo: data.type || 'application/octet-stream' };
+}
+
+/**
+ * Sube un objeto al bucket con privilegios de administrador.
+ *
+ * Existe para el receptor del Web Share Target
+ * (`app/api/compartir/route.ts`, Sprint 11, tarea 11.2): en ese momento la
+ * sesión todavía no tiene un PERFIL de destino -es una app multiperfil y
+ * recién se está por elegir en `/compartir`-, así que no hay ningún
+ * `profile_id` que las políticas de `objetos_insert_puede_cargar_en_perfil`
+ * puedan evaluar. Subir con el cliente del usuario no es una opción: esa
+ * política exige `puede_cargar_en_perfil(profile_id)` sobre el primer
+ * segmento del path, y acá ese segmento es un `user_id`, no un `profile_id`.
+ *
+ * No verifica permisos: vale la misma advertencia del encabezado del módulo.
+ * Quien llama (`lib/documentos/compartir-temporal.ts`) es responsable de
+ * haber verificado la sesión ANTES -`requerirSesion` en
+ * `app/api/compartir/route.ts`- y de construir el `path` con el `user_id` de
+ * esa sesión, nunca con uno que mande el cliente.
+ *
+ * `upsert: false`: el path lleva un uuid recién generado (igual que
+ * `construirStoragePath` en `lib/documentos/ingesta.ts`), así que no puede
+ * existir. Si existiera, sobrescribir sería destruir el archivo de otra
+ * fila de `shared_uploads_temp`.
+ */
+export async function subirObjeto(
+  bucket: Bucket,
+  path: string,
+  datos: Blob,
+  contentType: string,
+): Promise<void> {
+  const rutaLimpia = validarPath(path);
+
+  const { error } = await clienteAdmin()
+    .storage.from(bucket)
+    .upload(rutaLimpia, datos, { contentType, upsert: false });
+
+  if (error) {
+    throw new Error(`No se pudo subir "${bucket}/${rutaLimpia}": ${error.message}`);
+  }
 }
 
 /**

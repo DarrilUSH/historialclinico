@@ -87,24 +87,15 @@ import "server-only"
  * `created_at`, que responden "quién subió esto y cuándo".
  */
 
-import { detectarMimeReal, formatearBytes, LIMITE_BYTES } from "@/lib/archivos/validacion"
+import {
+  EXTENSION_POR_MIME,
+  detectarMimeReal,
+  formatearBytes,
+  LIMITE_BYTES,
+} from "@/lib/archivos/validacion"
 import type { MimeValidado } from "@/lib/archivos/validacion"
 import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
 import { BUCKETS, borrarObjeto } from "@/lib/storage-admin"
-
-/**
- * Extensión que se le pone al objeto en el bucket. Se deriva del **MIME real
- * detectado por magic bytes**, nunca del nombre que mandó el cliente: el
- * nombre es texto libre bajo control de quien sube, y usarlo permitiría
- * guardar un objeto llamado `.html` (o `.svg`) que después una signed URL
- * serviría con ese `Content-Type`.
- */
-const EXTENSION_POR_MIME: Record<MimeValidado, string> = {
-  "application/pdf": "pdf",
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-}
 
 /** Tope del título provisional. `documents.title` es `text` sin límite, pero un nombre de archivo absurdo no tiene por qué llegar entero a la interfaz. */
 const MAX_TITULO = 120

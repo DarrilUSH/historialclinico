@@ -16,6 +16,22 @@
 
 export type MimeValidado = "application/pdf" | "image/jpeg" | "image/png" | "image/webp"
 
+/**
+ * Extensión de archivo por MIME real. Fuente única: la usa
+ * `lib/documentos/ingesta.ts` para nombrar el objeto de `documentos-medicos`
+ * y `lib/documentos/compartir-temporal.ts` para nombrar el objeto temporal de
+ * `compartidos-temp` (Sprint 11, tarea 11.2) — es el mismo archivo en las dos
+ * paradas de su recorrido, así que la extensión tiene que salir del mismo
+ * lugar. Vive acá y no en `ingesta.ts` porque este módulo ya es dueño del
+ * universo de los cuatro `MimeValidado`.
+ */
+export const EXTENSION_POR_MIME: Record<MimeValidado, string> = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+}
+
 export interface ResultadoValidacion {
   valido: boolean
   /** MIME real detectado por los magic bytes, o `null` si no coincide con ninguno de los cuatro soportados. */

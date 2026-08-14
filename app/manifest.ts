@@ -38,6 +38,32 @@
  * carga (splash screen que arma Android con estos dos valores) combinan con
  * el fondo real de la app en vez de mostrar un color que no es de nadie.
  *
+ * ## `share_target` (Sprint 11, tarea 11.2)
+ *
+ * Registra la PWA como destino en la hoja de "Compartir" del sistema (solo
+ * Android/Chrome con la app instalada como WebAPK — ver `docs/share-target.md`
+ * §4 para la limitación de iOS y la de verificación contra localhost, ya
+ * conocida desde 11.1). `action` apunta al Route Handler receptor
+ * (`app/api/compartir/route.ts`), que hace su PROPIA guarda de sesión -ver el
+ * comentario de `RUTA_COMPARTIR` en `lib/auth/rutas.ts`- en vez de depender
+ * del 401 JSON genérico de `/api`.
+ *
+ * `params.files[0].name` ("archivos") es el nombre de campo que el receptor
+ * lee del `FormData` con `formData.getAll("archivos")`: tiene que coincidir
+ * exacto en los dos lados. `accept` repite los mismos cuatro MIME que
+ * `lib/archivos/validacion.ts` y el bucket `documentos-medicos` — el sistema
+ * operativo ya filtra qué archivos ofrece compartir hacia esta app con esta
+ * lista, aunque el receptor igual revalida por magic bytes (nunca confía en
+ * lo que declaró el sistema operativo, mismo criterio que el resto del
+ * pipeline de ingesta).
+ *
+ * `title`/`text` se aceptan (algunas apps mandan una leyenda al compartir,
+ * por ejemplo WhatsApp) pero el receptor no los usa: el título final del
+ * documento se decide en la pantalla de revisión existente del Sprint 4
+ * (`components/documentos/formulario-revision.tsx`), que ya deja
+ * retitular todo antes de confirmar. Enchufarlos ahora sería una segunda
+ * fuente de título compitiendo con la que ya funciona.
+ *
  * ## `short_name`: "H. Médico" y no "Historial"
  *
  * El launcher de Android corta el nombre visible a pocos caracteres. Entre
@@ -82,6 +108,22 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: "maskable",
       },
     ],
+    // Ver el comentario de cabecera "share_target (Sprint 11, tarea 11.2)".
+    share_target: {
+      action: "/api/compartir",
+      method: "POST",
+      enctype: "multipart/form-data",
+      params: {
+        title: "titulo",
+        text: "texto",
+        files: [
+          {
+            name: "archivos",
+            accept: ["application/pdf", "image/jpeg", "image/png", "image/webp"],
+          },
+        ],
+      },
+    },
     // Shortcuts (long-press del ícono instalado): los dos caminos que un
     // adulto mayor o quien lo cuida necesitan sin pasar por la navegación
     // normal de la app. Reusan el ícono principal -pedido explícito de la

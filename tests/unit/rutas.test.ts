@@ -11,6 +11,7 @@
 import { describe, it, expect } from "vitest"
 
 import {
+  RUTA_COMPARTIR,
   RUTA_CRON_ALERTAS_MEDICACION,
   RUTA_CRON_RECORDATORIOS,
   RUTA_MANIFEST,
@@ -96,6 +97,22 @@ describe("lib/auth/rutas.ts", () => {
     // header `x-cron-secret` contra la misma variable CRON_SECRET.
     expect(esRutaPublica(RUTA_CRON_ALERTAS_MEDICACION, EN_PROD)).toBe(true)
     expect(esRutaPublica("/api/push/procesar-alertas-medicacion", EN_PROD)).toBe(true)
+  })
+
+  it("el receptor del Web Share Target es público para el proxy, también en producción, pero sigue siendo una ruta de /api", () => {
+    // A diferencia de RUTA_CRON_*, la autenticación real acá SÍ es la cookie
+    // de sesión: declararla pública en el proxy solo evita el 401 JSON
+    // automático, para que app/api/compartir/route.ts pueda hacer su propia
+    // redirección amable a /login cuando no hay sesión (ver el comentario de
+    // RUTA_COMPARTIR en lib/auth/rutas.ts).
+    expect(esRutaPublica(RUTA_COMPARTIR, EN_PROD)).toBe(true)
+    expect(esRutaPublica("/api/compartir", EN_PROD)).toBe(true)
+    expect(esRutaDeApi(RUTA_COMPARTIR)).toBe(true)
+  })
+
+  it("la pantalla de recepción /compartir sigue exigiendo sesión: la excepción es solo el receptor de /api", () => {
+    expect(esRutaPrivada("/compartir", EN_PROD)).toBe(true)
+    expect(esRutaDeApi("/compartir")).toBe(false)
   })
 
   it("las excepciones de los barridos NO abren el resto de /api/push", () => {
