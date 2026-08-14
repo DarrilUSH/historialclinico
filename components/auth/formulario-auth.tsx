@@ -54,6 +54,14 @@ interface FormularioAuthProps {
   textoBoton: string
   /** Contenido debajo del botón: links a otras pantallas del flujo. */
   pie?: React.ReactNode
+  /**
+   * Contenido DENTRO del `<form>`, entre los campos y el botón de envío
+   * (Sprint 12, tarea 12.1). Hoy el único uso es
+   * `<ConsentimientoLegal />` en `/registro`: tiene que viajar en el mismo
+   * `formData` que el resto del formulario, así que no alcanza con `pie`
+   * -que también vive dentro del `<form>`, pero DESPUÉS del botón-.
+   */
+  consentimiento?: React.ReactNode
 }
 
 const ESTADO_INICIAL: EstadoAuth = { error: null, mensaje: null }
@@ -67,6 +75,7 @@ export function FormularioAuth({
   camposOcultos,
   textoBoton,
   pie,
+  consentimiento,
 }: FormularioAuthProps) {
   const [estado, enviarAccion] = useActionState(accion, ESTADO_INICIAL)
 
@@ -114,6 +123,8 @@ export function FormularioAuth({
                 describedBy={estado.error ? ID_ERROR : undefined}
               />
             ))}
+
+            {consentimiento}
 
             {estado.error && (
               <Alerta variante="error" id={ID_ERROR}>

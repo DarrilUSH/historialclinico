@@ -163,7 +163,7 @@ export default async function PaginaFamilia() {
 
       <section className="flex flex-col gap-4 chica:gap-3">
         <h2 className="text-lg font-semibold text-foreground">Invitar a alguien</h2>
-        <FormularioInvitar perfilId={perfil.id} />
+        <FormularioInvitar perfilId={perfil.id} perfilNombre={perfil.full_name} />
       </section>
     </div>
   )

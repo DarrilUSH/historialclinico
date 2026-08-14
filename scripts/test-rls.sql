@@ -4124,6 +4124,221 @@ update public.profiles set blood_type = 'A+'           where id = :p_a;
 
 
 -- =============================================================================
+-- BLOQUE 18 — Consentimiento registrado (consents) — Sprint 12, tarea 12.1
+-- -----------------------------------------------------------------------------
+-- Ley 25.326, criterio de aceptación del ROADMAP: el consentimiento queda
+-- registrado con versión y timestamp. Reusa las dos cuentas del BLOQUE
+-- 15/16 (f1500aaa = A, f1500bbb = B), que siguen vivas por la misma razón
+-- que el BLOQUE 16 ya documentó: la limpieza de estas entidades es global y
+-- corre al final del script.
+--
+--   · INSERT propio: permitido. INSERT a nombre de otra cuenta: rechazado
+--     por el WITH CHECK.
+--   · SELECT: solo las filas propias, ni siquiera entre las dos cuentas de
+--     prueba que en otros bloques comparten perfiles.
+--   · document fuera del dominio cerrado ('privacidad', 'terminos',
+--     'acceso_familiar'): rechazado por el CHECK (23514).
+--   · UPDATE y DELETE: sin PRIVILEGIO, no solo sin política — nace
+--     append-only desde el día uno (lección de la auditoría 11.4 sobre
+--     consultation_sheets, aplicada acá sin esperar a una migración de
+--     corrección separada).
+--   · anon: nada de nada.
+--   · TRUNCATE: revocado. RLS no protege de un TRUNCATE.
+-- =============================================================================
+\echo '### BLOQUE 18 — consentimiento registrado (consents)'
+
+-- Pre-limpieza defensiva (lección del fix de auditoría 10.5): una corrida
+-- anterior abortada a la mitad dejaría estas filas y los conteos esperados
+-- de abajo no cerrarían.
+delete from public.consents
+ where user_id in ('f1500aaa-1111-4111-8111-111111111111', 'f1500bbb-2222-4222-8222-222222222222');
+
+-- ── La cuenta A: firma su propio consentimiento de alta (privacidad + términos).
+begin;
+select set_config('request.jwt.claims', '{"sub":"f1500aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v integer;
+begin
+    insert into public.consents (user_id, document, version)
+    values ('f1500aaa-1111-4111-8111-111111111111', 'privacidad', '2026-08-14-v1'),
+           ('f1500aaa-1111-4111-8111-111111111111', 'terminos',   '2026-08-14-v1');
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('18. consentimiento (consents)',
+        'A inserta su propio consentimiento a privacidad y términos  [CRITERIO DE ACEPTACIÓN]',
+        '2 filas', v || ' filas');
+end $$;
+
+select pruebas_rls.registrar('18. consentimiento (consents)',
+       'A lee sus propias filas (SELECT propio)', '2',
+       (select count(*)::text from public.consents
+         where user_id = 'f1500aaa-1111-4111-8111-111111111111'));
+
+select pruebas_rls.registrar('18. consentimiento (consents)',
+       'A NO ve el consentimiento de B  [CRITERIO DE ACEPTACIÓN]', '0 filas',
+       (select count(*)::text || ' filas' from public.consents
+         where user_id = 'f1500bbb-2222-4222-8222-222222222222'));
+
+-- INSERT a nombre de OTRA cuenta: el WITH CHECK lo rechaza.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consents (user_id, document, version)
+        values ('f1500bbb-2222-4222-8222-222222222222', 'privacidad', '2026-08-14-v1');
+        v := 'insertado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('18. consentimiento (consents)',
+        'A NO puede insertar consentimiento a nombre de B (WITH CHECK)',
+        'rechazado (42501)', v);
+end $$;
+
+-- El CHECK del dominio cerrado de documentos: 'cookies' no es ninguno de los tres.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consents (user_id, document, version)
+        values ('f1500aaa-1111-4111-8111-111111111111', 'cookies', '2026-08-14-v1');
+        v := 'insertado';
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('18. consentimiento (consents)',
+        'Un documento fuera del dominio cerrado es rechazado por el CHECK',
+        'rechazado (23514)', v);
+end $$;
+
+-- UPDATE: sin PRIVILEGIO, no solo sin política.
+do $$
+declare v text;
+begin
+    begin
+        update public.consents set version = 'otra'
+         where user_id = 'f1500aaa-1111-4111-8111-111111111111' and document = 'privacidad';
+        v := 'editado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('18. consentimiento (consents)',
+        'authenticated NO tiene GRANT UPDATE sobre consents (registro probatorio)',
+        'denegado (42501)', v);
+end $$;
+
+-- DELETE: ídem.
+do $$
+declare v text;
+begin
+    begin
+        delete from public.consents
+         where user_id = 'f1500aaa-1111-4111-8111-111111111111' and document = 'privacidad';
+        v := 'borrado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('18. consentimiento (consents)',
+        'authenticated NO tiene GRANT DELETE sobre consents (registro probatorio)',
+        'denegado (42501)', v);
+end $$;
+
+-- TRUNCATE: el revoke que no es decorativo. RLS no lo filtraría.
+do $$
+declare v text;
+begin
+    begin
+        truncate table public.consents;
+        v := 'vaciada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('18. consentimiento (consents)',
+        'authenticated NO puede TRUNCATE consents (RLS no protege de un TRUNCATE)',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+-- ── La cuenta B: firma la suya (acceso_familiar), no toca la de A.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f1500bbb-2222-4222-8222-222222222222","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v integer;
+begin
+    insert into public.consents (user_id, document, version)
+    values ('f1500bbb-2222-4222-8222-222222222222', 'acceso_familiar', '2026-08-14-v1');
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('18. consentimiento (consents)',
+        'B inserta su propio consentimiento de "acceso_familiar"',
+        '1 filas', v || ' filas');
+end $$;
+
+select pruebas_rls.registrar('18. consentimiento (consents)',
+       'B NO ve el consentimiento de A  [CRITERIO DE ACEPTACIÓN]', '0 filas',
+       (select count(*)::text || ' filas' from public.consents
+         where user_id = 'f1500aaa-1111-4111-8111-111111111111'));
+
+commit;
+
+-- ── anon: nada de nada.
+begin;
+select set_config('request.jwt.claims', '', true);
+set local role anon;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.consents;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('18. consentimiento (consents)',
+        'anon NO puede leer consents (sin GRANT SELECT)', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consents (user_id, document, version)
+        values ('f1500aaa-1111-4111-8111-111111111111', 'privacidad', '2026-08-14-v1');
+        v := 'insertado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('18. consentimiento (consents)',
+        'anon NO tiene GRANT INSERT sobre consents (REVOKE no concede nada)',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+-- Invariantes estructurales.
+select pruebas_rls.registrar('18. consentimiento (consents)',
+       'consents tiene RLS habilitada', 'true',
+       (select rowsecurity::text from pg_tables
+         where schemaname = 'public' and tablename = 'consents'));
+
+select pruebas_rls.registrar('18. consentimiento (consents)',
+       'Privilegios de anon sobre consents', '0',
+       (select count(*)::text from information_schema.role_table_grants
+         where table_schema = 'public' and table_name = 'consents' and grantee = 'anon'));
+
+select pruebas_rls.registrar('18. consentimiento (consents)',
+       'Privilegio de UPDATE/DELETE de authenticated en consents (append-only desde el día uno)',
+       '0',
+       (select count(*)::text from information_schema.role_table_grants
+         where table_schema = 'public' and table_name = 'consents'
+           and grantee = 'authenticated' and privilege_type in ('UPDATE', 'DELETE')));
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
@@ -4174,6 +4389,11 @@ delete from public.profiles  where id = 'f1500000-0000-4000-8000-00000000f503';
 -- pero explícito es más fácil de auditar y no depende del orden de los FK.
 delete from public.shared_uploads_temp
  where id in ('f1600000-0000-4000-8000-00000000f601', 'f1600000-0000-4000-8000-00000000f602');
+-- Filas del BLOQUE 18 (Sprint 12, tarea 12.1). Mismo criterio: el
+-- `on delete cascade` de consents.user_id igual las llevaría, pero explícito
+-- no depende del orden de los FK.
+delete from public.consents
+ where user_id in ('f1500aaa-1111-4111-8111-111111111111', 'f1500bbb-2222-4222-8222-222222222222');
 delete from auth.users       where id in ('f1500aaa-1111-4111-8111-111111111111', 'f1500bbb-2222-4222-8222-222222222222');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 

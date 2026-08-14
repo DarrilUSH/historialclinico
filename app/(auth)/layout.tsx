@@ -13,9 +13,18 @@
  * `profiles`. Un dispositivo que ya eligió letra chica ve el login chico
  * antes de identificarse, verificable con
  * `curl -b tamano=chica http://localhost:3000/login`.
+ *
+ * ## Pie con las páginas legales (Sprint 12, tarea 12.1)
+ *
+ * El criterio de aceptación del ROADMAP exige que `/privacidad` y
+ * `/terminos` sean "accesibles desde el pie sin sesión": `<PiePaginasLegales
+ * />` va debajo de la tarjeta, dentro del mismo `<main>` -no es un segundo
+ * landmark-, verificable sin sesión con `curl http://localhost:3000/login`.
  */
 
 import type { ReactNode } from "react"
+
+import { PiePaginasLegales } from "@/components/legal/pie-paginas-legales"
 
 export default function LayoutAuth({ children }: { children: ReactNode }) {
   return (
@@ -26,8 +35,9 @@ export default function LayoutAuth({ children }: { children: ReactNode }) {
     // El shell autenticado ya trae su propio <main>
     // (`app/(app)/(con-nav)/layout.tsx`), y este árbol es hermano del de aquel:
     // nunca hay dos <main> en la misma página.
-    <main className="flex min-h-dvh w-full flex-1 items-center justify-center bg-muted/30 px-4 py-10 chica:px-3 chica:py-6">
+    <main className="flex min-h-dvh w-full flex-1 flex-col items-center justify-center gap-2 bg-muted/30 px-4 py-10 chica:gap-1 chica:px-3 chica:py-6">
       {children}
+      <PiePaginasLegales />
     </main>
   )
 }

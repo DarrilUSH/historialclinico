@@ -164,7 +164,11 @@ function esIpv6(valor: string): boolean {
  * No se reescribe la dirección (una `::ffff:127.0.0.1` se guarda tal cual):
  * la auditoría registra lo que llegó, no una interpretación.
  */
-function normalizarIp(valor: string | null): string | null {
+// Exportada desde el Sprint 12 (`lib/legales.ts`): el registro de
+// consentimiento (`consents.ip`) necesita la misma normalización que
+// `access_logs.ip`, y es una función pura sin ningún efecto de auditoría —
+// exportarla no cambia ni el contrato ni el comportamiento de este archivo.
+export function normalizarIp(valor: string | null): string | null {
   if (!valor) {
     return null
   }

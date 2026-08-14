@@ -32,6 +32,7 @@ import {
   limpiarCookieTamano,
   sincronizarCookieTamano,
 } from "@/lib/densidad/servidor"
+import { registrarConsentimientosDeAlta } from "@/lib/legales"
 import {
   PARAM_DESDE,
   RUTA_LOGIN,
@@ -50,6 +51,11 @@ const LARGO_MINIMO_CONTRASENA = 8
 
 function normalizarTexto(valor: FormDataEntryValue | null): string {
   return typeof valor === "string" ? valor.trim() : ""
+}
+
+/** Mismo criterio que `esCasillaMarcada` de `familia/actions.ts`: un checkbox HTML sin marcar ni siquiera manda su campo en el `FormData`. */
+function esCasillaMarcada(valor: FormDataEntryValue | null): boolean {
+  return valor === "on" || valor === "true"
 }
 
 function esEmailValido(email: string): boolean {
@@ -121,6 +127,7 @@ export async function registrarse(
   const email = normalizarTexto(formData.get("email")).toLowerCase()
   const password = normalizarTexto(formData.get("password"))
   const confirmarPassword = normalizarTexto(formData.get("confirmarPassword"))
+  const aceptaLegales = esCasillaMarcada(formData.get("aceptaLegales"))
 
   if (!nombreCompleto) {
     return { error: "Ingresá tu nombre completo." }
@@ -135,6 +142,19 @@ export async function registrarse(
   }
   if (password !== confirmarPassword) {
     return { error: "Las contraseñas no coinciden." }
+  }
+  // Sprint 12, tarea 12.1 (Ley 25.326): sin este checkbox no hay
+  // consentimiento libre, expreso e informado, y por lo tanto no hay base
+  // legal para crear la cuenta. `<ConsentimientoLegal />`
+  // (components/legal/consentimiento.tsx) ya lo exige del lado del cliente
+  // con `required`, pero un `formData` se puede alterar: esta es la
+  // revalidación que de verdad importa, igual que `destinoSeguro` en
+  // `iniciarSesion`.
+  if (!aceptaLegales) {
+    return {
+      error:
+        "Tenés que aceptar la Política de Privacidad y los Términos y Condiciones para crear tu cuenta.",
+    }
   }
 
   const supabase = await createClient()
@@ -170,6 +190,24 @@ export async function registrarse(
     return {
       error:
         "Tu cuenta se creó, pero hubo un problema al guardar tu perfil. Iniciá sesión y probá de nuevo, o escribinos si el problema sigue.",
+    }
+  }
+
+  // Sprint 12, tarea 12.1: el consentimiento a Privacidad y Términos queda
+  // registrado con versión y timestamp (criterio de aceptación del
+  // ROADMAP). A diferencia de `registrarAcceso` (auditoría de conveniencia),
+  // acá el registro ES la prueba de la base legal que habilitó crear la
+  // cuenta -por eso `registrarConsentimientosDeAlta` propaga el error en vez
+  // de tragarlo, ver el porqué en `lib/legales.ts`-.
+  const { error: errorConsentimiento } = await registrarConsentimientosDeAlta(
+    supabase,
+    data.user.id,
+  )
+
+  if (errorConsentimiento) {
+    return {
+      error:
+        "Tu cuenta se creó, pero hubo un problema al registrar tu consentimiento. Iniciá sesión y probá de nuevo, o escribinos si el problema sigue.",
     }
   }
 

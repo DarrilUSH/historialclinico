@@ -33,6 +33,7 @@ import {
   esErrorDeGuarda,
   requerirPermiso,
 } from "@/lib/auth/guardas"
+import { registrarConsentimiento } from "@/lib/legales"
 
 export type EstadoFamilia = {
   error: string | null
@@ -130,12 +131,23 @@ export async function invitarFamiliar(
   const email = normalizarTexto(formData.get("email")).toLowerCase()
   const canUpload = esCasillaMarcada(formData.get("canUpload"))
   const canManage = esCasillaMarcada(formData.get("canManage"))
+  const confirmoAcceso = esCasillaMarcada(formData.get("confirmoAcceso"))
 
   if (!PATRON_UUID.test(perfilId)) {
     return { error: "El perfil indicado no es válido.", mensaje: null }
   }
   if (!PATRON_EMAIL.test(email)) {
     return { error: "Ingresá un correo electrónico válido.", mensaje: null }
+  }
+  // Sprint 12, tarea 12.1 (Ley 25.326): mismo criterio que el checkbox de
+  // `/registro` -sin marcar por defecto, revalidado acá porque el `formData`
+  // se puede alterar-. `FormularioInvitar` ya lo exige del lado del cliente
+  // con `required` y el texto explícito de a quién se le está dando acceso.
+  if (!confirmoAcceso) {
+    return {
+      error: "Tenés que confirmar que querés otorgar este acceso para continuar.",
+      mensaje: null,
+    }
   }
 
   let concedido: Awaited<ReturnType<typeof requerirAutoridadDeOtorgamiento>>
@@ -189,6 +201,14 @@ export async function invitarFamiliar(
   if (errorInsert) {
     return { error: mapearErrorPostgres(errorInsert), mensaje: null }
   }
+
+  // Sprint 12, tarea 12.1: el otorgamiento ya ocurrió (el INSERT de arriba
+  // tuvo éxito) — esta fila es CONSTANCIA de esa decisión, no su condición.
+  // Por eso usa `registrarConsentimiento` (nunca lanza) y no
+  // `registrarConsentimientosDeAlta` (propaga el error): un fallo de red acá
+  // no debe dejar a quien otorgó el acceso pensando que el otorgamiento en
+  // sí no funcionó. Ver el porqué completo en `lib/legales.ts`.
+  await registrarConsentimiento(supabase, concedido.usuario.id, "acceso_familiar")
 
   revalidatePath("/familia")
   return { error: null, mensaje: "Acceso otorgado correctamente." }

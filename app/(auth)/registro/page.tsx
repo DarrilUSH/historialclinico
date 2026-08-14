@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 
 import { FormularioAuth } from "@/components/auth/formulario-auth"
+import { ConsentimientoLegal } from "@/components/legal/consentimiento"
 import { registrarse } from "@/app/(auth)/actions"
 
 export const metadata: Metadata = {
@@ -42,6 +43,7 @@ export default function PaginaRegistro() {
           autoComplete: "new-password",
         },
       ]}
+      consentimiento={<ConsentimientoLegal />}
       pie={
         <p className="text-center text-base text-muted-foreground">
           ¿Ya tenés cuenta?{" "}

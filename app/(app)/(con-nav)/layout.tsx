@@ -52,6 +52,7 @@ import type { ReactNode } from "react"
 import { redirect } from "next/navigation"
 
 import { IndicadorConexion } from "@/components/base/indicador-conexion"
+import { PiePaginasLegales } from "@/components/legal/pie-paginas-legales"
 import { BottomNav } from "@/components/navegacion/bottom-nav"
 import { EncabezadoPerfil } from "@/components/navegacion/encabezado-perfil"
 import { RegistroServiceWorker } from "@/components/pwa/registro-service-worker"
@@ -129,6 +130,14 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
         className="flex flex-1 flex-col pb-[calc(var(--spacing-bottom-nav)+env(safe-area-inset-bottom))] focus:outline-none"
       >
         {children}
+
+        {/* Sprint 12, tarea 12.1: "un lugar razonable no invasivo" para
+            /privacidad y /terminos dentro de la app con sesión. No hay
+            todavía una pantalla de configuración de cuenta -crearla es más
+            superficie de la que pide esta tarea-, así que el pie de cada
+            pantalla, después de todo su contenido, es el lugar que no
+            compite con ninguna acción primaria. */}
+        <PiePaginasLegales />
       </main>
 
       <BottomNav />

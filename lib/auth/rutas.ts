@@ -150,11 +150,24 @@ export const RUTA_COMPARTIR = "/api/compartir"
  * exacta y sus subrutas (`/recuperar` cubre `/recuperar/confirmar`), salvo
  * `/` que se compara exacta —si no, cubriría toda la aplicación—.
  */
+/**
+ * Páginas legales (Sprint 12, tarea 12.1). Públicas por partida doble: tienen
+ * que poder leerse ANTES de crear una cuenta -el checkbox de `/registro` las
+ * enlaza- y el criterio de aceptación del ROADMAP exige que sean
+ * "accesibles desde el pie sin sesión". No están en `RUTAS_SOLO_ANONIMAS`:
+ * con sesión activa siguen siendo legibles (el pie de
+ * `app/(app)/(con-nav)/layout.tsx` también enlaza acá).
+ */
+export const RUTA_PRIVACIDAD = "/privacidad"
+export const RUTA_TERMINOS = "/terminos"
+
 export const RUTAS_PUBLICAS = [
   "/",
   "/login",
   "/registro",
   "/recuperar",
+  RUTA_PRIVACIDAD,
+  RUTA_TERMINOS,
   RUTA_SERVICE_WORKER,
   RUTA_OFFLINE,
   RUTA_MANIFEST,

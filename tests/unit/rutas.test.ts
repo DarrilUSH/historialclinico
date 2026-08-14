@@ -16,6 +16,8 @@ import {
   RUTA_CRON_RECORDATORIOS,
   RUTA_MANIFEST,
   RUTA_OFFLINE,
+  RUTA_PRIVACIDAD,
+  RUTA_TERMINOS,
   destinoSeguro,
   esRutaDeApi,
   esRutaPrivada,
@@ -36,6 +38,23 @@ describe("lib/auth/rutas.ts", () => {
 
   it("las subrutas de una ruta pública también son públicas", () => {
     expect(esRutaPublica("/recuperar/confirmar", EN_PROD)).toBe(true)
+  })
+
+  it("las páginas legales son públicas TAMBIÉN en producción (Sprint 12, tarea 12.1)", () => {
+    // Tienen que poder leerse ANTES de crear una cuenta -el checkbox de
+    // /registro las enlaza- y el criterio de aceptación del ROADMAP exige
+    // que sean "accesibles desde el pie sin sesión".
+    expect(esRutaPublica(RUTA_PRIVACIDAD, EN_PROD)).toBe(true)
+    expect(esRutaPublica(RUTA_TERMINOS, EN_PROD)).toBe(true)
+    expect(esRutaPublica("/privacidad", EN_PROD)).toBe(true)
+    expect(esRutaPublica("/terminos", EN_PROD)).toBe(true)
+  })
+
+  it("las páginas legales NO son solo-anónimas: siguen legibles con sesión activa", () => {
+    // A diferencia de /login y /registro, tener sesión no te saca de acá: el
+    // pie de app/(app)/(con-nav)/layout.tsx enlaza a las mismas rutas.
+    expect(esRutaSoloAnonima(RUTA_PRIVACIDAD)).toBe(false)
+    expect(esRutaSoloAnonima(RUTA_TERMINOS)).toBe(false)
   })
 
   it("el service worker es público TAMBIÉN en producción", () => {

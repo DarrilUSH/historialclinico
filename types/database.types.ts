@@ -214,6 +214,33 @@ export type Database = {
           },
         ]
       }
+      consents: {
+        Row: {
+          accepted_at: string
+          document: string
+          id: string
+          ip: unknown
+          user_id: string
+          version: string
+        }
+        Insert: {
+          accepted_at?: string
+          document: string
+          id?: string
+          ip?: unknown
+          user_id: string
+          version: string
+        }
+        Update: {
+          accepted_at?: string
+          document?: string
+          id?: string
+          ip?: unknown
+          user_id?: string
+          version?: string
+        }
+        Relationships: []
+      }
       consultation_sheets: {
         Row: {
           content: Json
