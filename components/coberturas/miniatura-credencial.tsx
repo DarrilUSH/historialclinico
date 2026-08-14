@@ -70,7 +70,7 @@ export function MiniaturaCredencial({
   if (estado === "cargando") {
     return (
       <div
-        className="flex size-16 shrink-0 items-center justify-center rounded-lg border border-border bg-muted"
+        className="flex size-16 shrink-0 items-center justify-center rounded-lg border border-border bg-muted chica:size-14"
         aria-hidden="true"
       >
         <Loader2Icon className="size-5 animate-spin text-muted-foreground" />
@@ -81,7 +81,7 @@ export function MiniaturaCredencial({
   if (estado === "error" || !url) {
     return (
       <div
-        className="flex size-16 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground"
+        className="flex size-16 shrink-0 items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground chica:size-14"
         aria-hidden="true"
       >
         <ImageOffIcon className="size-5" />
@@ -89,6 +89,12 @@ export function MiniaturaCredencial({
     )
   }
 
-  // eslint-disable-next-line @next/next/no-img-element -- signed URL de vida corta, ver visor-documento.tsx
-  return <img src={url} alt={alt} className="size-16 shrink-0 rounded-lg border border-border object-cover" />
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- signed URL de vida corta, ver visor-documento.tsx
+    <img
+      src={url}
+      alt={alt}
+      className="size-16 shrink-0 rounded-lg border border-border object-cover chica:size-14"
+    />
+  )
 }

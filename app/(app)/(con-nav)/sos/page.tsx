@@ -76,7 +76,7 @@ export default async function PaginaSos() {
     .maybeSingle()
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <FichaSos
         perfil={perfil}
         coberturaPrincipal={

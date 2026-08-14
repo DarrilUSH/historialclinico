@@ -31,9 +31,9 @@ export function TarjetaCobertura({
   puedeEditar: boolean
 }) {
   return (
-    <Tarjeta className="gap-4 px-(--card-spacing)">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
+    <Tarjeta className="gap-4 px-(--card-spacing) chica:gap-3">
+      <div className="flex items-start justify-between gap-3 chica:gap-2">
+        <div className="flex items-start gap-3 chica:gap-2">
           <span
             className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
             aria-hidden="true"
@@ -50,17 +50,32 @@ export function TarjetaCobertura({
             <h2 className="text-lg font-semibold text-balance text-foreground">
               {cobertura.provider}
             </h2>
-            {cobertura.plan && <p className="text-sm text-muted-foreground">{cobertura.plan}</p>}
+            {/* Plan + N.º de afiliado: DOS líneas en grande. Chica (Sprint
+                13, tarea 13.5) las combina en UNA -mismo patrón que
+                `tarjeta-medicacion.tsx` (Tanda 3)-: la versión larga se
+                oculta con `chica:hidden`, la combinada con `hidden
+                chica:block`, así que cada dato aparece una sola vez por
+                modo. */}
+            {cobertura.plan && (
+              <p className="text-sm text-muted-foreground chica:hidden">{cobertura.plan}</p>
+            )}
             {cobertura.member_number && (
-              <p className="text-sm text-muted-foreground numeros-clinicos">
+              <p className="text-sm text-muted-foreground numeros-clinicos chica:hidden">
                 Afiliado {cobertura.member_number}
+              </p>
+            )}
+            {(cobertura.plan || cobertura.member_number) && (
+              <p className="hidden text-sm text-muted-foreground numeros-clinicos chica:block">
+                {[cobertura.plan, cobertura.member_number ? `Afiliado ${cobertura.member_number}` : null]
+                  .filter(Boolean)
+                  .join(" · ")}
               </p>
             )}
           </div>
         </div>
 
         {cobertura.is_primary && (
-          <span className="flex shrink-0 items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-xs font-semibold text-accent-foreground">
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-accent px-2.5 py-1 text-xs font-semibold text-accent-foreground chica:px-2 chica:py-0.5">
             <StarIcon className="size-3.5" aria-hidden="true" />
             Principal
           </span>

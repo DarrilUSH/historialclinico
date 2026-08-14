@@ -135,7 +135,7 @@ export function CampoImagenCredencial({
             </p>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3 chica:gap-2">
             {/* `capture="environment"`: abre la cámara trasera directo, mismo
                 criterio que `cargador-documento.tsx`. */}
             <input
@@ -180,12 +180,12 @@ export function CampoImagenCredencial({
       )}
 
       {paso === "listo" && previewUrl && (
-        <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-3">
+        <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-3 chica:gap-3 chica:p-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element -- object URL local (blob en memoria), ver cargador-documento.tsx */}
           <img
             src={previewUrl}
             alt={`Vista previa: ${label.toLowerCase()}`}
-            className="size-20 shrink-0 rounded-lg border border-border object-cover"
+            className="size-20 shrink-0 rounded-lg border border-border object-cover chica:size-16"
           />
           <div className="flex min-w-0 flex-1 flex-col gap-2">
             <p className="text-sm text-muted-foreground numeros-clinicos">{peso}</p>

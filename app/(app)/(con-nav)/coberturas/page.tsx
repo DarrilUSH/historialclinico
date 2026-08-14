@@ -57,8 +57,8 @@ export default async function PaginaCoberturas() {
   const lista = coberturas ?? []
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 chica:gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">Coberturas</h1>
         {activo.permisos.canUpload && <BotonAgregarCobertura />}
       </div>
@@ -66,7 +66,7 @@ export default async function PaginaCoberturas() {
       {lista.length === 0 ? (
         <EstadoVacio puedeCargar={activo.permisos.canUpload} />
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-3 chica:gap-2">
           {lista.map((cobertura) => (
             <li key={cobertura.id}>
               <TarjetaCobertura cobertura={cobertura} puedeEditar={activo.permisos.canManage} />
@@ -89,12 +89,12 @@ function BotonAgregarCobertura() {
 
 function EstadoVacio({ puedeCargar }: { puedeCargar: boolean }) {
   return (
-    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center">
+    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center chica:gap-3 chica:py-8">
       <span
-        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-12"
         aria-hidden="true"
       >
-        <CreditCardIcon className="size-8" />
+        <CreditCardIcon className="size-8 chica:size-6" />
       </span>
       <h2 className="text-xl font-semibold text-balance text-foreground">
         Todavía no hay coberturas cargadas

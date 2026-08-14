@@ -69,8 +69,8 @@ export function TarjetaPermiso({
   // desmonta esta tarjeta entera -diálogo incluido-, así que no hace falta
   // cerrarla a mano. Un error la deja abierta sola, porque nada la cierra.
   return (
-    <li className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave sm:flex-row sm:items-start sm:justify-between">
-      <div className="flex items-start gap-3">
+    <li className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave sm:flex-row sm:items-start sm:justify-between chica:gap-3 chica:p-4">
+      <div className="flex items-start gap-3 chica:gap-2">
         <span
           className={cn(
             "flex size-11 shrink-0 items-center justify-center rounded-full text-base font-semibold text-avatar-foreground",
@@ -80,9 +80,9 @@ export function TarjetaPermiso({
         >
           {inicialesDe(permiso.nombre)}
         </span>
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 chica:gap-1.5">
           <span className="text-base font-semibold text-foreground">{permiso.nombre}</span>
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5 chica:gap-1">
             <BadgeFlag icono={<EyeIcon className="size-3.5" aria-hidden="true" />}>
               Ve el historial
             </BadgeFlag>
@@ -106,7 +106,7 @@ export function TarjetaPermiso({
       </div>
 
       {!bloqueadaPorOtroAdministrador && (
-        <div className="flex flex-col gap-3 sm:w-64 sm:shrink-0 sm:items-stretch">
+        <div className="flex flex-col gap-3 sm:w-64 sm:shrink-0 sm:items-stretch chica:gap-2">
           <form
             // La clave incluye los valores actuales del servidor: si esta
             // fila se guarda (o cambia por otra vía) React desmonta y
@@ -116,28 +116,28 @@ export function TarjetaPermiso({
             // mostrando un valor que ya no coincide con la base.
             key={`${permiso.canUpload}-${permiso.canManage}`}
             action={enviarEdicion}
-            className="flex flex-col gap-2.5 rounded-lg bg-muted/50 p-3"
+            className="flex flex-col gap-2.5 rounded-lg bg-muted/50 p-3 chica:gap-2 chica:p-2.5"
           >
             <input type="hidden" name="perfilId" value={perfilId} />
             <input type="hidden" name="permisoId" value={permiso.id} />
 
-            <label className="flex items-start gap-2 text-sm">
+            <label className="flex items-start gap-2 text-sm chica:gap-1.5">
               <Checkbox name="canUpload" defaultChecked={permiso.canUpload} className="mt-0.5" />
               <span>
                 <span className="font-medium text-foreground">Puede cargar datos</span>
                 <br />
-                <span className="text-muted-foreground">
+                <span className="text-muted-foreground chica:hidden">
                   Sube documentos, turnos y mediciones nuevas.
                 </span>
               </span>
             </label>
 
-            <label className="flex items-start gap-2 text-sm">
+            <label className="flex items-start gap-2 text-sm chica:gap-1.5">
               <Checkbox name="canManage" defaultChecked={permiso.canManage} className="mt-0.5" />
               <span>
                 <span className="font-medium text-foreground">Administra</span>
                 <br />
-                <span className="text-muted-foreground">
+                <span className="text-muted-foreground chica:hidden">
                   Edita y borra datos, y otorga o revoca accesos.
                 </span>
               </span>
@@ -182,7 +182,7 @@ function BotonGuardar() {
 
 function BadgeFlag({ children, icono }: { children: ReactNode; icono: ReactNode }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-foreground chica:gap-1 chica:px-2 chica:py-0.5">
       {icono}
       {children}
     </span>

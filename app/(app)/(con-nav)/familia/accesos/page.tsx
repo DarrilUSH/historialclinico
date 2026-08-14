@@ -167,8 +167,8 @@ export default async function PaginaAccesos() {
   }))
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-10 sm:py-14">
-      <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-10 sm:py-14 chica:gap-6 chica:py-6">
+      <div className="flex flex-col gap-4 chica:gap-3">
         <Link
           href="/familia"
           className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -177,7 +177,7 @@ export default async function PaginaAccesos() {
           Volver a Familia
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 chica:gap-2">
           <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
             <ScrollTextIcon className="size-5" aria-hidden="true" />
           </span>
@@ -193,15 +193,15 @@ export default async function PaginaAccesos() {
       </div>
 
       {filas.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground">
+        <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground chica:p-4">
           Todavía no hay accesos registrados en este historial.
         </p>
       ) : (
-        <ul className="flex flex-col gap-3">
+        <ul className="flex flex-col gap-3 chica:gap-2">
           {filas.map((fila) => (
             <li
               key={fila.id}
-              className="flex flex-col gap-1 rounded-xl border border-border bg-card p-4"
+              className="flex flex-col gap-1 rounded-xl border border-border bg-card p-4 chica:gap-0.5 chica:p-3"
             >
               <p className="text-base text-card-foreground">
                 <strong className="font-semibold">{fila.nombreActor}</strong> {fila.frase}{" "}

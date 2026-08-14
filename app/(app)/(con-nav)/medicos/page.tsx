@@ -74,8 +74,8 @@ export default async function PaginaMedicos() {
   const sinMedicos = listaActivos.length === 0 && listaBaja.length === 0
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 chica:gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">Médicos</h1>
         {activo.permisos.canUpload && <BotonAgregarMedico />}
       </div>
@@ -85,11 +85,11 @@ export default async function PaginaMedicos() {
       ) : (
         <>
           {listaActivos.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground">
+            <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground chica:p-4">
               No tenés médicos activos en el directorio.
             </p>
           ) : (
-            <ul className="flex flex-col gap-3">
+            <ul className="flex flex-col gap-3 chica:gap-2">
               {listaActivos.map((medico) => (
                 <li key={medico.id}>
                   <TarjetaMedicoActivo medico={medico} puedeEditar={activo.permisos.canManage} />
@@ -100,7 +100,7 @@ export default async function PaginaMedicos() {
 
           {listaBaja.length > 0 && (
             <SeccionBajaMedicos cantidad={listaBaja.length}>
-              <ul className="flex flex-col gap-3">
+              <ul className="flex flex-col gap-3 chica:gap-2">
                 {listaBaja.map((medico) => (
                   <li key={medico.id}>
                     <TarjetaMedicoBaja medico={medico} puedeEditar={activo.permisos.canManage} />
@@ -126,12 +126,12 @@ function BotonAgregarMedico() {
 
 function EstadoVacio({ puedeCargar }: { puedeCargar: boolean }) {
   return (
-    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center">
+    <div className="flex w-full flex-col items-center gap-4 px-4 py-12 text-center chica:gap-3 chica:py-8">
       <span
-        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+        className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-12"
         aria-hidden="true"
       >
-        <StethoscopeIcon className="size-8" />
+        <StethoscopeIcon className="size-8 chica:size-6" />
       </span>
       <h2 className="text-xl font-semibold text-balance text-foreground">
         Todavía no hay médicos cargados

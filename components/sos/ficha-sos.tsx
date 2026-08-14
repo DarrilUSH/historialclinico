@@ -97,7 +97,7 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
   )
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 chica:gap-4">
       <header className="flex flex-col gap-1 text-center">
         <h1 className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
           {perfil.full_name}
@@ -124,7 +124,14 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
         `foreground`/`card` en el script de contraste. La prominencia sale
         del tamaño (`text-6xl`) y el peso, no de un color nuevo sin medir.
       */}
-      <Tarjeta variante="destacada" className="items-center gap-1 py-6 text-center">
+      {/* Chica (Sprint 13, tarea 13.5): baja el aire vertical de la tarjeta
+          (`py-6` a `py-4`), pero el dato en sí NO se toca -`text-6xl` sigue
+          siendo la letra más grande de toda la pantalla en los dos modos
+          (44px en chica contra 26px del h1, ver la tabla de
+          docs/densidad.md §5), vía el mismo token de tipografía que ya
+          compacta el resto de la app: ni esta tarjeta ni el resto de la
+          ficha necesitan una clase `chica:text-*` acá para lograrlo. */}
+      <Tarjeta variante="destacada" className="items-center gap-1 py-6 text-center chica:py-4">
         <p className="px-(--card-spacing) text-lg font-medium">Grupo y factor sanguíneo</p>
         <p className="px-(--card-spacing) text-6xl font-extrabold tracking-tight">
           {perfil.blood_type ?? "No registrado"}
@@ -148,13 +155,25 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
       />
 
       {hayContacto && (
-        <Tarjeta className="gap-3">
+        <Tarjeta className="gap-3 chica:gap-2">
           <h2 className={CLASE_TITULO_SECCION}>Contacto de emergencia</h2>
-          <div className="flex flex-col gap-3 px-(--card-spacing)">
+          <div className="flex flex-col gap-3 px-(--card-spacing) chica:gap-2">
             {perfil.emergency_contact_phone ? (
+              // Excepción deliberada al piso táctil de 40px del modo chico
+              // (docs/densidad.md §4, regla 2): este `<a>` sigue usando
+              // `min-h-tactil-amplio`, que en chica computa ~49,5px
+              // (`--spacing-tactil-amplio: max(48px, 2.75rem)`, ver
+              // app/globals.css) — muy por encima del piso, a propósito. Es
+              // el botón de LLAMAR AL CONTACTO DE EMERGENCIA: el control más
+              // importante de toda la ficha SOS, y el único de la app que no
+              // se achica al piso normal ni siquiera en el modo compacto. Solo
+              // se ajustan el aire interno (`gap`/`px`) y el tamaño de letra,
+              // que igual sigue siendo grande y prominente vía el token de
+              // `text-2xl` (23px en chica, el segundo tamaño más grande de
+              // toda la pantalla después del grupo sanguíneo).
               <a
                 href={`tel:${perfil.emergency_contact_phone}`}
-                className="flex min-h-tactil-amplio w-full items-center justify-center gap-3 rounded-xl bg-primary px-5 text-center text-2xl leading-tight font-bold text-primary-foreground shadow-elevada transition-[transform,box-shadow] duration-(--duracion-media) ease-salida hover:-translate-y-0.5 hover:shadow-elevada focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:translate-y-0 active:scale-[0.995]"
+                className="flex min-h-tactil-amplio w-full items-center justify-center gap-3 rounded-xl bg-primary px-5 text-center text-2xl leading-tight font-bold text-primary-foreground shadow-elevada transition-[transform,box-shadow] duration-(--duracion-media) ease-salida hover:-translate-y-0.5 hover:shadow-elevada focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:translate-y-0 active:scale-[0.995] chica:gap-2 chica:px-4"
               >
                 <PhoneIcon className="size-7 shrink-0" aria-hidden="true" />
                 Llamar a {perfil.emergency_contact || "el contacto"} (
@@ -173,7 +192,7 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
         </Tarjeta>
       )}
 
-      <Tarjeta className="gap-2">
+      <Tarjeta className="gap-2 chica:gap-1.5">
         <h2 className={CLASE_TITULO_SECCION}>Observaciones para el personal de emergencia</h2>
         <p className="px-(--card-spacing) text-lg whitespace-pre-wrap">
           {perfil.sos_notes || "Sin observaciones registradas."}
@@ -181,7 +200,7 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
       </Tarjeta>
 
       {coberturaPrincipal && (
-        <Tarjeta className="gap-2">
+        <Tarjeta className="gap-2 chica:gap-1.5">
           <h2 className={CLASE_TITULO_SECCION}>Cobertura principal</h2>
           <div className="flex flex-col gap-0.5 px-(--card-spacing) text-lg">
             <p className="font-semibold">{coberturaPrincipal.provider}</p>
@@ -192,7 +211,7 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
           </div>
 
           {(coberturaPrincipal.tieneFrente || coberturaPrincipal.tieneDorso) && (
-            <div className="flex flex-col gap-3 px-(--card-spacing) pt-1">
+            <div className="flex flex-col gap-3 px-(--card-spacing) pt-1 chica:gap-2">
               {coberturaPrincipal.tieneFrente && (
                 <FotoCredencial
                   coberturaId={coberturaPrincipal.id}
@@ -277,7 +296,7 @@ function FotoCredencial({
         <img
           src={url}
           alt={`Credencial de ${proveedor} — ${etiqueta.toLowerCase()}`}
-          className="max-h-64 w-full object-contain"
+          className="max-h-64 w-full object-contain chica:max-h-52"
         />
       </a>
       <figcaption className="text-base text-muted-foreground">
@@ -298,10 +317,15 @@ function SeccionLista({
   textoVacio: string
 }) {
   return (
-    <Tarjeta className="gap-2">
+    <Tarjeta className="gap-2 chica:gap-1.5">
       <h2 className={CLASE_TITULO_SECCION}>{titulo}</h2>
       {items.length > 0 ? (
-        <ul className="flex flex-col gap-1 px-(--card-spacing) text-lg">
+        // Arrays en líneas más densas (Sprint 13, tarea 13.5): `gap-1` baja a
+        // `chica:gap-0.5`. El tamaño de letra NO se toca -sigue siendo
+        // `text-lg`, que ya se compacta solo vía el token (21px → 18px, ver
+        // docs/densidad.md §5)-: son datos clínicos, siempre visibles al
+        // mismo tamaño relativo que el resto de la ficha.
+        <ul className="flex flex-col gap-1 px-(--card-spacing) text-lg chica:gap-0.5">
           {items.map((item) => (
             <li key={item}>{item}</li>
           ))}

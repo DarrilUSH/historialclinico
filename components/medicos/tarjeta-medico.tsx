@@ -44,22 +44,31 @@ function formatearFecha(fechaIso: string): string {
 }
 
 function DatosMedico({ medico }: { medico: FilaMedico }) {
+  const detalle =
+    [medico.license_number ? `Matrícula ${medico.license_number}` : null, medico.institution]
+      .filter(Boolean)
+      .join(" · ") || null
+
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1 chica:gap-0.5">
       {/* h2 y no h3: mismo caso que `tarjeta-cobertura.tsx` -el h2 de
           `/medicos` solo existe en el estado vacío, así que con la lista
           cargada el h3 saltaba un nivel desde el h1 (Sprint 11, WCAG 1.3.1)-.
           El tamaño lo sigue dando `text-lg`. */}
       <h2 className="text-lg font-semibold text-balance text-foreground">{medico.full_name}</h2>
-      {medico.specialty && <p className="text-base text-muted-foreground">{medico.specialty}</p>}
-      <p className="text-sm text-muted-foreground">
-        {[
-          medico.license_number ? `Matrícula ${medico.license_number}` : null,
-          medico.institution,
-        ]
-          .filter(Boolean)
-          .join(" · ") || null}
-      </p>
+      {/* Especialidad + matrícula + institución: TRES líneas en grande.
+          Chica (Sprint 13, tarea 13.5) las combina en UNA -mismo patrón que
+          `tarjeta-medicacion.tsx` (Tanda 3)-: las versiones largas se ocultan
+          con `chica:hidden`, la combinada con `hidden chica:block`. */}
+      {medico.specialty && (
+        <p className="text-base text-muted-foreground chica:hidden">{medico.specialty}</p>
+      )}
+      {detalle && <p className="text-sm text-muted-foreground chica:hidden">{detalle}</p>}
+      {(medico.specialty || detalle) && (
+        <p className="hidden text-sm text-muted-foreground chica:block">
+          {[medico.specialty, detalle].filter(Boolean).join(" · ")}
+        </p>
+      )}
     </div>
   )
 }
@@ -78,17 +87,23 @@ export function TarjetaMedicoActivo({
   })
 
   return (
-    <Tarjeta className="gap-4 px-(--card-spacing)">
+    <Tarjeta className="gap-4 px-(--card-spacing) chica:gap-3">
       <DatosMedico medico={medico} />
 
+      {/* Llamar / Cómo llegar: ya son una fila a partir de `sm:`. Chica
+          (Sprint 13, tarea 13.5) los pone en fila en CUALQUIER ancho -es el
+          criterio de aceptación del ROADMAP-, con menos aire entre ellos.
+          `size="lg"` sigue siendo `min-h-tactil-amplio`, que en chica ya
+          computa ~49,5px por el token (docs/densidad.md §5): siguen muy por
+          encima del piso de 40px sin tocar la altura a mano. */}
       {(medico.phone || urlComoLlegar) && (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 chica:grid-cols-2 chica:gap-1.5">
           {medico.phone && (
             <Boton
               render={<a href={`tel:${medico.phone}`} />}
               nativeButton={false}
               size="lg"
-              className="w-full"
+              className="w-full chica:px-3 chica:text-base"
             >
               <PhoneIcon aria-hidden="true" />
               Llamar
@@ -100,7 +115,7 @@ export function TarjetaMedicoActivo({
               nativeButton={false}
               variant="outline"
               size="lg"
-              className="w-full"
+              className="w-full chica:px-3 chica:text-base"
             >
               <MapPinnedIcon aria-hidden="true" />
               Cómo llegar
@@ -122,7 +137,7 @@ export function TarjetaMedicoBaja({
   puedeEditar: boolean
 }) {
   return (
-    <Tarjeta className="gap-3 px-(--card-spacing) opacity-80">
+    <Tarjeta className="gap-3 px-(--card-spacing) opacity-80 chica:gap-2">
       <DatosMedico medico={medico} />
 
       {medico.deactivated_at && (

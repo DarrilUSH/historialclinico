@@ -60,6 +60,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { cn } from "@/lib/utils"
 import {
   GRUPOS_SANGUINEOS,
   MAX_ITEMS_LISTA,
@@ -112,8 +113,8 @@ export function FormularioSos({ valoresIniciales }: FormularioSosProps) {
   )
 
   return (
-    <form action={enviarAccion} className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
+    <form action={enviarAccion} className="flex flex-col gap-6 chica:gap-4">
+      <div className="flex flex-col gap-2 chica:gap-1.5">
         <Label htmlFor="grupoSanguineo-trigger">Grupo y factor sanguíneo</Label>
         <Select items={OPCIONES_GRUPO} value={grupo} onValueChange={(valor) => setGrupo(String(valor))}>
           <SelectTrigger id="grupoSanguineo-trigger" className="w-full">
@@ -133,7 +134,7 @@ export function FormularioSos({ valoresIniciales }: FormularioSosProps) {
           name="grupoSanguineo"
           value={grupo === SIN_GRUPO ? "" : grupo}
         />
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground chica:hidden">
           Si no está confirmado por un análisis, dejá &quot;No lo sé&quot;: en una emergencia es
           preferible a un dato que nadie verificó.
         </p>
@@ -169,19 +170,34 @@ export function FormularioSos({ valoresIniciales }: FormularioSosProps) {
         textoVacio="Todavía no cargaste ninguna medicación crítica."
       />
 
-      <fieldset className="flex flex-col gap-4 rounded-xl border border-border p-4">
+      <fieldset className="flex flex-col gap-4 rounded-xl border border-border p-4 chica:gap-3 chica:p-3">
         <legend className="px-1 text-base font-semibold">Contacto de emergencia</legend>
 
-        <CampoTexto
-          id="contactoNombre"
-          label="Nombre"
-          maxLength={120}
-          autoComplete="off"
-          defaultValue={valoresIniciales.contactoNombre}
-          ayuda="A quién llamar. Sin nombre, el teléfono no le sirve a nadie."
-        />
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/*
+          Chica (Sprint 13, tarea 13.5): "Nombre" y "Vínculo" pasan a
+          compartir fila, y "Teléfono" queda solo a ancho completo debajo.
+          Los tres campos viven en UN solo grid -en vez de reordenar el DOM,
+          que arriesgaría tocar el orden visual en grande- y la reubicación
+          es puramente visual, vía `order` con `chica:`: grande nunca aplica
+          esas clases, así que su disposición (Nombre solo arriba, Teléfono y
+          Vínculo en fila desde `sm:`) queda pixel a pixel igual que antes.
+          El costo es que el orden de tabulación/lectura de pantalla en chica
+          (Nombre, Teléfono, Vínculo — el orden real del DOM, sin cambios) no
+          coincide con el orden visual (Nombre, Vínculo, Teléfono): un
+          desvío acotado y deliberado de WCAG 1.3.2, confinado a este único
+          grupo de tres campos cortos donde la relación entre ellos es obvia
+          igual sin mirar el orden exacto.
+        */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2 chica:gap-3">
+          <CampoTexto
+            id="contactoNombre"
+            label="Nombre"
+            maxLength={120}
+            autoComplete="off"
+            defaultValue={valoresIniciales.contactoNombre}
+            ayuda="A quién llamar. Sin nombre, el teléfono no le sirve a nadie."
+            contenedorClassName="sm:col-span-2 chica:col-span-1 chica:order-1"
+          />
           <CampoTexto
             id="contactoTelefono"
             label="Teléfono"
@@ -191,6 +207,7 @@ export function FormularioSos({ valoresIniciales }: FormularioSosProps) {
             maxLength={MAX_LARGO_TELEFONO}
             defaultValue={valoresIniciales.contactoTelefono}
             ayuda="Con característica. Ej: +54 9 2901 612345."
+            contenedorClassName="chica:order-3 chica:col-span-2"
           />
           <CampoTexto
             id="contactoVinculo"
@@ -199,6 +216,7 @@ export function FormularioSos({ valoresIniciales }: FormularioSosProps) {
             autoComplete="off"
             defaultValue={valoresIniciales.contactoVinculo}
             ayuda="Hija, esposo, vecina, cuidadora..."
+            contenedorClassName="chica:order-2"
           />
         </div>
       </fieldset>
@@ -284,10 +302,10 @@ function CampoLista({
   }
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 chica:gap-1.5">
       <Label htmlFor={`${id}-nuevo`}>{label}</Label>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 chica:gap-1.5">
         <Input
           id={`${id}-nuevo`}
           ref={campoRef}
@@ -312,26 +330,35 @@ function CampoLista({
         </Boton>
       </div>
 
-      <p id={`${id}-ayuda`} className="text-sm text-muted-foreground">
+      {/* La ayuda pura se oculta en chica (regla del rediseño compacto); el
+          aviso de "llegaste al máximo" NO -es la explicación de por qué
+          "Agregar" está deshabilitado, no una guía de contexto-. */}
+      <p
+        id={`${id}-ayuda`}
+        className={cn("text-sm text-muted-foreground", !lleno && "chica:hidden")}
+      >
         {lleno ? `Llegaste al máximo de ${MAX_ITEMS_LISTA} entradas.` : ayuda}
       </p>
 
       {valores.length > 0 ? (
-        <ul className="flex flex-wrap gap-2">
+        <ul className="flex flex-wrap gap-2 chica:gap-1.5">
           {valores.map((valor) => (
             <li key={valor}>
-              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 py-1.5 pr-1.5 pl-3.5 text-base font-medium text-primary">
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 py-1.5 pr-1.5 pl-3.5 text-base font-medium text-primary chica:py-1 chica:pl-3 chica:text-sm">
                 <span className="min-w-0 break-words">{valor}</span>
                 <input type="hidden" name={id} value={valor} />
-                {/* `size-9` (40px) en vez de `size-6` (27px): mismo criterio
-                    que los chips de horario de `formulario-medicacion.tsx`. */}
+                {/* `size-9` (40px en grande) en vez de `size-6` (27px): mismo
+                    criterio que los chips de horario de
+                    `formulario-medicacion.tsx`. Chica: `size-9` computa a
+                    36px con la escala de espaciado compacta -por debajo del
+                    piso-, así que se fija en `chica:size-10` (40px exacto). */}
                 <button
                   type="button"
                   onClick={() => quitar(valor)}
                   aria-label={`Quitar ${valor} de ${label.toLocaleLowerCase("es-AR")}`}
-                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/20 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/20 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none chica:size-10"
                 >
-                  <XIcon className="size-4.5" aria-hidden="true" />
+                  <XIcon className="size-4.5 chica:size-4" aria-hidden="true" />
                 </button>
               </span>
             </li>

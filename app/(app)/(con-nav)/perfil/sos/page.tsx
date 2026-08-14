@@ -90,7 +90,7 @@ export default async function PaginaFichaSos({
   const ultimaRevision = formatearRevisionSos(perfil.sos_updated_at)
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
       <Link
         href="/inicio"
         className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -128,7 +128,7 @@ export default async function PaginaFichaSos({
         (ver el encabezado). Se muestra abajo del formulario, fuera de él, para
         que nadie lo confunda con un campo editable de esta pantalla.
       */}
-      <Tarjeta className="gap-2">
+      <Tarjeta className="gap-2 chica:gap-1.5">
         <h2 className="flex items-center gap-2 px-(--card-spacing) text-base font-semibold">
           <CreditCardIcon className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
           Cobertura principal

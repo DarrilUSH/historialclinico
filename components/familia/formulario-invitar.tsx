@@ -40,7 +40,7 @@ export function FormularioInvitar({ perfilId }: FormularioInvitarProps) {
     <form
       ref={formRef}
       action={enviarAccion}
-      className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave"
+      className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave chica:gap-3 chica:p-4"
     >
       <input type="hidden" name="perfilId" value={perfilId} />
 
@@ -57,23 +57,23 @@ export function FormularioInvitar({ perfilId }: FormularioInvitarProps) {
         error={estado.error ?? undefined}
       />
 
-      <div className="flex flex-col gap-3">
-        <label className="flex items-start gap-2.5 text-sm">
+      <div className="flex flex-col gap-3 chica:gap-2">
+        <label className="flex items-start gap-2.5 text-sm chica:gap-2">
           <Checkbox name="canUpload" className="mt-0.5" />
           <span>
             <span className="font-medium text-foreground">Puede cargar datos</span>
             <br />
-            <span className="text-muted-foreground">
+            <span className="text-muted-foreground chica:hidden">
               Sube documentos, turnos, medicación y mediciones nuevas.
             </span>
           </span>
         </label>
-        <label className="flex items-start gap-2.5 text-sm">
+        <label className="flex items-start gap-2.5 text-sm chica:gap-2">
           <Checkbox name="canManage" className="mt-0.5" />
           <span>
             <span className="font-medium text-foreground">Administra</span>
             <br />
-            <span className="text-muted-foreground">
+            <span className="text-muted-foreground chica:hidden">
               Edita y borra datos, y puede otorgar o revocar accesos de otras personas.
             </span>
           </span>

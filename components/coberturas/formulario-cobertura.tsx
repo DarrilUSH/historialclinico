@@ -110,23 +110,33 @@ export function FormularioCobertura({
         <input type="hidden" name="coberturaId" value={coberturaId} />
       )}
 
-      <CampoTexto
-        id="proveedor"
-        label="Obra social o prepaga"
-        required
-        maxLength={200}
-        defaultValue={valoresIniciales?.proveedor}
-        icono={<CreditCardIcon />}
-        ayuda='Tal como figura en la credencial. Ej: "OSDE", "PAMI", "IOMA".'
-      />
+      {/*
+        Chica (Sprint 13, tarea 13.5): "Obra social o prepaga" y "Plan" pasan
+        a una grilla de 2 columnas -son dos elementos consecutivos en el DOM,
+        así que no hay reordenamiento-. "Número de afiliado" se queda fuera
+        de la grilla, a ancho completo en los dos modos: es el dato más largo
+        de los tres (puede tener 15+ caracteres) y partirlo a la mitad del
+        ancho lo volvería ilegible.
+      */}
+      <div className="flex flex-col gap-5 chica:grid chica:grid-cols-2 chica:items-start chica:gap-3">
+        <CampoTexto
+          id="proveedor"
+          label="Obra social o prepaga"
+          required
+          maxLength={200}
+          defaultValue={valoresIniciales?.proveedor}
+          icono={<CreditCardIcon />}
+          ayuda='Tal como figura en la credencial. Ej: "OSDE", "PAMI", "IOMA".'
+        />
 
-      <CampoTexto
-        id="plan"
-        label="Plan"
-        maxLength={150}
-        defaultValue={valoresIniciales?.plan}
-        ayuda='Opcional. Ej: "210", "Plan Oro".'
-      />
+        <CampoTexto
+          id="plan"
+          label="Plan"
+          maxLength={150}
+          defaultValue={valoresIniciales?.plan}
+          ayuda='Opcional. Ej: "210", "Plan Oro".'
+        />
+      </div>
 
       <CampoTexto
         id="numeroAfiliado"
@@ -147,6 +157,14 @@ export function FormularioCobertura({
         </Label>
       </div>
 
+      {/*
+        Frente/Dorso NO pasan a `chica:grid-cols-2`: cada `CampoImagenCredencial`
+        ya arma su propia grilla interna de 2 columnas para "Sacar foto" /
+        "Galería" (`campo-imagen-credencial.tsx`), y anidar esa grilla dentro
+        de otra de 2 columnas deja 4 columnas en un ancho de celular -los
+        botones internos se solapan-. Se quedan apiladas en los dos modos,
+        igual que en grande.
+      */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <CampoImagenCredencial
           label="Frente"

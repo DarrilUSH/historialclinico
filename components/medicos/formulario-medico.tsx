@@ -70,38 +70,49 @@ export function FormularioMedico({ modo, medicoId, valoresIniciales }: Formulari
     <form action={enviarAccion} className="flex flex-col gap-5">
       {modo === "editar" && medicoId && <input type="hidden" name="medicoId" value={medicoId} />}
 
-      <CampoTexto
-        id="nombre"
-        label="Nombre del médico"
-        required
-        maxLength={200}
-        defaultValue={valoresIniciales?.nombre}
-        ayuda='Con el tratamiento que uses. Ej: "Dr. Carlos Rodríguez".'
-      />
+      {/*
+        Chica (Sprint 13, tarea 13.5): "Nombre" + "Especialidad" y "Matrícula"
+        + "Institución" pasan cada par a una grilla de 2 columnas -son pares
+        de elementos consecutivos en el DOM, así que no hay reordenamiento,
+        mismo criterio que la grilla de dosis de
+        `formulario-medicacion.tsx`-.
+      */}
+      <div className="flex flex-col gap-5 chica:grid chica:grid-cols-2 chica:items-start chica:gap-3">
+        <CampoTexto
+          id="nombre"
+          label="Nombre del médico"
+          required
+          maxLength={200}
+          defaultValue={valoresIniciales?.nombre}
+          ayuda='Con el tratamiento que uses. Ej: "Dr. Carlos Rodríguez".'
+        />
 
-      <CampoTexto
-        id="especialidad"
-        label="Especialidad"
-        maxLength={150}
-        defaultValue={valoresIniciales?.especialidad}
-        ayuda='Opcional. Ej: "Cardiología", "Clínica médica".'
-      />
+        <CampoTexto
+          id="especialidad"
+          label="Especialidad"
+          maxLength={150}
+          defaultValue={valoresIniciales?.especialidad}
+          ayuda='Opcional. Ej: "Cardiología", "Clínica médica".'
+        />
+      </div>
 
-      <CampoTexto
-        id="matricula"
-        label="Matrícula"
-        maxLength={100}
-        defaultValue={valoresIniciales?.matricula}
-        ayuda='Opcional. MN o MP, tal como figura en el sello. Ej: "MN 45678".'
-      />
+      <div className="flex flex-col gap-5 chica:grid chica:grid-cols-2 chica:items-start chica:gap-3">
+        <CampoTexto
+          id="matricula"
+          label="Matrícula"
+          maxLength={100}
+          defaultValue={valoresIniciales?.matricula}
+          ayuda='Opcional. MN o MP, tal como figura en el sello. Ej: "MN 45678".'
+        />
 
-      <CampoTexto
-        id="institucion"
-        label="Institución"
-        maxLength={150}
-        defaultValue={valoresIniciales?.institucion}
-        ayuda='Opcional. Clínica, hospital o consultorio. Ej: "Clínica Ushuaia".'
-      />
+        <CampoTexto
+          id="institucion"
+          label="Institución"
+          maxLength={150}
+          defaultValue={valoresIniciales?.institucion}
+          ayuda='Opcional. Clínica, hospital o consultorio. Ej: "Clínica Ushuaia".'
+        />
+      </div>
 
       <CampoTexto
         id="telefono"
@@ -134,7 +145,7 @@ export function FormularioMedico({ modo, medicoId, valoresIniciales }: Formulari
         </Boton>
 
         {mostrarCoordenadas && (
-          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-4">
+          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-4 chica:gap-2 chica:p-3">
             <a
               href={urlMaps}
               target="_blank"
@@ -144,11 +155,11 @@ export function FormularioMedico({ modo, medicoId, valoresIniciales }: Formulari
               <MapPinnedIcon className="size-4 shrink-0" aria-hidden="true" />
               Abrir en Google Maps para copiarlas
             </a>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground chica:hidden">
               Podés copiar las coordenadas desde Google Maps: buscá el consultorio, mantené
               apretado el punto en el mapa hasta que aparezcan los números, y copialos acá abajo.
             </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
               <CampoNumero
                 id="latitud"
                 label="Latitud"

@@ -28,7 +28,7 @@ export function SeccionBajaMedicos({
   const idContenido = "medicos-baja-contenido"
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 chica:gap-2">
       <Boton
         type="button"
         variant="outline"
@@ -46,7 +46,7 @@ export function SeccionBajaMedicos({
       </Boton>
 
       {abierto && (
-        <div id={idContenido} className="flex flex-col gap-3">
+        <div id={idContenido} className="flex flex-col gap-3 chica:gap-2">
           {children}
         </div>
       )}

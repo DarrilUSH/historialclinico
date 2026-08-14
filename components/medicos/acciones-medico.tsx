@@ -40,7 +40,7 @@ export function AccionesMedicoActivo({ medicoId, nombre }: { medicoId: string; n
   const [estadoBaja, enviarBaja] = useActionState(darDeBajaMedico, ESTADO_INICIAL)
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-2 chica:gap-1.5">
       <Boton render={<Link href={`/medicos/${medicoId}/editar`} />} nativeButton={false} variant="outline" size="sm">
         <PencilIcon aria-hidden="true" />
         Editar

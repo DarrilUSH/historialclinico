@@ -91,8 +91,8 @@ export default async function PaginaFamilia() {
   }))
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-10 sm:py-14">
-      <div className="flex flex-col gap-4">
+    <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-8 px-4 py-10 sm:py-14 chica:gap-6 chica:py-6">
+      <div className="flex flex-col gap-4 chica:gap-3">
         <Link
           href="/inicio"
           className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
@@ -101,7 +101,7 @@ export default async function PaginaFamilia() {
           Volver
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 chica:gap-2">
           <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
             <UsersIcon className="size-5" aria-hidden="true" />
           </span>
@@ -125,7 +125,7 @@ export default async function PaginaFamilia() {
       */}
       <Link
         href="/familia/accesos"
-        className="flex items-center gap-3 rounded-xl border border-border p-4 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="flex items-center gap-3 rounded-xl border border-border p-4 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background chica:gap-2 chica:p-3"
       >
         <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
           <ScrollTextIcon className="size-5" aria-hidden="true" />
@@ -138,15 +138,15 @@ export default async function PaginaFamilia() {
         </span>
       </Link>
 
-      <section className="flex flex-col gap-4">
+      <section className="flex flex-col gap-4 chica:gap-3">
         <h2 className="text-lg font-semibold text-foreground">Accesos otorgados</h2>
 
         {filas.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground">
+          <p className="rounded-xl border border-dashed border-border p-6 text-center text-base text-muted-foreground chica:p-4">
             Todavía no le diste acceso a nadie sobre este perfil.
           </p>
         ) : (
-          <ul className="flex flex-col gap-3">
+          <ul className="flex flex-col gap-3 chica:gap-2">
             {filas.map((fila) => (
               <TarjetaPermiso
                 key={fila.id}
@@ -161,7 +161,7 @@ export default async function PaginaFamilia() {
         )}
       </section>
 
-      <section className="flex flex-col gap-4">
+      <section className="flex flex-col gap-4 chica:gap-3">
         <h2 className="text-lg font-semibold text-foreground">Invitar a alguien</h2>
         <FormularioInvitar perfilId={perfil.id} />
       </section>
