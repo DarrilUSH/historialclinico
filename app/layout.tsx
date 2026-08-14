@@ -79,7 +79,13 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
-      lang="es"
+      // `es-AR` y no `es` (Sprint 11, auditoría a11y): toda la app está
+      // escrita en castellano rioplatense ("Ingresá", "Registrate", "vos"), y
+      // la etiqueta de idioma es lo que usa un lector de pantalla para elegir
+      // la voz y las reglas de pronunciación (WCAG 3.1.1). Declarar la región
+      // hace que NVDA/TalkBack lean con voz argentina donde esté disponible,
+      // en vez de caer en el castellano peninsular por defecto.
+      lang="es-AR"
       suppressHydrationWarning
       className={`${fuenteSans.variable} ${fuenteMono.variable} h-full antialiased`}
     >

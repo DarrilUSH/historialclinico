@@ -128,7 +128,10 @@ export default async function PaginaHistorialFichas() {
                   <p className="text-sm font-medium text-muted-foreground">{formatearFecha(fila.created_at)}</p>
                   <p className="text-sm text-muted-foreground">Generada por {generadoPor}</p>
                 </div>
-                <ChevronRightIcon className="h-5 w-5 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+                <ChevronRightIcon
+                  aria-hidden="true"
+                  className="h-5 w-5 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+                />
               </Link>
             )
           })}

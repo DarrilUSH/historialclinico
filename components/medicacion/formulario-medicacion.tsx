@@ -261,18 +261,59 @@ function CampoHorarios({
 }) {
   const [horaNueva, setHoraNueva] = React.useState("")
 
+  // Sprint 11 (auditoría a11y): agregar un chip deja "Agregar" deshabilitado
+  // -ya no hay hora que agregar-, y un botón deshabilitado NO puede conservar
+  // el foco: el navegador lo manda al <body>, o sea al principio del
+  // documento. Alguien que carga tres horarios con el teclado tenía que
+  // volver a tabular todo el formulario entre horario y horario. Se devuelve
+  // el foco al campo de hora, que es exactamente donde sigue la tarea.
+  const campoHoraRef = React.useRef<HTMLInputElement | null>(null)
+
+  /**
+   * Devuelve el foco al campo de hora dejándolo listo para tipear.
+   *
+   * `<input type="time">` no es un campo de texto: Chromium le maneja
+   * segmentos internos (hora / minuto) y los dígitos entran en el segmento
+   * ACTIVO. Después de agregar un horario el foco nunca salió del campo -Enter
+   * se maneja acá con `preventDefault`-, así que un `focus()` a secas es un
+   * no-op: el puntero de segmento se queda donde terminó, en los minutos.
+   * Resultado medido en la auditoría: tipear "2000" llenaba minutos dos veces,
+   * la hora quedaba vacía y, como un `input[type=time]` solo reporta `value`
+   * con TODOS los segmentos completos, el campo devolvía `""` y "Agregar" no
+   * hacía nada. El segundo horario era imposible de cargar con el teclado.
+   *
+   * `blur()` + `focus()` fuerza a Chromium a reseleccionar el primer segmento
+   * (verificado: con reset "2000" da "20:00"; sin reset da ""). Va dentro de
+   * un `requestAnimationFrame` para correr después de que React aplicó el
+   * `value=""`, igual que el patrón de dictado de
+   * `components/base/campo-texto.tsx`.
+   */
+  function devolverFocoAlCampo() {
+    requestAnimationFrame(() => {
+      const campo = campoHoraRef.current
+      if (!campo) return
+      campo.blur()
+      campo.focus()
+    })
+  }
+
   function agregar() {
     if (!horaNueva) return
     if (horarios.includes(horaNueva)) {
       setHoraNueva("")
+      devolverFocoAlCampo()
       return
     }
     onCambiar([...horarios, horaNueva].sort())
     setHoraNueva("")
+    devolverFocoAlCampo()
   }
 
   function quitar(hora: string) {
     onCambiar(horarios.filter((h) => h !== hora))
+    // El botón que se acaba de tocar desaparece del DOM con su chip: sin esto
+    // el foco cae al <body> igual que arriba.
+    devolverFocoAlCampo()
   }
 
   return (
@@ -282,9 +323,20 @@ function CampoHorarios({
       <div className="flex items-center gap-2">
         <input
           id="horario-nuevo"
+          ref={campoHoraRef}
           type="time"
           value={horaNueva}
           onChange={(evento) => setHoraNueva(evento.target.value)}
+          // Enter dentro de un campo de un <form> dispara el submit implícito:
+          // sin esto, escribir "08:00" y apretar Enter -el gesto natural- NO
+          // agregaba el horario, intentaba guardar la medicación entera. Mismo
+          // manejador que ya usaba `components/sos/formulario-sos.tsx`.
+          onKeyDown={(evento) => {
+            if (evento.key === "Enter") {
+              evento.preventDefault()
+              agregar()
+            }
+          }}
           className="min-h-tactil flex-1 rounded-lg border border-input bg-transparent px-3.5 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
         />
         <Boton type="button" variant="outline" size="lg" onClick={agregar} disabled={!horaNueva}>
@@ -297,16 +349,20 @@ function CampoHorarios({
         <ul className="flex flex-wrap gap-2">
           {horarios.map((hora) => (
             <li key={hora}>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 py-1.5 pr-2 pl-3.5 text-base font-medium text-primary">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 py-1.5 pr-1.5 pl-3.5 text-base font-medium text-primary">
                 {hora}
                 <input type="hidden" name="horarios" value={hora} />
+                {/* `size-9` (40px) en vez de `size-6` (27px): el aspa medía
+                    menos que el mínimo táctil y es el control que más se falla
+                    con temblor o dedo grueso. El chip crece apenas porque el
+                    padding derecho baja de `pr-2` a `pr-1.5`. */}
                 <button
                   type="button"
                   onClick={() => quitar(hora)}
                   aria-label={`Quitar el horario ${hora}`}
-                  className="flex size-6 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/20"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/20 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                 >
-                  <XIcon className="size-4" aria-hidden="true" />
+                  <XIcon className="size-4.5" aria-hidden="true" />
                 </button>
               </span>
             </li>

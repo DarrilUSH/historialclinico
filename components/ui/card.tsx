@@ -35,9 +35,24 @@ function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-function CardTitle({ className, ...props }: React.ComponentProps<"div">) {
+/**
+ * `como` (Sprint 11, auditoría a11y): por defecto `CardTitle` es un `<div>`
+ * -el título de una tarjeta dentro de una lista no siempre es un encabezado, y
+ * convertirlos a todos en `<h3>` inventaría estructura donde no la hay-. Pero
+ * cuando la tarjeta ES la pantalla (el caso de `/login`, `/registro` y
+ * `/recuperar`, donde el formulario entero vive en una sola tarjeta), ese
+ * título es el encabezado de la página y tiene que ser un `<h1>` real: si no,
+ * la pantalla queda sin ningún h1 y la navegación por encabezados no encuentra
+ * nada. El estilo no cambia -la capa base de `globals.css` le da a los h1-h6
+ * `font-heading`/`font-semibold`, que es justo lo que ya aplicaba esta clase-.
+ */
+function CardTitle({
+  className,
+  como: Componente = "div",
+  ...props
+}: React.ComponentProps<"div"> & { como?: "div" | "h1" | "h2" | "h3" }) {
   return (
-    <div
+    <Componente
       data-slot="card-title"
       className={cn(
         "font-heading text-xl leading-snug font-semibold group-data-[size=sm]/card:text-lg",

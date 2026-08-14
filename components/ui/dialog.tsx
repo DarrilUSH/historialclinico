@@ -70,9 +70,14 @@ function DialogContent({
               />
             }
           >
-            <XIcon
-            />
-            <span className="sr-only">Close</span>
+            <XIcon aria-hidden="true" />
+            {/* Sprint 11 (auditoría a11y): decía "Close". Es el único nombre
+                accesible de este botón y aparece en TODOS los diálogos de
+                confirmación de la app (`components/base/dialogo-confirmacion.tsx`
+                nunca pisa `showCloseButton`), así que un lector de pantalla
+                anunciaba "Close, botón" en medio de una app en castellano
+                (WCAG 3.1.2 Idioma de las partes). */}
+            <span className="sr-only">Cerrar</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>
@@ -110,7 +115,7 @@ function DialogFooter({
       {children}
       {showCloseButton && (
         <DialogPrimitive.Close render={<Button variant="outline" />}>
-          Close
+          Cerrar
         </DialogPrimitive.Close>
       )}
     </div>

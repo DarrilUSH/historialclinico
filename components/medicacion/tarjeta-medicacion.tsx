@@ -93,7 +93,12 @@ export function TarjetaMedicacionActiva({
     <Tarjeta className="gap-4 px-(--card-spacing)">
       <div className="flex flex-col gap-1">
         <div className="flex items-start justify-between gap-3">
-          <h3 className="text-lg font-semibold text-balance text-foreground">{medicacion.name}</h3>
+          {/* h2 y no h3 (Sprint 11, auditoría a11y): el único h2 de
+              `/medicacion` es "Tomas de hoy", que `SeccionTomasDeHoy` no
+              renderiza cuando no hay dosis programadas para hoy -caso
+              frecuente-, y ahí el h3 saltaba un nivel desde el h1 (WCAG
+              1.3.1). Como h2 la jerarquía cierra en los dos casos. */}
+          <h2 className="text-lg font-semibold text-balance text-foreground">{medicacion.name}</h2>
           {!medicacion.vigente_hoy && (
             <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">
               No vigente hoy
@@ -209,7 +214,9 @@ export function TarjetaMedicacionSuspendida({
   return (
     <Tarjeta className="gap-3 px-(--card-spacing) opacity-80">
       <div className="flex flex-col gap-1">
-        <h3 className="text-base font-semibold text-balance text-foreground">{medicacion.name}</h3>
+        {/* Misma corrección de nivel que la tarjeta activa, para la sección
+            colapsable "Suspendidas" (que es un <button>, no un encabezado). */}
+        <h2 className="text-base font-semibold text-balance text-foreground">{medicacion.name}</h2>
         {medicacion.active_ingredient && (
           <p className="text-sm text-muted-foreground">{medicacion.active_ingredient}</p>
         )}

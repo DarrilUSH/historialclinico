@@ -67,7 +67,13 @@ export function FormularioAuth({
   return (
     <Card className="w-full max-w-md">
       <CardHeader>
-        <CardTitle className="text-2xl font-semibold">{titulo}</CardTitle>
+        {/* `como="h1"` (Sprint 11, auditoría a11y): en estas pantallas la
+            tarjeta es la pantalla entera, así que su título es el h1 de la
+            página. Sin esto, /login, /registro, /recuperar y
+            /recuperar/confirmar no tenían ningún encabezado en el DOM. */}
+        <CardTitle como="h1" className="text-2xl font-semibold">
+          {titulo}
+        </CardTitle>
         {descripcion && (
           <CardDescription className="text-base leading-relaxed">
             {descripcion}

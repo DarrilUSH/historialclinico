@@ -21,7 +21,11 @@ export default async function PaginaRecuperarConfirmar({
     return (
       <Card className="w-full max-w-md">
         <CardHeader>
-          <CardTitle className="text-2xl font-semibold">Enlace no válido</CardTitle>
+          {/* `como="h1"`: esta rama no pasa por `FormularioAuth`, así que
+              necesita marcar su propio encabezado de pantalla (Sprint 11). */}
+          <CardTitle como="h1" className="text-2xl font-semibold">
+            Enlace no válido
+          </CardTitle>
           <CardDescription className="text-base leading-relaxed">
             Este enlace ya no es válido o ya expiró.
           </CardDescription>

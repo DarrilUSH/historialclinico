@@ -263,14 +263,24 @@ function CampoLista({
   const lleno = valores.length >= MAX_ITEMS_LISTA
   const puedeAgregar = limpio.length > 0 && !yaEsta && !lleno
 
+  // Sprint 11 (auditoría a11y): al agregar, "Agregar" queda deshabilitado
+  // -el borrador se vació- y un botón deshabilitado no retiene el foco; al
+  // quitar, el aspa desaparece con su chip. En los dos casos el navegador
+  // manda el foco al <body>, o sea al principio del documento. Se devuelve al
+  // campo de texto, que es donde sigue la tarea. (Con Enter el foco ya se
+  // quedaba en el campo; esto cubre el camino del botón y el del aspa.)
+  const campoRef = React.useRef<HTMLInputElement | null>(null)
+
   function agregar() {
     if (!puedeAgregar) return
     onCambiar([...valores, limpio])
     setBorrador("")
+    campoRef.current?.focus()
   }
 
   function quitar(valor: string) {
     onCambiar(valores.filter((v) => v !== valor))
+    campoRef.current?.focus()
   }
 
   return (
@@ -280,6 +290,7 @@ function CampoLista({
       <div className="flex items-center gap-2">
         <Input
           id={`${id}-nuevo`}
+          ref={campoRef}
           type="text"
           className="flex-1"
           value={borrador}
@@ -309,16 +320,18 @@ function CampoLista({
         <ul className="flex flex-wrap gap-2">
           {valores.map((valor) => (
             <li key={valor}>
-              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 py-1.5 pr-2 pl-3.5 text-base font-medium text-primary">
+              <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-primary/10 py-1.5 pr-1.5 pl-3.5 text-base font-medium text-primary">
                 <span className="min-w-0 break-words">{valor}</span>
                 <input type="hidden" name={id} value={valor} />
+                {/* `size-9` (40px) en vez de `size-6` (27px): mismo criterio
+                    que los chips de horario de `formulario-medicacion.tsx`. */}
                 <button
                   type="button"
                   onClick={() => quitar(valor)}
                   aria-label={`Quitar ${valor} de ${label.toLocaleLowerCase("es-AR")}`}
-                  className="flex size-6 shrink-0 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/20"
+                  className="flex size-9 shrink-0 items-center justify-center rounded-full text-primary transition-colors hover:bg-primary/20 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none"
                 >
-                  <XIcon className="size-4" aria-hidden="true" />
+                  <XIcon className="size-4.5" aria-hidden="true" />
                 </button>
               </span>
             </li>

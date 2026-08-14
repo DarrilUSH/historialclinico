@@ -19,7 +19,9 @@ function Checkbox({ className, ...props }: CheckboxPrimitive.Root.Props) {
         data-slot="checkbox-indicator"
         className="flex items-center justify-center text-current"
       >
-        <CheckIcon className="size-4" />
+        {/* Decorativo: el estado real lo expone `aria-checked` del
+            primitivo de Base UI (Sprint 11, auditoría a11y). */}
+        <CheckIcon className="size-4" aria-hidden="true" />
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   )

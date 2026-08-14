@@ -69,6 +69,27 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
 
   return (
     <div className="flex min-h-pantalla w-full flex-col bg-background">
+      {/* Salto al contenido (WCAG 2.4.1 "Evitar bloques", Sprint 11: la
+          auditoría de accesibilidad lo encontró ausente en toda la app).
+          Invisible hasta que se lo enfoca con Tab, y entonces aparece arriba de
+          todo: saltea el encabezado de perfil y la barra de conexión. `sr-only`
+          con `focus:not-sr-only` es el patrón estándar -queda siempre en el
+          árbol de accesibilidad, nunca `display:none`, que lo sacaría del orden
+          de tabulación-.
+
+          Va PRIMERO en el árbol, incluso antes de `RegistroServiceWorker`: un
+          salto de contenido que no es la primera parada de teclado no sirve de
+          nada. En la auditoría, con el aviso "Hay una versión nueva" en
+          pantalla, ese botón se comía la primera Tab y el salto quedaba
+          segundo. El aviso es `fixed` sobre la bottom nav, así que moverlo
+          abajo en el árbol no cambia dónde se ve. */}
+      <a
+        href="#contenido-principal"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:inline-flex focus:min-h-tactil focus:items-center focus:rounded-lg focus:bg-primary focus:px-5 focus:text-base focus:font-semibold focus:text-primary-foreground focus:shadow-elevada focus:ring-3 focus:ring-ring/50 focus:outline-none"
+      >
+        Saltar al contenido
+      </a>
+
       {/* Registra el service worker y le pide precargar la ficha SOS de ESTE
           perfil (Sprint 8.4). Va acá y no en el layout raíz porque `/login` y
           `/registro` no tienen ninguna ficha que guardar. Ver
@@ -78,8 +99,7 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
           Casi siempre devuelve `null`. Lo único que puede llegar a pintar es la
           barra "Hay una versión nueva" (Sprint 11.3,
           `components/pwa/aviso-actualizacion.tsx`), que se posiciona `fixed`
-          sobre la bottom nav: por eso da igual que esté acá arriba en el
-          árbol. */}
+          sobre la bottom nav: por eso da igual dónde esté en el árbol. */}
       <RegistroServiceWorker perfilId={perfil.id} />
 
       <EncabezadoPerfil perfil={perfil} esPropio={permisos.esPropio} />
@@ -91,7 +111,15 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
       {/* `pb-[...]` reserva exactamente el alto de la bottom nav fija
           (`--spacing-bottom-nav`, app/globals.css) más su safe-area: sin esto,
           el último elemento de cada pantalla queda tapado por la nav. */}
-      <main className="flex flex-1 flex-col pb-[calc(var(--spacing-bottom-nav)+env(safe-area-inset-bottom))]">
+      {/* `tabIndex={-1}` para que el salto de arriba pueda mover el foco de
+          verdad: sin él, el navegador desplaza la página pero el foco de
+          teclado se queda en el <a>, y el siguiente Tab vuelve al encabezado.
+          -1 lo hace enfocable por script/ancla sin sumarlo al orden de Tab. */}
+      <main
+        id="contenido-principal"
+        tabIndex={-1}
+        className="flex flex-1 flex-col pb-[calc(var(--spacing-bottom-nav)+env(safe-area-inset-bottom))] focus:outline-none"
+      >
         {children}
       </main>
 

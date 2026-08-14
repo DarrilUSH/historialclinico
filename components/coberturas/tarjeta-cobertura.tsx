@@ -41,9 +41,15 @@ export function TarjetaCobertura({
             <CreditCardIcon className="size-5" />
           </span>
           <div className="flex flex-col gap-0.5">
-            <h3 className="text-lg font-semibold text-balance text-foreground">
+            {/* h2 y no h3 (Sprint 11, auditoría a11y): entre el h1 de
+                `/coberturas` y estas tarjetas no hay ninguna sección
+                intermedia -el único h2 de la pantalla vivía en el estado
+                vacío, que por definición nunca coexiste con la lista-, así que
+                un h3 acá saltaba un nivel (WCAG 1.3.1). El tamaño lo sigue
+                fijando `text-lg`: no cambia nada visualmente. */}
+            <h2 className="text-lg font-semibold text-balance text-foreground">
               {cobertura.provider}
-            </h3>
+            </h2>
             {cobertura.plan && <p className="text-sm text-muted-foreground">{cobertura.plan}</p>}
             {cobertura.member_number && (
               <p className="text-sm text-muted-foreground numeros-clinicos">

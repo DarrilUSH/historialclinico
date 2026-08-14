@@ -46,7 +46,11 @@ function formatearFecha(fechaIso: string): string {
 function DatosMedico({ medico }: { medico: FilaMedico }) {
   return (
     <div className="flex flex-col gap-1">
-      <h3 className="text-lg font-semibold text-balance text-foreground">{medico.full_name}</h3>
+      {/* h2 y no h3: mismo caso que `tarjeta-cobertura.tsx` -el h2 de
+          `/medicos` solo existe en el estado vacío, así que con la lista
+          cargada el h3 saltaba un nivel desde el h1 (Sprint 11, WCAG 1.3.1)-.
+          El tamaño lo sigue dando `text-lg`. */}
+      <h2 className="text-lg font-semibold text-balance text-foreground">{medico.full_name}</h2>
       {medico.specialty && <p className="text-base text-muted-foreground">{medico.specialty}</p>}
       <p className="text-sm text-muted-foreground">
         {[

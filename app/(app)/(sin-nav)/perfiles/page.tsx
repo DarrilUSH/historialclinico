@@ -42,7 +42,7 @@ export default async function PaginaPerfiles() {
 
   if (errorPerfiles) {
     return (
-      <main className="flex min-h-dvh w-full flex-col items-center justify-center gap-4 px-4 py-12 text-center">
+      <div className="flex min-h-dvh w-full flex-col items-center justify-center gap-4 px-4 py-12 text-center">
         <h1 className="text-2xl font-semibold">No pudimos cargar tus perfiles</h1>
         <p className="max-w-md text-base text-muted-foreground">
           Probá recargar la página en unos segundos. Si el problema sigue,
@@ -53,7 +53,7 @@ export default async function PaginaPerfiles() {
             Cerrar sesión
           </Button>
         </form>
-      </main>
+      </div>
     )
   }
 
@@ -86,7 +86,7 @@ export default async function PaginaPerfiles() {
   })
 
   return (
-    <main className="flex min-h-dvh w-full flex-col items-center justify-center gap-10 px-4 py-12 sm:py-16">
+    <div className="flex min-h-dvh w-full flex-col items-center justify-center gap-10 px-4 py-12 sm:py-16">
       <div className="flex flex-col items-center gap-3 text-center">
         <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
           ¿Quién usa Historial Médico?
@@ -106,6 +106,6 @@ export default async function PaginaPerfiles() {
           Cerrar sesión
         </Button>
       </form>
-    </main>
+    </div>
   )
 }
