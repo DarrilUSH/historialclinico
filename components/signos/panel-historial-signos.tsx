@@ -19,6 +19,7 @@
 
 import * as React from "react"
 
+import { BotonExportar } from "@/components/signos/boton-exportar"
 import { GraficoSigno } from "@/components/signos/grafico-signo"
 import { SelectorPeriodoSigno } from "@/components/signos/selector-periodo-signo"
 import { SelectorSignoTipo } from "@/components/signos/selector-signo-tipo"
@@ -66,7 +67,10 @@ export function PanelHistorialSignos({ historial, alertas, umbrales, tipoInicial
       <SelectorSignoTipo tipoSeleccionado={tipo} onSeleccionar={setTipo} tiposConDatos={tiposConDatos} />
 
       <div className="flex flex-col gap-4 border-t border-borde-sutil pt-4">
-        <SelectorPeriodoSigno periodo={periodo} onCambiar={setPeriodo} />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <SelectorPeriodoSigno periodo={periodo} onCambiar={setPeriodo} />
+          <BotonExportar tipo={tipo} periodo={periodo} />
+        </div>
 
         <GraficoSigno key={`${tipo}-${periodo}`} serie={serie} />
       </div>
