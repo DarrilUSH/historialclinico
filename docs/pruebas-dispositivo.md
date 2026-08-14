@@ -236,3 +236,8 @@ Con el servidor de vuelta en `npm run dev` (sin tocar código en esta tarea):
 
 `adb reverse` restaurado (`tcp:3000`, `tcp:54321`), WiFi del teléfono
 reactivado, sesión de María sobre el perfil de Roberto intacta.
+
+
+## Resolución del warning de script tag (Sprint 12)
+
+El error de consola “Encountered a script tag while rendering React component” (visto en /turnos/nuevo, /inicio y otras) es el script anti-parpadeo de next-themes chocando con el validador de hidratación de la build de DESARROLLO de React 19. Evidencia: el string del warning solo existe en los chunks de dev (.next/dev) — no aparece en .next/static (producción) ni en react-dom-client.production.js. En producción el código del warning no se envía. Sin acción de código necesaria.
