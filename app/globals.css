@@ -317,6 +317,12 @@
   --spacing-tactil: max(48px, 2.75rem); /* 49.5px por defecto */
   --spacing-tactil-amplio: max(56px, 3.25rem); /* 58.5px por defecto */
 
+  /* Alto mínimo del botón SOS (components/inicio/boton-sos.tsx, Sprint 8,
+     tarea 8.3). El roadmap pide "bastante más de 48×48px": el piso absoluto
+     de `max()` garantiza los 64px aunque el navegador tenga el tamaño de
+     fuente por defecto sin agrandar (rem más chico que acá). */
+  --spacing-sos-boton: max(64px, 3.75rem); /* 67.5px por defecto */
+
   /* Alto de la bottom nav fija (components/navegacion/bottom-nav.tsx). El
      shell de app/(app)/(con-nav)/layout.tsx reserva este mismo alto como
      padding-bottom del contenido para que la nav nunca lo tape. Un solo

@@ -27,6 +27,7 @@ import { redirect } from "next/navigation"
 import { CreditCardIcon, HeartPulseIcon, PillIcon } from "lucide-react"
 
 import { ActivarNotificaciones } from "@/components/notificaciones/activar-notificaciones"
+import { BotonSos } from "@/components/inicio/boton-sos"
 import { ProximoTurno } from "@/components/inicio/proximo-turno"
 import { CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA } from "@/components/base/tarjeta"
 import { requerirSesion } from "@/lib/auth/guardas"
@@ -60,6 +61,15 @@ export default async function PaginaInicio() {
 
   return (
     <div className="flex w-full flex-1 flex-col items-center justify-center gap-8 px-4 py-12 text-center">
+      {/*
+        Botón SOS (Sprint 8, tarea 8.3): primera cosa bajo el encabezado del
+        perfil (que renderiza el layout, no esta página), arriba incluso del
+        saludo. Ver el comentario de cabecera de `boton-sos.tsx` para el
+        criterio de "menos de 2 toques desde cualquier pantalla" y por qué no
+        suma un quinto ítem a la bottom nav.
+      */}
+      <BotonSos />
+
       <div className="flex flex-col items-center gap-2">
         <p className="text-lg text-muted-foreground">Estás viendo el historial de</p>
         <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
