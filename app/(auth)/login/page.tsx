@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 
 import { FormularioAuth } from "@/components/auth/formulario-auth"
+import { PurgaCacheOffline } from "@/components/pwa/purga-cache-offline"
 import { iniciarSesion } from "@/app/(auth)/actions"
 import { PARAM_DESDE, destinoSeguro } from "@/lib/auth/rutas"
 
@@ -24,6 +25,12 @@ export default async function PaginaLogin({
 
   return (
     <div className="flex w-full max-w-md flex-col gap-4">
+      {/* Llegar acá significa que este dispositivo no tiene sesión —por logout
+          o porque venció—, así que la copia offline de la ficha de salud que
+          haya quedado guardada se borra. No pinta nada. Ver
+          `lib/pwa/registrar-sw.ts#purgarCacheOffline`. */}
+      <PurgaCacheOffline />
+
       {contrasenaRecuperada && (
         <p
           role="status"

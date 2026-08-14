@@ -81,6 +81,27 @@ export const RUTA_CRON_RECORDATORIOS = "/api/push/procesar-recordatorios"
 export const RUTA_CRON_ALERTAS_MEDICACION = "/api/push/procesar-alertas-medicacion"
 
 /**
+ * Pantalla de "sin conexión" (Sprint 8.4, `app/offline/page.tsx`). Es pública
+ * por dos motivos independientes, y cada uno alcanzaría solo:
+ *
+ * 1. **El service worker la precarga durante `install`**, con un `fetch` que
+ *    puede ocurrir antes de que exista cualquier sesión. Si el proxy
+ *    respondiera `307 → /login`, lo que quedaría guardado en el teléfono sería
+ *    la pantalla de login, y el modo offline mostraría "iniciá sesión" a
+ *    alguien que ya tiene la sesión abierta y solo se quedó sin señal.
+ * 2. **Es la respuesta a una navegación fallida**, incluidas las de alguien
+ *    sin sesión. Mandarlo al login sin red produciría otra navegación fallida:
+ *    un rebote que termina en el error del navegador, que es exactamente lo
+ *    que esta pantalla viene a evitar.
+ *
+ * Que sea pública no expone nada: la pantalla **no consulta absolutamente
+ * nada** —vive fuera de `app/(app)/`, no llama a `obtenerPerfilActivo()` y es
+ * estática—, precisamente porque queda escrita en el disco del dispositivo y
+ * sobrevive al cierre de sesión.
+ */
+export const RUTA_OFFLINE = "/offline"
+
+/**
  * Rutas públicas: se sirven con o sin sesión. Cada entrada cubre la ruta
  * exacta y sus subrutas (`/recuperar` cubre `/recuperar/confirmar`), salvo
  * `/` que se compara exacta —si no, cubriría toda la aplicación—.
@@ -91,6 +112,7 @@ export const RUTAS_PUBLICAS = [
   "/registro",
   "/recuperar",
   RUTA_SERVICE_WORKER,
+  RUTA_OFFLINE,
   RUTA_CRON_RECORDATORIOS,
   RUTA_CRON_ALERTAS_MEDICACION,
 ] as const

@@ -70,7 +70,7 @@ export default async function PaginaSos() {
   // `obtenerPerfilActivo()`.
   const { data: coberturaPrincipal } = await supabase
     .from("insurance_cards")
-    .select("provider, plan, member_number, front_storage_path, back_storage_path")
+    .select("id, provider, plan, member_number, front_storage_path, back_storage_path")
     .eq("profile_id", perfil.id)
     .eq("is_primary", true)
     .maybeSingle()
@@ -82,9 +82,17 @@ export default async function PaginaSos() {
         coberturaPrincipal={
           coberturaPrincipal
             ? {
+                id: coberturaPrincipal.id,
                 provider: coberturaPrincipal.provider,
                 plan: coberturaPrincipal.plan,
                 member_number: coberturaPrincipal.member_number,
+                // Solo si HAY foto: la ficha no debe pintar un `<img>` roto.
+                // Los paths no salen de acá -la imagen se pide por la URL
+                // estable `/api/credenciales/{id}/imagen`, que revalida
+                // permiso-, así que lo único que viaja al componente es si esa
+                // cara existe. Ver `docs/offline.md` §4.
+                tieneFrente: Boolean(coberturaPrincipal.front_storage_path),
+                tieneDorso: Boolean(coberturaPrincipal.back_storage_path),
               }
             : null
         }

@@ -151,6 +151,44 @@ export async function crearSignedUrl(
   return data.signedUrl;
 }
 
+/** Objeto leído del bucket, listo para devolverlo por HTTP. */
+export interface ObjetoDescargado {
+  /** Contenido crudo. `Response` lo transmite en streaming, sin copiarlo a un string. */
+  datos: Blob;
+  /** MIME que reportó Storage, o `application/octet-stream` si no vino ninguno. */
+  tipo: string;
+}
+
+/**
+ * Lee el contenido de un objeto privado, para servirlo desde un Route Handler
+ * con una URL propia del proyecto en vez de una signed URL.
+ *
+ * Existe por el modo offline (Sprint 8, tarea 8.4): una signed URL cambia en
+ * cada emisión y expira a los 300 segundos, así que como clave de caché no
+ * sirve —cada apertura crearía una entrada nueva que nace vencida—. Servir los
+ * bytes desde una URL estable le da al service worker algo que puede guardar,
+ * y mantiene la verificación de permiso en el servidor, request por request.
+ * Ver `docs/offline.md` §4.
+ *
+ * No verifica permisos: vale la advertencia del encabezado del módulo. Quien
+ * llama tiene que haber leído antes la fila correspondiente con el cliente del
+ * USUARIO (que sí pasa por RLS).
+ */
+export async function descargarObjeto(bucket: Bucket, path: string): Promise<ObjetoDescargado> {
+  const rutaLimpia = validarPath(path);
+
+  const { data, error } = await clienteAdmin().storage.from(bucket).download(rutaLimpia);
+
+  if (error) {
+    throw new Error(`No se pudo descargar "${bucket}/${rutaLimpia}": ${error.message}`);
+  }
+  if (!data) {
+    throw new Error(`Storage no devolvió contenido para "${bucket}/${rutaLimpia}".`);
+  }
+
+  return { datos: data, tipo: data.type || 'application/octet-stream' };
+}
+
 /**
  * Borra un objeto del bucket.
  *

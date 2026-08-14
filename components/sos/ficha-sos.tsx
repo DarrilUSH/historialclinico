@@ -36,6 +36,14 @@
  * resto de los campos SÍ tiene fallback porque son texto puro, sin ninguna
  * acción que pueda quedar inerte.
  *
+ * ## La foto de la credencial vive acá desde el Sprint 8.4
+ *
+ * El bloque "Cobertura principal" muestra las caras cargadas de la credencial
+ * con una URL **estable y cacheable** (`FotoCredencial`, más abajo). Es lo que
+ * hace que la ficha sirva de verdad en una ventanilla de guardia sin señal:
+ * DNI, grupo sanguíneo y carnet en la misma pantalla. Sigue sin haber un solo
+ * `"use client"` en este árbol.
+ *
  * ## El teléfono nunca se normaliza
  *
  * `href="tel:${telefono}"` usa el string tal como está guardado, sin tocar
@@ -56,13 +64,18 @@ import { PhoneIcon } from "lucide-react"
 import { Tarjeta } from "@/components/base/tarjeta"
 import { calcularEdad } from "@/lib/perfiles/edad"
 import { formatearRevisionSos } from "@/lib/sos/frescura"
+import { urlImagenCredencial } from "@/lib/sos/payload"
 import type { Perfil } from "@/types/dominio"
 
 /** Recorte de `insurance_cards` que trae `/sos` (contrato §5): solo lo que se muestra. */
 export interface CoberturaPrincipalSos {
+  id: string
   provider: string
   plan: string | null
   member_number: string | null
+  /** ¿Hay foto de esa cara? Los `storage_path` NO llegan hasta acá (ver `/sos/page.tsx`). */
+  tieneFrente: boolean
+  tieneDorso: boolean
 }
 
 export interface FichaSosProps {
@@ -176,6 +189,25 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
               <p>N.º de afiliado {coberturaPrincipal.member_number}</p>
             )}
           </div>
+
+          {(coberturaPrincipal.tieneFrente || coberturaPrincipal.tieneDorso) && (
+            <div className="flex flex-col gap-3 px-(--card-spacing) pt-1">
+              {coberturaPrincipal.tieneFrente && (
+                <FotoCredencial
+                  coberturaId={coberturaPrincipal.id}
+                  lado="front"
+                  proveedor={coberturaPrincipal.provider}
+                />
+              )}
+              {coberturaPrincipal.tieneDorso && (
+                <FotoCredencial
+                  coberturaId={coberturaPrincipal.id}
+                  lado="back"
+                  proveedor={coberturaPrincipal.provider}
+                />
+              )}
+            </div>
+          )}
         </Tarjeta>
       )}
 
@@ -185,6 +217,68 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
           : "Todavía no se cargó ningún dato vital."}
       </p>
     </div>
+  )
+}
+
+/**
+ * Una cara de la credencial de cobertura, dentro de la ficha SOS (Sprint 8,
+ * tarea 8.4).
+ *
+ * ## Tres decisiones que hacen que esto funcione en modo avión
+ *
+ * 1. **URL estable, nunca una signed URL.** `urlImagenCredencial` apunta a
+ *    `/api/credenciales/{id}/imagen`, que es siempre la misma para la misma
+ *    cara y verifica sesión y permiso en cada request que llega al servidor.
+ *    Una signed URL cambia en cada emisión y vive 300 segundos: como clave de
+ *    caché no sirve para nada (`docs/offline.md` §4).
+ *
+ * 2. **`<img>` nativo, no `next/image`.** `next/image` reescribe el `src` a
+ *    `/_next/image?url=…&w=…&q=…`, o sea otra URL, con su propio caché y su
+ *    propia negociación de formato — justo lo que el service worker no puede
+ *    seguir. Además haría pasar una foto privada por el optimizador. Es el
+ *    mismo criterio que ya aplican el visor y la miniatura de la billetera.
+ *
+ * 3. **Cero JavaScript.** Es un `<a>` con un `<img>` adentro: sin efectos, sin
+ *    estado, sin fetch. La billetera (`miniatura-credencial.tsx`) necesita ser
+ *    un Client Component porque tiene que pedir su signed URL; acá no hay nada
+ *    que pedir, y por eso la ficha SOS sigue siendo un Server Component puro
+ *    que se ve completa aunque no cargue ni un chunk de JS.
+ *
+ * El enlace abre la imagen sola en otra pestaña: sin red eso también sale del
+ * caché, y es la forma de verla grande en la ventanilla de una guardia sin
+ * depender del visor con zoom, que sí necesita JavaScript y conexión.
+ */
+function FotoCredencial({
+  coberturaId,
+  lado,
+  proveedor,
+}: {
+  coberturaId: string
+  lado: "front" | "back"
+  proveedor: string
+}) {
+  const etiqueta = lado === "front" ? "Frente" : "Dorso"
+  const url = urlImagenCredencial(coberturaId, lado)
+
+  return (
+    <figure className="flex flex-col gap-1">
+      <a
+        href={url}
+        target="_blank"
+        rel="noopener"
+        className="block overflow-hidden rounded-xl border border-border bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element -- URL estable cacheable offline, ver el comentario de arriba */}
+        <img
+          src={url}
+          alt={`Credencial de ${proveedor} — ${etiqueta.toLowerCase()}`}
+          className="max-h-64 w-full object-contain"
+        />
+      </a>
+      <figcaption className="text-base text-muted-foreground">
+        {etiqueta} de la credencial · tocá para verla en grande
+      </figcaption>
+    </figure>
   )
 }
 

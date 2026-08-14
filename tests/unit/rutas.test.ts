@@ -13,6 +13,7 @@ import { describe, it, expect } from "vitest"
 import {
   RUTA_CRON_ALERTAS_MEDICACION,
   RUTA_CRON_RECORDATORIOS,
+  RUTA_OFFLINE,
   destinoSeguro,
   esRutaDeApi,
   esRutaPrivada,
@@ -40,6 +41,36 @@ describe("lib/auth/rutas.ts", () => {
     // login rompe el registro y con él todas las notificaciones push. Ver el
     // comentario de RUTA_SERVICE_WORKER en lib/auth/rutas.ts.
     expect(esRutaPublica("/sw.js", EN_PROD)).toBe(true)
+  })
+
+  it("la pantalla de sin conexión es pública TAMBIÉN en producción", () => {
+    // El service worker la precarga durante `install`, con un `fetch` que
+    // puede ocurrir antes de que exista sesión: si el proxy contestara
+    // `307 → /login`, lo que quedaría guardado en el teléfono sería la
+    // pantalla de login. Ver el comentario de RUTA_OFFLINE en lib/auth/rutas.ts.
+    expect(esRutaPublica(RUTA_OFFLINE, EN_PROD)).toBe(true)
+    expect(esRutaPublica("/offline", EN_PROD)).toBe(true)
+  })
+
+  it("/offline no vuelve pública ninguna ruta con nombre parecido", () => {
+    expect(esRutaPublica("/offline-datos", EN_PROD)).toBe(false)
+    expect(esRutaPrivada("/offline-datos", EN_PROD)).toBe(true)
+  })
+
+  it("el payload offline de la ficha SOS SÍ exige sesión", () => {
+    // Es lo contrario de `/offline`: el JSON de `/api/sos/{perfilId}` trae
+    // datos de salud y se sirve por el camino normal (401 sin cookie, porque
+    // es una ruta de API). Que la pantalla offline sea pública no arrastra a
+    // los datos que esa pantalla promete tener guardados.
+    expect(esRutaPrivada("/api/sos/3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d", EN_PROD)).toBe(true)
+    expect(esRutaDeApi("/api/sos/3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")).toBe(true)
+    expect(esRutaPrivada("/sos", EN_PROD)).toBe(true)
+  })
+
+  it("la imagen estable de una credencial exige sesión", () => {
+    const ruta = "/api/credenciales/3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/imagen"
+    expect(esRutaPrivada(ruta, EN_PROD)).toBe(true)
+    expect(esRutaDeApi(ruta)).toBe(true)
   })
 
   it("el barrido de recordatorios es público para el proxy, también en producción", () => {

@@ -53,6 +53,7 @@ import { redirect } from "next/navigation"
 
 import { BottomNav } from "@/components/navegacion/bottom-nav"
 import { EncabezadoPerfil } from "@/components/navegacion/encabezado-perfil"
+import { RegistroServiceWorker } from "@/components/pwa/registro-service-worker"
 import { Toaster } from "@/components/ui/sonner"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
@@ -67,6 +68,13 @@ export default async function LayoutConNav({ children }: { children: ReactNode }
 
   return (
     <div className="flex min-h-pantalla w-full flex-col bg-background">
+      {/* Registra el service worker y le pide precargar la ficha SOS de ESTE
+          perfil (Sprint 8.4). No pinta nada; va acá y no en el layout raíz
+          porque `/login` y `/registro` no tienen ninguna ficha que guardar.
+          Ver `lib/pwa/registrar-sw.ts` para por qué el registro subió al
+          arranque en este sprint. */}
+      <RegistroServiceWorker perfilId={perfil.id} />
+
       <EncabezadoPerfil perfil={perfil} esPropio={permisos.esPropio} />
 
       {/* `pb-[...]` reserva exactamente el alto de la bottom nav fija

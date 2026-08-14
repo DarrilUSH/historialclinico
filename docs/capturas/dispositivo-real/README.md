@@ -63,6 +63,10 @@ Después se tocó (TAP real, `adb shell input tap`, no un click simulado) el pun
 | sprint7-alerta-renovacion.png | **Alertas de renovación de receta PROGRAMADAS** (tarea 7.4), dos en la bandeja: "A Roberto le quedan 4 días de Enalapril / Quedan 4 comprimidos · Conviene pedir la renovación de la receta." y la de Glucophage ("Quedan 8 comprimidos"). Nadie tocó ningún botón: las encoló `generar_alertas_medicacion()` sobre `v_medicacion_estado.necesita_renovacion` y las entregó el barrido de `/api/push/procesar-alertas-medicacion` — la segunda, por el circuito completo `pg_cron → pg_net → endpoint`. Que **se apilen** en vez de reemplazarse es lo correcto: el `tag` es `medicacion-{id}` y son dos medicaciones distintas |
 | sprint8-sos-ficha.png | Ficha SOS (`/sos`, tarea 8.3) en el dispositivo real: O+ gigante en panel destacado, "80 años · DNI no registrado" (fallback), alergias y crónicas en tipografía grande, contacto "Llamar a Gabriela Gómez (Hija)" como botón enorme, cobertura PAMI con afiliado, "Datos revisados el 14/08/2026". Dos toques desde cualquier pantalla (nav Inicio → botón SOS) |
 | sprint8-sos-llamar.png | Tocar "Llamar a Gabriela Gómez (Hija)" abre el **discador nativo con +54 9 2901 23-4567 precargado** — el criterio "marca al tocarlo en Android real" verificado por el orquestador; el `tel:` con espacios lo normaliza el propio discador |
+| sprint8-offline-sos.png | **`/sos` SIN RED** (tarea 8.4, túnel `adb reverse` removido): la ficha abre completa —tipografía Atkinson, tema oscuro, encabezado de perfil, O+ gigante, alergias, crónicas y bottom nav—, servida entera por el service worker desde `historial-medico-paginas-v1` + `historial-medico-estaticos-v1` |
+| sprint8-offline-credencial.png | Misma sesión sin red, al pie de `/sos`: **las dos caras de la credencial PAMI se ven** desde `historial-medico-imagenes-v1` (URL estable `/api/credenciales/{id}/imagen?lado=`, nunca una signed URL), más el sello "Datos revisados el 14/08/2026 03:38" |
+| sprint8-offline-credencial-grande.png | Tocar la credencial abre la imagen sola a pantalla completa, **también desde el caché**: la navegación a `/api/credenciales/.../imagen` cae en la estrategia de imagen y no en la pantalla offline |
+| sprint8-offline-pantalla.png | `/estudios` sin red: **pantalla "Estás sin conexión"** con diseño completo, en español, explicando qué sí está guardado y con el botón grande "Abrir mi ficha SOS" — no el dinosaurio de Chrome. La barra de direcciones sigue mostrando `/estudios`: el worker responde `/offline` sin cambiar la URL |
 | sprint6-recordatorio.png | **Recordatorio de turno PROGRAMADO** (tarea 6.4), expandido en la bandeja: "Turno de Cardiología en 3 horas / Hoy a las 17:54 · Dr. Carlos Rodríguez · Hospital Regional Ushuaia · Venir en ayunas de 8 horas". No lo disparó ningún botón de la app: lo generó `pg_cron` sobre un turno cargado a 2h55m y lo entregó el barrido de `/api/push/procesar-recordatorios`. Debajo se ven los otros dos recordatorios reales que salieron en el mismo barrido para los turnos del seed ("Turno de Cardiología pasado mañana", "Turno de Endocrinología en una semana") |
 
 ## Sprint 6 · Web Push (tarea 6.3) — verificación completa
@@ -156,3 +160,93 @@ La cadena de redirección sí se verificó sin sesión y es la correcta:
 `/medicacion?perfil=<uuid>` → `307` a
 `/login?desde=%2Fmedicacion%3Fperfil%3D<uuid>`, es decir el parámetro sobrevive
 al login y la persona aterriza donde apuntaba la notificación.
+
+## Sprint 8 · cache offline de datos vitales (tarea 8.4) — verificación completa
+
+**2026-08-14.** Contra `next build && next start` (no `next dev`: los chunks de
+desarrollo no son `immutable` y el service worker, correctamente, no los
+guarda — `docs/offline.md` límite 5).
+
+⚠️ **El modo avión NO corta `adb reverse`.** El túnel es loopback por USB y
+sigue vivo con el avión activado: una prueba de "modo avión" sobre
+`localhost:3000` no demuestra absolutamente nada. El corte real se hace con
+`adb reverse --remove tcp:3000` (y `tcp:54321`), y se restaura con
+`adb reverse tcp:3000 tcp:3000`.
+
+Sesión de María sobre el perfil gestionado de Roberto. Las fotos de credencial
+del seed apuntaban a `storage_path` **ficticios** (el bucket
+`credenciales-cobertura` estaba vacío), así que se subieron dos JPEG de prueba
+a esas mismas rutas antes de empezar — sin eso, el endpoint de imagen contesta
+404 con razón y la prueba no mide nada.
+
+1. **Con red**, abrir `/inicio` → `/sos`. El worker quedó `activated` y
+   controlando la pestaña, y las cinco cachés se llenaron solas (leído por CDP,
+   `adb forward tcp:9222 localabstract:chrome_devtools_remote`):
+
+   | Caché | Contenido |
+   |---|---|
+   | `shell-v1` | `/offline`, `/icono-192.png` |
+   | `estaticos-v1` | 20 entradas: CSS, chunks y las dos fuentes Atkinson |
+   | `paginas-v1` | `/sos` — **solo el HTML**, ningún payload RSC |
+   | `imagenes-v1` | las dos caras de la credencial |
+   | `datos-v1` | **DOS payloads**: `/api/sos/{maría}` y `/api/sos/{roberto}` |
+
+   Las dos entradas de `datos-v1` son la precarga por perfil funcionando: se
+   pasó por el perfil propio de María antes de cambiar al de Roberto, y cada
+   uno dejó su ficha guardada bajo su propia clave (regla dura 4 del contrato).
+
+2. **`adb reverse --remove tcp:3000` + `tcp:54321`.** Sin túnel, `localhost:3000`
+   no existe para el teléfono.
+
+3. **`/sos` abre COMPLETA** (`sprint8-offline-sos.png`): idéntica a la versión
+   con red, con estilos, fuentes y encabezado. Al pie, **las dos caras de la
+   credencial PAMI** (`sprint8-offline-credencial.png`), y tocarlas abre la
+   imagen sola a pantalla completa, también desde el caché
+   (`sprint8-offline-credencial-grande.png`).
+
+4. **`/estudios` muestra la pantalla de sin conexión**
+   (`sprint8-offline-pantalla.png`), no el error del navegador. Tocar "Abrir mi
+   ficha SOS" desde ahí lleva a la ficha cacheada: el camino de escape funciona
+   sin red, con un `<a>` nativo y sin depender de hidratación.
+
+5. **Refresco al volver la conexión.** Con el teléfono todavía sin red se le
+   agregó a Roberto la alergia "Aspirina" por SQL. Recargar `/sos` sin red
+   siguió mostrando **dos** alergias (la copia local, correcta). Restaurado el
+   túnel y recargado, apareció **"Aspirina"** — y la copia guardada quedó
+   reescrita, no salteada:
+
+   | | antes | después |
+   |---|---|---|
+   | HTML cacheado de `/sos` | sin "Aspirina" | **con "Aspirina"** |
+   | `payload.generado_at` | `07:44:18.266Z` | **`07:49:19.080Z`** |
+   | `payload.vitales.actualizado_at` | `06:38:00` | **`07:48:34`** (lo movió el trigger) |
+
+   Las dos marcas de tiempo se movieron por motivos distintos y quedaron
+   distintas, que es exactamente lo que pide `docs/modelo-sos.md` §6.1.
+   También se verificó que el HTML cacheado **no** es la pantalla de login: la
+   guarda de `decidirDestinoDeCache` contra respuestas redirigidas
+   (`307 → /login` llega como `200` con el HTML del login) hizo su trabajo.
+
+6. **Purga al cerrar sesión.** Antes del logout había cinco cachés; al aterrizar
+   en `/login`, quedaron **dos**:
+
+   ```
+   historial-medico-shell-v1
+   historial-medico-estaticos-v1
+   ```
+
+   Las tres con datos personales —`paginas` (la ficha), `imagenes` (las fotos de
+   la credencial) y `datos` (los payloads de los dos perfiles)— desaparecieron
+   del dispositivo. Es el mecanismo de `lib/pwa/registrar-sw.ts#purgarCacheOffline`,
+   montado en `/login` y no en el botón de logout justamente para cubrir también
+   la sesión que vence sola.
+
+Después de la prueba se restauraron el seed (las dos alergias originales), la
+sesión y el túnel `adb reverse tcp:3000`.
+
+**Lo que quedó sin verificar en pantalla:** el borrado del caché por revocación
+de permiso con red (el camino 401/403/404 → `descartar` de
+`decidirDestinoDeCache`). Está cubierto por `tests/unit/sw-offline.test.ts`,
+pero no se ejercitó contra el teléfono: exige revocar el permiso de María sobre
+Roberto en medio de la sesión, que es una prueba de `docs/modelo-permisos.md`
+más que de esta tarea.
