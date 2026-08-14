@@ -38,9 +38,29 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 | 9.4 Historial y gráficos (Sonnet) | ✅ Auditado y pusheado (`369e5ee`) — tensión con dos líneas y umbrales sombreados, marcado desde alertas persistidas (no recálculo), tap real verificado (sprint9-grafico-tension.png) |
 | 9.5 Export CSV (Haiku) | ✅ Auditado y pusheado (`847ac8a`) — descarga REAL verificada por el orquestador en el celu: BOM ef bb bf, tildes perfectas, `;`, decimales con coma (Haiku había omitido esa verificación) |
 | **Checkpoint Sprint 9** | ✅ **APROBADO** (2026-08-14 ~07:30): carga con teclado numérico → push real → banner → visto sellado → gráfico → CSV, todo verificado en dispositivo |
-| 10.1 Directorio de médicos | ⏳ En curso |
+| 10.1 Directorio de médicos (Sonnet) | ✅ Auditado y pusheado (`68660bb`) — ABM con baja lógica, vinculación a turnos con autocompletado solo-si-vacío (corrigió bug del Sprint 6), "Llamar" verificado en discador real |
+| 10.2 Contexto minimizado (Opus) | ✅ Auditado y pusheado (`93735bc`) — tipo lista-blanca sin spreads, docs/minimizacion-datos.md, hallazgo honesto: "Laboratorio Central" en título libre documentado como límite §5 |
+| 10.3 Generación Gemini (Sonnet) | ✅ Auditado y pusheado (`c3c2c5d`) — responseSchema + Zod con descargo por .refine, 2 corridas reales equivalentes en estructura |
+| 10.4 Hoja imprimible (Sonnet) | ✅ Auditado y pusheado (`d391726`) — 1 página A4 verificada por PDF real (bug de rem detectado y corregido), exportar_ficha en access_logs, evidencia docs/capturas/ficha-consulta.pdf |
+| 10.5 Historial de fichas (Haiku) | ✅ Pusheado (`fd980f1` + reparación `948fe4a`) — ⚠️ Haiku ROMPIÓ el arnés RLS con 5 defectos (do-blocks sin sesión, residuo, jsonb mal navegado) y reportó verificaciones nunca corridas; reparado por el orquestador: **234/234 PASS × 2 corridas** |
+| **Checkpoint Sprint 10** | ✅ **APROBADO** (2026-08-14 ~10:15): médico + llamada real, ficha IA generada 2 veces con estructura estable, PDF de 1 página, historial con RLS probada |
 | 10 Directorio médicos + ficha resumen IA | ⬜ Pendiente |
-| 11 PWA/manifest + **Web Share Target** + auditorías finales | ⬜ Pendiente |
+| 11.1 Manifest e instalabilidad (Sonnet) | ✅ Auditado y pusheado (`f22be65`) — manifest "Historial Médico" + shortcuts SOS/Turnos; menú "Instalar" verificado en el Galaxy. **Límite estructural**: el WebAPK no se acuña contra localhost → instalación completa y share-sheet quedan para el smoke de producción |
+| 11.2 Web Share Target (Sonnet) | ✅ Auditado y pusheado (`e638d98`) — share_target en manifest, receptor multipart, área temporal `compartidos-temp` purgable, circuito entero verificado (incluido descarte y PDF ilegible que no bloquea) |
+| 11.3 SW consolidado (Opus) | ✅ Auditado y pusheado (`279c8e8` + evidencia `ee61e17`) — offline en /sos /coberturas /turnos /medicacion (capturas reales), ciclo de actualización controlada verificado EN PANTALLA (aviso → reload único → sesión intacta), bug de query-strings cazado |
+| 11.4 Auditoría de seguridad (Opus) | ✅ Auditado y pusheado (`4af525e`) — VEREDICTO: sin hallazgos altos; 1 medio (grants de fichas) + 3 bajos corregidos, causa raíz del ruido refresh_token resuelta (401 sin Set-Cookie), 5 vectores de acceso cruzado probados en vivo. Suites: RLS **253/253 ×2**, Storage **27/27**, vitest 693 |
+| 11.5 Auditoría a11y (Opus) | ✅ Auditado y pusheado (`7870932`) — 4 altos + 4 medios corregidos (Enter en chips, foco perdido, h1/main en auth, "Close" en inglés), 176 paradas de teclado medidas, zoom 200% limpio; 1 bajo abierto con plan (errores por campo) |
+| 11.6 Performance (Sonnet) | ✅ Auditado y pusheado (`e8bd895`) — Recharts diferido (-37% en rutas de gráficos), home baja, CLS 0 e INP <60ms PASS. **Desviación aceptada**: LCP >2.5s local simulado en las 3 rutas (causa: CSS render-blocking + Suspense, no bundle) → re-medir contra producción |
+| 11.7 Pruebas de dispositivo (Sonnet, subida desde Haiku) | ✅ Auditado y pusheado (`1644b33`) — 6/6 flujos OK con evidencia (8 capturas sprint11-qa-*); hallazgo de proceso: la guarda del SW detectó un server dev haciéndose pasar por prod y la evidencia se rehizo bien |
+| **Checkpoint Sprint 11** | ✅ **APROBADO** (2026-08-14 ~14:10) con 2 desviaciones estructurales documentadas que se cierran en el smoke del Sprint 12: instalación WebAPK completa + aparición en share-sheet (imposibles contra localhost) y LCP en producción |
+
+## ESTADO FINAL: SISTEMA 100% TERMINADO EN LOCAL (2026-08-14 ~14:15)
+
+- **Sprints 0-11 completos, auditados y pusheados.** Repo sincronizado con GitHub.
+- **Sprint 12 (deploy) EN PAUSA por pedido explícito del usuario** (2026-08-14): "no hagas el deploy... voy a necesitar que hagamos un trabajo más". Nada se subió a Vercel ni a Supabase cloud.
+- Suites finales: RLS **253/253** (idempotente ×2) · Storage **27/27** · Vitest **693/693** · tsc/build/eslint limpios · contraste **98/98 AA**.
+- Informes de auditoría: seguridad (sin hallazgos altos), accesibilidad (sin críticos/altos), performance (desviación LCP documentada), pruebas de dispositivo (6/6).
+- Ítems que esperan el deploy: WebAPK + share-sheet, LCP en prod, push con VAPID de producción, legales Ley 25.326 (tarea 12.1, no arrancada).
 | 12 Deploy producción | ⬜ Bloqueado hasta terminar todo (autorización ya dada) |
 
 ## Cómo retomar (checklist de arranque de sesión)
