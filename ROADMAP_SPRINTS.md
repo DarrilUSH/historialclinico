@@ -808,6 +808,15 @@ Demo en el dispositivo real: alternar A/a en 6 pantallas representativas, persis
 
 ---
 
+## Backlog de mejoras (post-lanzamiento, pedidas por el usuario)
+
+> Anotadas el 2026-08-14 durante el estreno en producción. Se encaran como tandas nuevas cuando el usuario lo pida, con el protocolo de siempre.
+
+1. **Aceptación de invitaciones familiares** — hoy quien otorga acceso consiente explícitamente (Ley 25.326, tarea 12.1) pero a la contraparte el perfil le aparece sin aceptar. Mejora: invitación PENDIENTE con notificación ("X quiere darte acceso, nivel: ver"), estados aceptada/rechazada, y nada visible hasta aceptar. Tabla de invitaciones + pantalla + push.
+2. **"Temas para la consulta" (notas por turno)** — sugerencia de un conocido del usuario: lista viva de ítems colgada de cada turno ("preguntarle por la pastilla X", "contarle de la alergia"), carga en dos toques desde el detalle o la card del próximo turno, vista destacada el día de la consulta con checkboxes para tachar en vivo, e integración con la Ficha para el médico (los ítems reales del usuario se combinan con las preguntas sugeridas por la IA). Los campos de notas actuales (preparation_notes, notes) quedan como están: esto es una entidad propia (ítems, no texto libre).
+3. **SMTP propio para los mails de Auth** — Supabase no permite personalizar remitente/asunto/cuerpo sin SMTP custom. Opción costo-cero: Brevo (300/día gratis). El usuario carga las credenciales SMTP + "Sender name: Historial Médico"; después se redactan los templates en castellano (contenido, lo puede hacer el orquestador vía dashboard).
+4. **Cerrar o limitar el registro público** — decisión pendiente del usuario (mitigación de abuso de cuota Gemini; docs/checklist-produccion.md ítem 7).
+
 ## Protocolo de Auditoría y Checkpoints
 
 ### Cómo funciona
