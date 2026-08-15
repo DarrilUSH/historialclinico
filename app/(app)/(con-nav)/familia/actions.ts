@@ -204,10 +204,9 @@ export async function invitarFamiliar(
 
   // Sprint 12, tarea 12.1: el otorgamiento ya ocurrió (el INSERT de arriba
   // tuvo éxito) — esta fila es CONSTANCIA de esa decisión, no su condición.
-  // Por eso usa `registrarConsentimiento` (nunca lanza) y no
-  // `registrarConsentimientosDeAlta` (propaga el error): un fallo de red acá
-  // no debe dejar a quien otorgó el acceso pensando que el otorgamiento en
-  // sí no funcionó. Ver el porqué completo en `lib/legales.ts`.
+  // Por eso `registrarConsentimiento` nunca lanza: un fallo de red acá no debe
+  // dejar a quien otorgó el acceso pensando que el otorgamiento en sí no
+  // funcionó. Ver el porqué completo en `lib/legales.ts`.
   await registrarConsentimiento(supabase, concedido.usuario.id, "acceso_familiar")
 
   revalidatePath("/familia")

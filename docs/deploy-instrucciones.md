@@ -6,6 +6,28 @@
 
 ---
 
+## ⚠️ HOTFIX pendiente de aplicar a la base de producción (2026-08-14)
+
+> Este documento describe el deploy INICIAL, cuando la base cloud todavía estaba vacía. Producción ya está viva, así que lo único que falta aplicar es la migración nueva:
+>
+> **`supabase/migrations/20260814140000_alta_de_cuenta.sql`** — arregla el bug por el cual una cuenta recién registrada quedaba sin perfil ("Todavía no hay perfiles disponibles para tu cuenta") y sin consentimiento registrado.
+>
+> ```bash
+> npx supabase db push
+> ```
+>
+> Se aplica sola con el resto del flujo del Paso 1 (`login` + `link` ya hechos → directo `db push`). **Pushear el código a `main` NO alcanza**: el deploy de Vercel no toca la base. Hasta que corras `db push`, las cuentas nuevas van a seguir naciendo rotas.
+>
+> La migración incluye un **backfill** que repara las cuentas ya afectadas. Al aplicarla vas a ver un `NOTICE` diciendo cuántos perfiles y consentimientos creó. Para verificar después, en el SQL Editor del Dashboard:
+>
+> ```sql
+> select count(*) from auth.users u
+>  where not exists (select 1 from public.profiles p where p.user_id = u.id);
+> -- tiene que dar 0
+> ```
+
+---
+
 ## Paso 1 — Aplicar el esquema a la base de producción (Supabase cloud)
 
 El proyecto cloud es `nbypcqhojmixlxvkflrp` y está **vacío**. Hay que aplicarle las 18 migraciones. La forma robusta es el CLI (aplica todo en orden, transaccional):

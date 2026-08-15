@@ -303,6 +303,7 @@ Los índices de FK (`family_permissions`, `doctors`, `medication_intakes.medicat
 | `0011_sos.sql` | Confirmación/ajuste del modelo SOS (ver decisión 10) | 8 |
 | ~~`0012_signos_umbrales.sql`~~ → **`20260814080000_signos_umbrales.sql`** | **APLICADA.** Umbrales clínicos configurables por perfil (`vital_sign_thresholds`, fila opcional con defaults globales) y registro de alertas disparadas (`vital_sign_alerts`), con el enum `vital_sign_alert_rule`, los dos triggers de sellado y el `CHECK` que obliga al descargo clínico en el texto. Ver [`modelo-signos.md`](./modelo-signos.md) | 9 |
 | `0013_fichas.sql` | Historial de fichas de resumen generadas por IA | 10 |
+| **`20260814140000_alta_de_cuenta.sql`** | **APLICADA (hotfix de producción).** Trigger `auth_users_crear_perfil_de_cuenta` (`AFTER INSERT ON auth.users`) + función `completar_alta_de_cuenta` idempotente: toda cuenta nueva obtiene su perfil propio y sus dos filas de `consents`. Incluye backfill de las cuentas que quedaron sin perfil cuando el alta dependía de una sesión que, con confirmación por correo, no existe. Arnés: BLOQUE 19 | 12 |
 
 Decisiones deliberadamente **no** tomadas todavía:
 

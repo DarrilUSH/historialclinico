@@ -4,33 +4,38 @@
  * se puede completar el registro sin aceptar explícitamente Privacidad y
  * Términos, y el consentimiento aceptado queda registrado.
  *
- * Todo lo externo va mockeado -Supabase, `next/headers`, `next/navigation`,
- * `lib/legales`- para probar únicamente las ramas de decisión de
- * `registrarse`, sin salir a la red. El caso SQL (que la fila realmente
- * quede en `consents` con versión y timestamp, bajo RLS real) lo cubre
- * `scripts/test-rls.sql` BLOQUE 18.
+ * Todo lo externo va mockeado -Supabase, `next/headers`, `next/navigation`-
+ * para probar únicamente las ramas de decisión de `registrarse`, sin salir a
+ * la red.
+ *
+ * ## Dónde quedó cada mitad del criterio después del hotfix
+ *
+ * - **"No se puede completar el registro sin aceptar"** — sigue acá: es la
+ *   revalidación server-side de `aceptaLegales`, la única que de verdad
+ *   importa (un `formData` se puede alterar; el `required` del checkbox es
+ *   conveniencia del navegador). Nada de esto cambió con el hotfix.
+ * - **"El consentimiento queda registrado"** — se mudó a la base
+ *   (`supabase/migrations/20260814140000_alta_de_cuenta.sql`), porque en
+ *   producción `signUp` no devuelve sesión y la aplicación no podía escribir
+ *   la fila bajo RLS. Que la versión aceptada VIAJE hasta allá lo prueba
+ *   `tests/unit/alta-de-cuenta.test.ts`; que la fila realmente aparezca, con
+ *   versión y timestamp, lo prueba `scripts/test-rls.sql` BLOQUE 19.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { mockClient, mockSignUp, mockInsertProfiles, mockRegistrarConsentimientosDeAlta } =
-  vi.hoisted(() => {
-    const mockSignUp = vi.fn()
-    const mockInsertProfiles = vi.fn()
-    const mockRegistrarConsentimientosDeAlta = vi.fn()
-
-    const mockClient = {
-      auth: { signUp: mockSignUp },
-      from: (tabla: string) => {
-        if (tabla !== "profiles") {
-          throw new Error(`Tabla inesperada en el mock: ${tabla}`)
-        }
-        return { insert: mockInsertProfiles }
-      },
-    }
-
-    return { mockClient, mockSignUp, mockInsertProfiles, mockRegistrarConsentimientosDeAlta }
+const { mockClient, mockSignUp, mockFrom } = vi.hoisted(() => {
+  const mockSignUp = vi.fn()
+  const mockFrom = vi.fn((tabla: string) => {
+    throw new Error(`Tabla inesperada en el mock: ${tabla}`)
   })
+
+  return {
+    mockClient: { auth: { signUp: mockSignUp }, from: mockFrom },
+    mockSignUp,
+    mockFrom,
+  }
+})
 
 vi.mock("next/headers", () => ({
   headers: vi.fn(async () => new Map()),
@@ -56,16 +61,13 @@ vi.mock("@/lib/densidad/servidor", () => ({
   sincronizarCookieTamano: vi.fn(),
 }))
 
-vi.mock("@/lib/legales", () => ({
-  registrarConsentimientosDeAlta: mockRegistrarConsentimientosDeAlta,
-}))
-
 vi.mock("@/lib/perfil-activo", () => ({
   limpiarPerfilActivo: vi.fn(),
 }))
 
 import { registrarse } from "@/app/(auth)/actions"
 import { redirect } from "next/navigation"
+import { VERSION_LEGALES } from "@/lib/legales"
 
 const USUARIO_FALSO = { id: "usuario-nuevo-123" }
 
@@ -95,8 +97,7 @@ describe("registrarse — consentimiento (Sprint 12, tarea 12.1)", () => {
 
     expect(resultado.error).toMatch(/Política de Privacidad|Términos/i)
     expect(mockSignUp).not.toHaveBeenCalled()
-    expect(mockInsertProfiles).not.toHaveBeenCalled()
-    expect(mockRegistrarConsentimientosDeAlta).not.toHaveBeenCalled()
+    expect(mockFrom).not.toHaveBeenCalled()
   })
 
   it('rechaza igual con aceptaLegales="off" (valor real de un checkbox HTML sin marcar cuando SÍ viaja)', async () => {
@@ -108,44 +109,38 @@ describe("registrarse — consentimiento (Sprint 12, tarea 12.1)", () => {
     expect(mockSignUp).not.toHaveBeenCalled()
   })
 
-  it("con el checkbox marcado, completa el alta y registra el consentimiento del usuario recién creado", async () => {
+  it("[CRITERIO DE ACEPTACIÓN] con el checkbox marcado, el alta lleva la versión legal aceptada", async () => {
     mockSignUp.mockResolvedValue({
       data: { user: USUARIO_FALSO, session: { access_token: "token" } },
       error: null,
     })
-    mockInsertProfiles.mockResolvedValue({ error: null })
-    mockRegistrarConsentimientosDeAlta.mockResolvedValue({ error: null })
 
     const formData = formularioValido({ aceptaLegales: "on" })
 
     await expect(registrarse({ error: null }, formData)).rejects.toThrow("[REDIRECT]")
 
     expect(mockSignUp).toHaveBeenCalledOnce()
-    expect(mockInsertProfiles).toHaveBeenCalledOnce()
-    // El consentimiento se registra DESPUÉS de crear el perfil, con el id de
-    // la cuenta recién creada -no un id inventado ni el de otra sesión-.
-    expect(mockRegistrarConsentimientosDeAlta).toHaveBeenCalledWith(
-      mockClient,
-      USUARIO_FALSO.id,
+    // La versión que se registra es la que esta persona tenía a la vista al
+    // marcar el checkbox, no la que esté vigente cuando la base procese el
+    // alta: con confirmación por correo esos dos momentos pueden ser
+    // distintos. Por eso viaja en el metadata en vez de deducirse allá.
+    expect(mockSignUp.mock.calls[0][0].options.data.legales_version).toBe(
+      VERSION_LEGALES,
     )
     expect(redirect).toHaveBeenCalledWith("/perfiles")
   })
 
-  it("si falla el registro del consentimiento, avisa y NO redirige (no se pierde en silencio)", async () => {
+  it("si el alta falla en Supabase, no redirige y avisa en castellano", async () => {
     mockSignUp.mockResolvedValue({
-      data: { user: USUARIO_FALSO, session: { access_token: "token" } },
+      data: { user: null, session: null },
       error: null,
-    })
-    mockInsertProfiles.mockResolvedValue({ error: null })
-    mockRegistrarConsentimientosDeAlta.mockResolvedValue({
-      error: "la base no respondió",
     })
 
     const formData = formularioValido({ aceptaLegales: "on" })
 
     const resultado = await registrarse({ error: null }, formData)
 
-    expect(resultado.error).toMatch(/consentimiento/i)
+    expect(resultado.error).toMatch(/No pudimos crear la cuenta/i)
     expect(redirect).not.toHaveBeenCalled()
   })
 })

@@ -7,19 +7,29 @@
  * Todas usan `lib/supabase/server.ts` (cliente de servidor, cookies vía
  * `next/headers`) — nunca el cliente de navegador ni un `supabase-js` a
  * pelo, porque necesitamos que la sesión que arma `signUp`/`signInWithPassword`
- * quede escrita en las cookies de ESTA request para que la llamada siguiente
- * (el `insert` en `profiles`) ya viaje autenticada.
+ * quede escrita en las cookies de ESTA request.
  *
- * Punto crítico de `registrarse`: la política `profiles_insert_propio_o_gestionado`
- * (supabase/migrations/20260812220000_rls.sql) exige `user_id = auth.uid()`
- * en el INSERT. En local, `supabase/config.toml` tiene
- * `[auth.email] enable_confirmations = false`, así que `signUp` autoconfirma
- * y devuelve `session` en el mismo response — el cliente de servidor que
- * llamó a `signUp` queda autenticado para el resto de la request, y el
- * `insert` de `profiles` corre como el usuario recién creado. Si algún día
- * se habilita confirmación de correo, `data.session` viene `null` y esta
- * función lo contempla: no intenta el insert (fallaría por RLS) y le pide a
- * la persona que confirme el correo antes de entrar.
+ * ## Punto crítico de `registrarse`: el perfil NO se crea acá
+ *
+ * Hasta el hotfix de la migración `20260814140000_alta_de_cuenta.sql`, esta
+ * función insertaba `profiles` y `consents` después del `signUp`, con la
+ * sesión que ese mismo `signUp` devuelve. Eso solo funciona con
+ * `[auth.email] enable_confirmations = false` (el default de
+ * `supabase/config.toml`, o sea LOCAL): ahí el alta autoconfirma y
+ * `data.session` llega en el mismo response.
+ *
+ * En PRODUCCIÓN la confirmación por correo está encendida y `data.session`
+ * viene `null`, porque la sesión recién existe cuando la persona toca el
+ * enlace del correo — en otra request, sin este `formData` a la vista. El
+ * resultado real fue una cuenta viva en `auth.users`, sin fila en `profiles`
+ * y sin prueba de consentimiento: al entrar, `/perfiles` mostraba "Todavía no
+ * hay perfiles disponibles para tu cuenta" y nada más.
+ *
+ * Ahora las tres filas las crea un trigger `AFTER INSERT ON auth.users`, que
+ * corre en la misma transacción que el alta y no depende de que exista sesión.
+ * Lo único que esta función tiene que hacer es mandarle los datos por
+ * `options.data` — GoTrue los guarda en `auth.users.raw_user_meta_data`, que
+ * es de donde los lee el trigger.
  */
 
 import { headers } from "next/headers"
@@ -32,7 +42,7 @@ import {
   limpiarCookieTamano,
   sincronizarCookieTamano,
 } from "@/lib/densidad/servidor"
-import { registrarConsentimientosDeAlta } from "@/lib/legales"
+import { VERSION_LEGALES } from "@/lib/legales"
 import {
   PARAM_DESDE,
   RUTA_LOGIN,
@@ -114,10 +124,16 @@ function mapearErrorAuth(error: AuthError): string {
 }
 
 /**
- * Alta de cuenta: crea el usuario en Supabase Auth y su fila en `profiles`.
- * `role` se guarda como `admin` porque quien se registra con cuenta propia
- * es, por definición del modelo de permisos (docs/modelo-permisos.md §3.1),
- * titular y administrador de su propio perfil.
+ * Alta de cuenta: crea el usuario en Supabase Auth. El perfil propio y las
+ * dos filas de `consents` las crea el trigger
+ * `auth_users_crear_perfil_de_cuenta` a partir de `options.data` — ver el
+ * encabezado de este archivo y el de la migración
+ * `supabase/migrations/20260814140000_alta_de_cuenta.sql`.
+ *
+ * El `role` del perfil (`admin`) lo pone esa migración, no este archivo:
+ * quien se registra con cuenta propia es, por definición del modelo de
+ * permisos (docs/modelo-permisos.md §3.1), titular y administrador de su
+ * propio perfil.
  */
 export async function registrarse(
   _estadoPrevio: EstadoAuth,
@@ -159,10 +175,23 @@ export async function registrarse(
 
   const supabase = await createClient()
 
+  // `options.data` es TODO lo que el alta necesita transportar: GoTrue lo
+  // guarda tal cual en `auth.users.raw_user_meta_data` y el trigger
+  // `auth_users_crear_perfil_de_cuenta` lo lee ahí para armar el perfil y las
+  // dos filas de `consents`.
+  //
+  // `legales_version` viaja junto con el nombre y no se deduce en la base
+  // (Sprint 12, tarea 12.1): la versión que corresponde registrar es la que
+  // esta persona TENÍA A LA VISTA cuando marcó el checkbox, no la que esté
+  // vigente cuando la base procese el alta. Con confirmación por correo esas
+  // dos pueden ser distintas — entre el registro y la confirmación puede
+  // pasar un día y publicarse una revisión de los documentos.
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { full_name: nombreCompleto } },
+    options: {
+      data: { full_name: nombreCompleto, legales_version: VERSION_LEGALES },
+    },
   })
 
   if (error) {
@@ -172,42 +201,14 @@ export async function registrarse(
     return { error: "No pudimos crear la cuenta. Probá de nuevo." }
   }
 
+  // Producción (confirmación por correo encendida): no hay sesión todavía. El
+  // perfil y el consentimiento YA quedaron creados por el trigger, así que
+  // acá no hay nada pendiente — solo hay que mandar a la persona al correo.
   if (!data.session) {
     return {
       error: null,
       mensaje:
         "Te enviamos un correo para confirmar tu cuenta. Confirmalo y después iniciá sesión.",
-    }
-  }
-
-  const { error: errorPerfil } = await supabase.from("profiles").insert({
-    user_id: data.user.id,
-    full_name: nombreCompleto,
-    role: "admin",
-  })
-
-  if (errorPerfil) {
-    return {
-      error:
-        "Tu cuenta se creó, pero hubo un problema al guardar tu perfil. Iniciá sesión y probá de nuevo, o escribinos si el problema sigue.",
-    }
-  }
-
-  // Sprint 12, tarea 12.1: el consentimiento a Privacidad y Términos queda
-  // registrado con versión y timestamp (criterio de aceptación del
-  // ROADMAP). A diferencia de `registrarAcceso` (auditoría de conveniencia),
-  // acá el registro ES la prueba de la base legal que habilitó crear la
-  // cuenta -por eso `registrarConsentimientosDeAlta` propaga el error en vez
-  // de tragarlo, ver el porqué en `lib/legales.ts`-.
-  const { error: errorConsentimiento } = await registrarConsentimientosDeAlta(
-    supabase,
-    data.user.id,
-  )
-
-  if (errorConsentimiento) {
-    return {
-      error:
-        "Tu cuenta se creó, pero hubo un problema al registrar tu consentimiento. Iniciá sesión y probá de nuevo, o escribinos si el problema sigue.",
     }
   }
 

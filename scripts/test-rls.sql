@@ -129,6 +129,22 @@ values
      'diego@ejemplo.ar', crypt('prueba-rls', gen_salt('bf')), now(), now(), now(),
      '{"provider":"email","providers":["email"]}', '{}');
 
+-- Desde `20260814140000_alta_de_cuenta.sql`, insertar en `auth.users` dispara
+-- `auth_users_crear_perfil_de_cuenta`, que le crea a cada cuenta su perfil
+-- propio con un id ALEATORIO y sus dos filas de `consents`. El arnés necesita
+-- ids fijos (:p_a y :p_b se interpolan en medio script), así que descarta el
+-- perfil automático — si no, el INSERT de abajo chocaría contra
+-- `profiles_user_id_unico` y tumbaría la corrida entera. Los `consents` se
+-- dejan: ningún bloque cuenta filas de estas dos cuentas y el cleanup final se
+-- los lleva con el CASCADE de `auth.users`.
+--
+-- El `id not in (...)` protege el caso de una corrida sobre restos previos:
+-- borrar el perfil DEFINITIVO de María se llevaría en cascada sus datos.
+-- El BLOQUE 19 es el que prueba que este perfil automático se crea bien.
+delete from public.profiles
+ where user_id in (:u_a, :u_b)
+   and id not in (:p_a, :p_b);
+
 insert into public.profiles (id, user_id, full_name, role, blood_type, allergies) values
     (:p_a, :u_a, 'María Gómez',   'admin',         'A+',  '{"Penicilina"}'),
     (:p_b, :u_b, 'Diego Gómez',   'family_member', 'O-',  '{}');
@@ -3423,6 +3439,13 @@ values
     ('f1500aaa-1111-4111-8111-111111111111', 'usuario15a@test.local', '{}', '{}'),
     ('f1500bbb-2222-4222-8222-222222222222', 'usuario15b@test.local', '{}', '{}');
 
+-- Mismo motivo que en la sección 2 de datos de prueba: el trigger
+-- `auth_users_crear_perfil_de_cuenta` (20260814140000) ya les creó un perfil
+-- propio con id aleatorio, y este bloque necesita ids fijos.
+delete from public.profiles
+ where user_id in ('f1500aaa-1111-4111-8111-111111111111', 'f1500bbb-2222-4222-8222-222222222222')
+   and id not in ('f1500000-0000-4000-8000-00000000f501', 'f1500000-0000-4000-8000-00000000f502');
+
 insert into public.profiles (id, user_id, full_name, role, blood_type)
 values
     ('f1500000-0000-4000-8000-00000000f501', 'f1500aaa-1111-4111-8111-111111111111', 'Perfil Prueba 15A', 'admin', 'A+'),
@@ -4339,6 +4362,254 @@ select pruebas_rls.registrar('18. consentimiento (consents)',
 
 
 -- =============================================================================
+-- BLOQUE 19 — Alta de cuenta: perfil y consentimiento por trigger
+-- (HOTFIX de producción, migración 20260814140000)
+-- -----------------------------------------------------------------------------
+-- Reproduce EL FLUJO DE PRODUCCIÓN, que es justamente el que no se podía
+-- probar desde la aplicación en local: un INSERT directo en `auth.users`, sin
+-- ninguna sesión, sin `auth.uid()`, sin cookies — exactamente lo que hace
+-- GoTrue cuando alguien se registra con la confirmación por correo encendida.
+-- Antes del hotfix, después de ese INSERT no existía ni el perfil ni el
+-- consentimiento, y la persona entraba a una cuenta vacía e inservible.
+--
+-- Se verifica:
+--   · El trigger crea UN perfil PROPIO con el nombre que viajó en
+--     `raw_user_meta_data.full_name`, `role = 'admin'` y sin
+--     `created_by_profile_id` (no lo creó nadie más).
+--   · Crea las DOS filas de `consents` con la versión que viajó en
+--     `raw_user_meta_data.legales_version` y fechadas en el alta.
+--   · IDEMPOTENCIA (lección de 948fe4a): volver a llamar a
+--     `completar_alta_de_cuenta` sobre la misma cuenta no duplica nada, ni
+--     siquiera sobre una cuenta cuyo perfil ya existía desde antes. Es lo que
+--     habilita que el backfill de la migración se pueda correr de nuevo.
+--   · FALLBACKS: una cuenta sin metadata (invitación desde el panel, seed,
+--     este mismo arnés) igual obtiene perfil, con el nombre derivado del
+--     correo, y consentimiento con la constante espejo de `VERSION_LEGALES`.
+--   · La función NO es invocable desde una sesión de usuario.
+-- =============================================================================
+\echo '### BLOQUE 19 — alta de cuenta (perfil + consentimiento por trigger)'
+
+-- Pre-limpieza defensiva (misma lección que el BLOQUE 15): restos de una
+-- corrida abortada harían chocar los INSERT de abajo contra users_pkey.
+delete from auth.users where id in (
+    'f1900aaa-1111-4111-8111-111111111111',
+    'f1900bbb-2222-4222-8222-222222222222',
+    'f1900ccc-3333-4333-8333-333333333333');
+
+-- ── Cuenta A: el alta tal como la manda `registrarse` (nombre + versión
+--    legal en options.data). La versión es deliberadamente distinta de la
+--    vigente, para probar que sale del metadata y no de la constante.
+insert into auth.users (id, instance_id, aud, role, email, created_at,
+                        raw_app_meta_data, raw_user_meta_data)
+values ('f1900aaa-1111-4111-8111-111111111111',
+        '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+        'juana@ejemplo.ar', now(),
+        '{"provider":"email","providers":["email"]}',
+        '{"full_name":"Juana Pérez","legales_version":"2020-01-01-v9"}');
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'Una cuenta nueva SIN SESIÓN obtiene su perfil  [CRITERIO DE ACEPTACIÓN]',
+       '1 filas',
+       (select count(*)::text || ' filas' from public.profiles
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'El perfil se llama como el full_name que viajó en raw_user_meta_data',
+       'Juana Pérez',
+       (select full_name from public.profiles
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'El perfil propio nace con role admin (titular de sus datos, modelo §3.1)',
+       'admin',
+       (select role::text from public.profiles
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+-- Un perfil PROPIO, no uno gestionado: la distinción es user_id NOT NULL.
+select pruebas_rls.registrar('19. alta de cuenta',
+       'El perfil es PROPIO (user_id apunta a la cuenta), no gestionado',
+       'propio',
+       (select case when user_id is null then 'gestionado' else 'propio' end
+          from public.profiles
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+-- `proteger_titularidad_de_perfil` sella created_by_profile_id con el perfil
+-- actor SOLO en sesiones de usuario. Acá no hay sesión, así que la columna
+-- queda NULL — que es lo que su propio comentario declara para los perfiles
+-- que se autocrean al registrarse una cuenta.
+select pruebas_rls.registrar('19. alta de cuenta',
+       'created_by_profile_id queda NULL (un perfil propio no lo creó nadie más)',
+       'NULL',
+       (select coalesce(created_by_profile_id::text, 'NULL') from public.profiles
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'El perfil nace en el modo de letra grande (default del producto)',
+       'grande',
+       (select display_density::text from public.profiles
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'La cuenta queda con los DOS consentimientos de alta  [CRITERIO DE ACEPTACIÓN]',
+       'privacidad, terminos',
+       (select string_agg(document, ', ' order by document) from public.consents
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'La versión registrada es la que viajó en el metadata, no la constante',
+       '2020-01-01-v9',
+       (select distinct version from public.consents
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+-- Fechado en el alta y no en el momento en que corre la función: es lo que
+-- hace honesto al backfill de cuentas viejas.
+select pruebas_rls.registrar('19. alta de cuenta',
+       'accepted_at es el momento del alta de la cuenta (no el de la migración)',
+       'true',
+       (select bool_and(c.accepted_at = u.created_at)::text
+          from public.consents c
+          join auth.users u on u.id = c.user_id
+         where c.user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+-- ── IDEMPOTENCIA: la segunda pasada del backfill no duplica nada.
+do $$
+begin
+    perform public.completar_alta_de_cuenta('f1900aaa-1111-4111-8111-111111111111');
+    perform public.completar_alta_de_cuenta('f1900aaa-1111-4111-8111-111111111111');
+end $$;
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'Llamarla dos veces más NO duplica el perfil (idempotencia del backfill)',
+       '1 perfiles',
+       (select count(*)::text || ' perfiles' from public.profiles
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'Llamarla dos veces más NO duplica el consentimiento (registro probatorio)',
+       '2 consents',
+       (select count(*)::text || ' consents' from public.consents
+         where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
+
+-- Y sobre una cuenta que YA tenía perfil desde antes del hotfix (María):
+-- tampoco inventa un segundo perfil propio.
+do $$
+begin
+    perform public.completar_alta_de_cuenta('11111111-1111-4111-8111-111111111111');
+end $$;
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'Sobre una cuenta que ya tenía perfil, el backfill no crea otro',
+       '1 perfiles',
+       (select count(*)::text || ' perfiles' from public.profiles
+         where user_id = :u_a));
+
+-- ── Cuenta B: sin metadata ninguna (invitación desde el panel de Supabase,
+--    seed, o este mismo arnés). Los fallbacks tienen que sostenerla igual:
+--    una cuenta sin perfil es exactamente lo que el hotfix vino a impedir.
+insert into auth.users (id, instance_id, aud, role, email, created_at,
+                        raw_app_meta_data, raw_user_meta_data)
+values ('f1900bbb-2222-4222-8222-222222222222',
+        '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+        'usuario19b@test.local', now(), '{}', '{}');
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'Una cuenta SIN metadata igual obtiene perfil, con el nombre derivado del correo',
+       'usuario19b',
+       (select full_name from public.profiles
+         where user_id = 'f1900bbb-2222-4222-8222-222222222222'));
+
+-- El espejo SQL de VERSION_LEGALES (lib/legales.ts). Si alguien cambia la
+-- constante de TypeScript y se olvida de la migración, este caso lo delata
+-- -igual que tests/unit/alta-de-cuenta.test.ts del lado del código-.
+select pruebas_rls.registrar('19. alta de cuenta',
+       'Sin legales_version en el metadata, se usa la constante espejo de VERSION_LEGALES',
+       '2026-08-14-v1',
+       (select distinct version from public.consents
+         where user_id = 'f1900bbb-2222-4222-8222-222222222222'));
+
+-- ── Cuenta C: metadata presente pero en blanco. `btrim` + `nullif` tienen que
+--    tratarla como ausente, porque `profiles_full_name_no_vacio` rechazaría
+--    una cadena vacía y el alta entera se caería.
+insert into auth.users (id, instance_id, aud, role, email, created_at,
+                        raw_app_meta_data, raw_user_meta_data)
+values ('f1900ccc-3333-4333-8333-333333333333',
+        '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+        'usuario19c@test.local', now(), '{}',
+        '{"full_name":"   ","legales_version":"  "}');
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'Un full_name en blanco se trata como ausente (el CHECK de no vacío no se roza)',
+       'usuario19c',
+       (select full_name from public.profiles
+         where user_id = 'f1900ccc-3333-4333-8333-333333333333'));
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'Una legales_version en blanco cae al fallback en vez de guardar vacío',
+       '2026-08-14-v1',
+       (select distinct version from public.consents
+         where user_id = 'f1900ccc-3333-4333-8333-333333333333'));
+
+-- ── La función NO se llama a mano desde una sesión: solo la disparan el
+--    trigger (como definer) y el backfill de la migración.
+begin;
+select set_config('request.jwt.claims', :jwt_b, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.completar_alta_de_cuenta('f1900aaa-1111-4111-8111-111111111111');
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('19. alta de cuenta',
+        'authenticated NO puede ejecutar completar_alta_de_cuenta (REVOKE del EXECUTE por defecto)',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+-- ── Una cuenta inexistente no se completa en silencio: sin este raise, un
+--    backfill mal escrito crearía perfiles colgando de la nada.
+do $$
+declare v text;
+begin
+    begin
+        perform public.completar_alta_de_cuenta('f1900fff-9999-4999-8999-999999999999');
+        v := 'ejecutada';
+    exception when foreign_key_violation then v := 'rechazado (23503)';
+             when others                 then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('19. alta de cuenta',
+        'Completar el alta de una cuenta que no existe falla en vez de pasar de largo',
+        'rechazado (23503)', v);
+end $$;
+
+-- Invariantes estructurales: el trigger existe, está habilitado y la función
+-- es SECURITY DEFINER (sin eso no podría escribir en profiles ni en consents,
+-- porque en el alta todavía no hay auth.uid()).
+select pruebas_rls.registrar('19. alta de cuenta',
+       'El trigger auth_users_crear_perfil_de_cuenta existe y está habilitado en auth.users',
+       'O',
+       (select tgenabled::text from pg_trigger
+         where tgrelid = 'auth.users'::regclass
+           and tgname = 'auth_users_crear_perfil_de_cuenta'));
+
+select pruebas_rls.registrar('19. alta de cuenta',
+       'completar_alta_de_cuenta es SECURITY DEFINER y fija su search_path',
+       'definer/search_path fijado',
+       (select case when p.prosecdef then 'definer' else 'invoker' end
+               || '/' ||
+               case when coalesce(array_to_string(p.proconfig, ','), '') like 'search_path=%'
+                    then 'search_path fijado' else 'search_path heredado' end
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.proname = 'completar_alta_de_cuenta'));
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
@@ -4395,6 +4666,13 @@ delete from public.shared_uploads_temp
 delete from public.consents
  where user_id in ('f1500aaa-1111-4111-8111-111111111111', 'f1500bbb-2222-4222-8222-222222222222');
 delete from auth.users       where id in ('f1500aaa-1111-4111-8111-111111111111', 'f1500bbb-2222-4222-8222-222222222222');
+-- Cuentas del BLOQUE 19 (hotfix del alta). Alcanza con borrar la cuenta: su
+-- perfil propio y sus consents cuelgan de ella con ON DELETE CASCADE, y
+-- ninguna administra un perfil gestionado, así que no hay orden que respetar.
+delete from auth.users       where id in (
+    'f1900aaa-1111-4111-8111-111111111111',
+    'f1900bbb-2222-4222-8222-222222222222',
+    'f1900ccc-3333-4333-8333-333333333333');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 
 drop schema pruebas_rls cascade;

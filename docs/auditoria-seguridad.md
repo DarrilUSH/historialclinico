@@ -113,16 +113,20 @@ Las 5 políticas de `storage.objects` filtran por `bucket_id = ANY(ARRAY['docume
 
 ### 2.5 Triggers de protección
 
-28 triggers activos (`tgenabled='O'`, ninguno deshabilitado). Los que cubren lo que RLS no puede expresar:
+30 triggers activos (`tgenabled='O'`, ninguno deshabilitado): 29 en `public` y uno sobre `auth.users`. Los que cubren lo que RLS no puede expresar:
 
 | Trigger | Tabla | Qué hace cumplir |
 |---|---|---|
 | `profiles_proteger_titularidad` | `profiles` | `user_id` inmutable desde una sesión de usuario |
+| `profiles_proteger_densidad` | `profiles` | El tamaño de letra lo cambia solo el titular de la fila |
+| `auth_users_crear_perfil_de_cuenta` | `auth.users` | Toda cuenta nueva nace con perfil propio y consentimiento registrado |
 | `*_sellar_created_by_profile_id` (7) | 7 tablas | El autor lo pone la base, no el cliente |
 | `medication_intakes_proteger_programacion` | `medication_intakes` | No se reprograma una toma |
 | `family_permissions_evitar_huerfano` | `family_permissions` | Ningún perfil gestionado queda sin administrador |
 | `vital_sign_alerts_sellar_visto` | `vital_sign_alerts` | `acknowledged_at`/`by` sellados e inmutables |
 | `*_encolar_purga_storage` (3) | `documents`, `insurance_cards`, `profiles` | El objeto huérfano queda encolado |
+
+`auth_users_crear_perfil_de_cuenta` es la excepción deliberada al patrón: es el único trigger del proyecto que corre como **definer**, porque no es una guarda contra una sesión de usuario sino todo lo contrario — dispara cuando **no hay** sesión (el alta con confirmación por correo), y tiene que poder escribir en `profiles` y `consents` sin un `auth.uid()` que satisfaga sus políticas de INSERT. Ver el encabezado de `supabase/migrations/20260814140000_alta_de_cuenta.sql`.
 
 Los tres que dependen de `es_sesion_de_usuario()` corren como **invocador**, que es la condición para que la guarda funcione (si fueran `DEFINER`, `current_user` sería siempre `postgres` y los triggers quedarían silenciosamente desactivados — el bug documentado en [`seguridad-rls.md`](./seguridad-rls.md) §2.5). Verificado en el catálogo: `proteger_titularidad_de_perfil`, `proteger_programacion_de_toma` y `sellar_created_by_profile_id` son `SECURITY INVOKER`.
 

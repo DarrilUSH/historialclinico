@@ -10,31 +10,37 @@ import "server-only"
  * probatorio depende de que nadie, ni siquiera su propio titular, pueda
  * reescribir lo que ya se firmó.
  *
- * ## Dos funciones con dos contratos de error distintos
+ * ## El consentimiento del ALTA no se registra desde acá
  *
- * Calcado del criterio que deja escrito `lib/auditoria.ts`: *"si algún día
- * aparece una acción cuya auditoría sea condición de la operación misma,
- * esa acción necesita su propia función que SÍ propague el error"*. Acá
- * aparecen las dos mitades de esa frase, para dos casos reales del roadmap:
+ * Hasta el hotfix de `supabase/migrations/20260814140000_alta_de_cuenta.sql`,
+ * este archivo exportaba además `registrarConsentimientosDeAlta`, que
+ * insertaba las filas de `privacidad` y `terminos` desde `registrarse`
+ * (`app/(auth)/actions.ts`) con la sesión que devolvía `signUp`. En producción
+ * esa sesión NO existe —la confirmación por correo está encendida y la sesión
+ * llega recién al confirmar—, así que las dos filas nunca se escribían: la
+ * cuenta quedaba creada, sin perfil y sin prueba de consentimiento.
  *
- * - **`registrarConsentimientosDeAlta`** — el registro (`registrarse`,
- *   `app/(auth)/actions.ts`). El consentimiento a Privacidad y Términos ES
- *   la base legal que habilita crear la cuenta (art. 5 de la Ley 25.326:
- *   consentimiento libre, expreso e informado). Si el `INSERT` de estas dos
- *   filas falla, la cuenta queda creada sin prueba de haber consentido, así
- *   que la función **propaga el error** y `registrarse` se lo muestra a la
- *   persona en vez de dejarlo pasar en silencio.
- * - **`registrarConsentimiento`** — el otorgamiento de acceso familiar
- *   (`invitarFamiliar`, `app/(app)/(con-nav)/familia/actions.ts`). Acá la
- *   fila de `consents` es la CONSTANCIA de una acción que ya ocurrió (el
- *   `INSERT` en `family_permissions` ya se hizo): es auditoría, no
- *   condición. Por eso **nunca lanza** -mismo contrato que
- *   `registrarAcceso`- y un fallo de red no debe dejar a quien otorgó el
- *   acceso sin saber si el otorgamiento en sí funcionó.
+ * Ese registro pasó a ser responsabilidad de la base, en el trigger
+ * `auth_users_crear_perfil_de_cuenta`, que corre en la misma transacción que
+ * el alta y lee la versión aceptada de `auth.users.raw_user_meta_data`. Lo
+ * único que sigue viniendo de este archivo para ese flujo es la constante
+ * `VERSION_LEGALES`, que `registrarse` manda en `options.data`.
  *
- * Las dos escriben con el cliente del USUARIO, nunca con `service_role`: la
- * política `consents_insert_propio` exige `user_id = auth.uid()`, así que
- * quien decide si la fila entra es RLS, no este archivo.
+ * ## Lo que sí queda acá: el consentimiento de acceso familiar
+ *
+ * `registrarConsentimiento` cubre el otorgamiento de acceso familiar
+ * (`invitarFamiliar`, `app/(app)/(con-nav)/familia/actions.ts`), donde la fila
+ * de `consents` es la CONSTANCIA de una acción que ya ocurrió (el `INSERT` en
+ * `family_permissions` ya se hizo): es auditoría, no condición. Por eso
+ * **nunca lanza** -mismo contrato que `registrarAcceso` en `lib/auditoria.ts`-
+ * y un fallo de red no debe dejar a quien otorgó el acceso sin saber si el
+ * otorgamiento en sí funcionó.
+ *
+ * Escribe con el cliente del USUARIO, nunca con `service_role`: la política
+ * `consents_insert_propio` exige `user_id = auth.uid()`, así que quien decide
+ * si la fila entra es RLS, no este archivo. (El trigger del alta es la única
+ * excepción posible y por eso vive en la base, como `SECURITY DEFINER`, y no
+ * como una clave de servicio en manos de la aplicación web.)
  */
 
 import { headers } from "next/headers"
@@ -50,6 +56,14 @@ import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
  *
  * Formato `AAAA-MM-DD-vN`: fecha de publicación + número de versión de ese
  * día, para poder publicar más de una revisión el mismo día sin ambigüedad.
+ *
+ * **Tiene un espejo en SQL.** `completar_alta_de_cuenta`
+ * (`supabase/migrations/20260814140000_alta_de_cuenta.sql`) repite este valor
+ * como constante, para poder fechar el consentimiento de una cuenta que no
+ * nació del formulario de registro y por lo tanto no trae `legales_version` en
+ * su metadata. La base no puede importar TypeScript; al cambiar esta constante
+ * hay que escribir una migración que actualice la otra.
+ * `tests/unit/alta-de-cuenta.test.ts` falla si las dos se separan.
  */
 export const VERSION_LEGALES = "2026-08-14-v1"
 
@@ -62,8 +76,6 @@ export const VERSION_LEGALES = "2026-08-14-v1"
  */
 export type DocumentoLegal = "privacidad" | "terminos" | "acceso_familiar"
 
-const DOCUMENTOS_DE_ALTA: readonly DocumentoLegal[] = ["privacidad", "terminos"]
-
 /** IP del cliente actual, o `null` si no hay ninguna cabecera utilizable. Ver `normalizarIp`. */
 async function obtenerIpActual(): Promise<string | null> {
   const encabezados = await headers()
@@ -71,40 +83,6 @@ async function obtenerIpActual(): Promise<string | null> {
     normalizarIp(encabezados.get("x-forwarded-for")) ??
     normalizarIp(encabezados.get("x-real-ip"))
   )
-}
-
-export interface ResultadoConsentimiento {
-  error: string | null
-}
-
-/**
- * Registra, en una sola escritura, el consentimiento a Privacidad Y
- * Términos que exige completar el registro (criterio de aceptación del
- * ROADMAP, Sprint 12 tarea 12.1). Se llama SOLO después de que `profiles`
- * quedó insertado con éxito, con el mismo cliente ya autenticado por
- * `signUp`.
- *
- * **Propaga el error** -ver el porqué en el encabezado del archivo-.
- */
-export async function registrarConsentimientosDeAlta(
-  supabase: ClienteSupabaseServidor,
-  userId: string,
-): Promise<ResultadoConsentimiento> {
-  const ip = await obtenerIpActual()
-
-  const { error } = await supabase.from("consents").insert(
-    DOCUMENTOS_DE_ALTA.map((documento) => ({
-      user_id: userId,
-      document: documento,
-      version: VERSION_LEGALES,
-      ip,
-    })),
-  )
-
-  if (error) {
-    return { error: error.message }
-  }
-  return { error: null }
 }
 
 /**

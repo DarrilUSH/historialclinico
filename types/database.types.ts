@@ -1263,6 +1263,10 @@ export type Database = {
         Args: { p_entregas: number; p_fallos: number; p_id: string }
         Returns: boolean
       }
+      completar_alta_de_cuenta: {
+        Args: { p_user_id: string }
+        Returns: undefined
+      }
       configurar_cron_alertas_medicacion: {
         Args: { p_url: string }
         Returns: undefined

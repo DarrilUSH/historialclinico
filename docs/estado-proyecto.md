@@ -64,13 +64,21 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 
 ## SPRINT 12 (DEPLOY) — EN CURSO, BLOQUEADO EN LOS PASOS QUE REQUIEREN LAS CLAVES DEL USUARIO (2026-08-14 ~19:00)
 
-- **12.1 legales (Ley 25.326)**: ✅ auditada y pusheada (`6bf02e6`) — /privacidad, /terminos, consentimiento con checkbox obligatorio en registro + al dar acceso familiar, tabla `consents` append-only (arnés 281/281). Sprint 13 (modo letra chica) ✅ completo antes de esto.
+- **12.1 legales (Ley 25.326)**: ✅ auditada y pusheada (`6bf02e6`) — /privacidad, /terminos, consentimiento con checkbox obligatorio en registro + al dar acceso familiar, tabla `consents` append-only (arnés 281/281 al momento de esa auditoría; hoy 301/301 con el BLOQUE 19). Sprint 13 (modo letra chica) ✅ completo antes de esto.
 - **Vercel**: el proyecto estaba importado como framework "Other" (buildeba vacío → 404). Corregido con `vercel.json` (`framework: nextjs`, commit `cce460f`). Ahora buildea Next.js de verdad. El dominio ya está OK (apex→www→Production). Producción da **500 esperado**: falta cargar las env vars y aplicar el esquema.
 - **Supabase cloud** (`nbypcqhojmixlxvkflrp`): proyecto existe, base VACÍA. Las 18 migraciones están listas para `supabase db push`.
 - **BLOQUEO**: los pasos que faltan requieren las claves del usuario y NO los puede hacer el asistente (regla de seguridad: no ingresar API keys/tokens/secretos en formularios, ni siquiera con autorización). Documentado en detalle en **`docs/deploy-instrucciones.md`** (4 pasos, ~15 min): (1) `supabase login`+`link`+`db push`; (2) pegar `.env.cloud-respaldo` en las env vars de Vercel; (3) redeploy; (4) configurar los crons de prod en el SQL editor con el CRON_SECRET.
 - **Claves cloud**: viven en `.env.cloud-respaldo` (local, git-ignoreado). Las 10 env vars están ahí completas.
 - **Pendiente para cuando el usuario complete el deploy**: smoke tests contra prod (12.5), configurar_cron (12.4, parte del paso 4), y la DECISIÓN de cerrar el registro público (mitigación de abuso de cuota Gemini).
 | 12 Deploy producción | ⬜ Bloqueado hasta terminar todo (autorización ya dada) |
+
+## HOTFIX DE PRODUCCIÓN — el alta de cuenta no creaba perfil (2026-08-14)
+
+- **Síntoma real** (primera persona registrada en `https://www.historialmedico.com.ar`): confirmó el correo, inició sesión y `/perfiles` le dijo "Todavía no hay perfiles disponibles para tu cuenta", con "Cerrar sesión" como única acción. Su cuenta existía en `auth.users` sin fila en `profiles` ni en `consents`.
+- **Causa**: `registrarse` creaba esas filas DESPUÉS del `signUp`, con la sesión que ese `signUp` devuelve. Eso solo pasa con `enable_confirmations = false` (local). En producción la confirmación por correo está encendida, `data.session` viene `null` y las filas nunca se escribían.
+- **Arreglo**: `supabase/migrations/20260814140000_alta_de_cuenta.sql` — trigger `auth_users_crear_perfil_de_cuenta` (`AFTER INSERT ON auth.users`, `SECURITY DEFINER`) + función idempotente `completar_alta_de_cuenta`, con **backfill** de las cuentas ya rotas. `registrarse` ahora solo manda `full_name` y `legales_version` en `options.data`.
+- **⚠️ El deploy de la app NO alcanza.** La migración hay que aplicarla aparte contra Supabase cloud (`npx supabase db push`); el backfill corre ahí y es lo que repara la cuenta de la persona afectada.
+- **`auth.users` no es de `postgres`** (la tiene `supabase_auth_admin`): se puede `CREATE TRIGGER` sobre ella (alcanza el privilegio TRIGGER) pero **no** `DROP TRIGGER` ni `COMMENT ON TRIGGER` — los dos fallan con 42501. La migración lo resuelve con un `if not exists` en vez del `drop`+`create` habitual.
 
 ## Cómo retomar (checklist de arranque de sesión)
 

@@ -86,6 +86,25 @@ insert into auth.users (
 -- =============================================================================
 -- 2. PERFILES
 -- =============================================================================
+-- Desde `20260814140000_alta_de_cuenta.sql`, el trigger
+-- `auth_users_crear_perfil_de_cuenta` YA le creó a cada cuenta de arriba su
+-- perfil propio (con un id aleatorio) y sus dos filas de `consents`. El seed
+-- necesita ids FIJOS —los referencian todas las secciones siguientes—, así que
+-- descarta ese perfil automático y carga el suyo. Los `consents` se dejan: son
+-- correctos y hacen que las cuentas del seed se parezcan a una cuenta real.
+--
+-- El `id not in (...)` no es decorativo: sin él, correr el seed dos veces
+-- borraría los perfiles definitivos de María y Diego —y con ellos, en cascada,
+-- todos los datos de salud que cuelgan de sus perfiles—.
+delete from public.profiles
+ where user_id in (
+           '550e8400-e29b-41d4-a716-446655440001'::uuid,
+           '550e8400-e29b-41d4-a716-446655440002'::uuid
+       )
+   and id not in (
+           '660e8400-e29b-41d4-a716-446655440001'::uuid,
+           '660e8400-e29b-41d4-a716-446655440002'::uuid
+       );
 
 -- María Gómez (titular, con cuenta, administrador)
 insert into public.profiles (
