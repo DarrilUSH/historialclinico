@@ -1,39 +1,16 @@
-import { HeartPulse } from "lucide-react";
+import { redirect } from "next/navigation"
 
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-
-export default function Home() {
-  return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 bg-background px-6 text-center">
-      <h1 className="text-4xl font-semibold tracking-tight text-balance text-foreground">
-        Historial Médico — en construcción
-      </h1>
-      <p className="max-w-md text-lg text-muted-foreground">
-        Estamos preparando tu historial médico. Muy pronto vas a poder
-        acceder a toda tu información acá.
-      </p>
-      <Card className="w-full max-w-sm text-left">
-        <CardHeader>
-          <CardTitle>Prueba de componentes</CardTitle>
-          <CardDescription>
-            Verificación de shadcn/ui y Lucide React funcionando en el
-            proyecto.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button>
-            <HeartPulse />
-            Ver mi historial
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
-  );
+/**
+ * Raíz del dominio. No hay landing pública: el producto ES la aplicación,
+ * así que `/` deriva a `/inicio` y `proxy.ts` resuelve el resto — con sesión
+ * se ve el inicio del perfil activo, sin sesión redirige a
+ * `/login?desde=/inicio` (y las páginas públicas /privacidad y /terminos
+ * quedan enlazadas desde el pie del login).
+ *
+ * Reemplaza al placeholder "en construcción" del Sprint 0, que sobrevivió
+ * hasta el deploy porque ninguna navegación interna pasa por la raíz — lo
+ * encontró el usuario al abrir el dominio pelado en producción.
+ */
+export default function Raiz() {
+  redirect("/inicio")
 }
