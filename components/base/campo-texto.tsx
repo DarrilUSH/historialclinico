@@ -14,9 +14,22 @@
  * `conDictado` agrega `boton-dictado.tsx` a la derecha del campo (Sprint 3).
  * Deliberadamente NO existe en `campo-numero.tsx`: ver el comentario de la
  * prop más abajo para el porqué.
+ *
+ * ## El ojito de `type="password"` (hotfix UX, 2026-08-14)
+ *
+ * Se implementó como una CAPACIDAD de este componente, no como un
+ * `CampoContrasena` aparte: `type === "password"` alcanza para activarlo,
+ * sin ninguna prop nueva. Es la opción de menor superficie -los cinco campos
+ * de contraseña de la app (login, registro ×2, recuperar/confirmar ×2) ya
+ * pasan por acá vía `type: "password"` en `formulario-auth.tsx`, así que
+ * cualquier pantalla futura que declare un campo de contraseña lo recibe
+ * gratis, sin acordarse de envolver nada-. El campo alterna su propio
+ * `type` entre `"password"` y `"text"` con un estado interno (`mostrarClave`):
+ * el padre nunca se entera, porque no cambia el valor, solo cómo se ve.
  */
 
 import * as React from "react"
+import { EyeIcon, EyeOffIcon } from "lucide-react"
 
 import { BotonDictado } from "@/components/base/boton-dictado"
 import { Input } from "@/components/ui/input"
@@ -88,6 +101,13 @@ export function CampoTexto({
     [idAyuda, idError, describedBy].filter(Boolean).join(" ") || undefined
 
   const inputRef = React.useRef<HTMLInputElement | null>(null)
+
+  // Ojito de mostrar/ocultar contraseña: arranca siempre oculta (nunca
+  // "recordar" el último estado entre montajes -reabrir /login no debería
+  // heredar el texto visible de una sesión anterior en el mismo navegador-).
+  const esContrasena = type === "password"
+  const [mostrarClave, setMostrarClave] = React.useState(false)
+  const tipoEfectivo = esContrasena ? (mostrarClave ? "text" : "password") : type
 
   // Inserta el texto dictado en la posición del cursor (o al final si no
   // hay selección conocida) sin pisar lo ya escrito, y dispara el `onChange`
@@ -163,11 +183,11 @@ export function CampoTexto({
             ref={inputRef}
             id={id}
             name={name ?? id}
-            type={type}
+            type={tipoEfectivo}
             required={required}
             aria-invalid={error || invalido ? true : undefined}
             aria-describedby={describedByFinal}
-            className={cn(icono && "pl-11", sufijo && "pr-14", className)}
+            className={cn(icono && "pl-11", (sufijo || esContrasena) && "pr-14", className)}
           />
 
           {sufijo && (
@@ -177,6 +197,28 @@ export function CampoTexto({
             >
               {sufijo}
             </span>
+          )}
+
+          {esContrasena && (
+            <button
+              type="button"
+              onClick={() => setMostrarClave((valor) => !valor)}
+              // Evita que el click le saque el foco al input: sin esto, un
+              // toque en el ojito mueve el foco al botón y quien estaba
+              // tipeando pierde el cursor en el campo. El teclado sigue
+              // funcionando normal -Tab enfoca el botón como cualquier
+              // otro, esto solo afecta el click/tap con puntero-.
+              onMouseDown={(evento) => evento.preventDefault()}
+              aria-label={mostrarClave ? "Ocultar contraseña" : "Mostrar contraseña"}
+              aria-pressed={mostrarClave}
+              className="absolute top-1/2 right-1 size-tactil shrink-0 -translate-y-1/2 inline-flex items-center justify-center rounded-lg text-muted-foreground transition-colors duration-150 ease-salida outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
+              {mostrarClave ? (
+                <EyeOffIcon className="size-5" aria-hidden="true" />
+              ) : (
+                <EyeIcon className="size-5" aria-hidden="true" />
+              )}
+            </button>
           )}
         </div>
 
