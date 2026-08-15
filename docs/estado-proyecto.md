@@ -1,7 +1,15 @@
 # Estado del proyecto — Historial Médico
 
-> **Última actualización:** 2026-08-13 ~16:50 (sesión cortada a las 18:40 por viaje del usuario).
+> **Última actualización:** 2026-08-14 ~22:30 — **EL SITIO ESTÁ EN PRODUCCIÓN: https://www.historialmedico.com.ar**
 > Este documento existe para retomar el trabajo exactamente donde quedó. Léelo completo antes de tocar nada.
+
+## PRODUCCIÓN (2026-08-14)
+
+- **Vivo en https://www.historialmedico.com.ar** (Vercel auto-deploy desde main — ¡cada push a main VA A PRODUCCIÓN!). Base: Supabase cloud `nbypcqhojmixlxvkflrp` con las 20 migraciones aplicadas (20 tablas, 0 sin RLS, 4 buckets, 3 crons, Vault configurado). Env vars cargadas por el usuario. Site URL y Redirect de Auth apuntando al dominio.
+- **Las migraciones NO se aplican con el push del código**: cada migración nueva requiere que el usuario corra `npx supabase db push` (ya logueado+linkeado).
+- **Hotfixes post-estreno aplicados**: raíz `/` redirige (adiós placeholder "en construcción"), alta de cuenta por trigger en la base (funciona con confirmación por email; `4f02427` + `20260814140000`), ojito de contraseñas y feedback inmediato del A/a (`7a9fab1`).
+- **Pendientes del usuario**: (1) terminar SMTP de Brevo en Supabase → después el orquestador redacta los templates en castellano; (2) decisión de cerrar/limitar el registro público; (3) prueba final: registro real desde el celular.
+- **Backlog** (ROADMAP §Backlog): aceptación de invitaciones familiares; "temas para la consulta" (notas por turno integradas a la ficha IA); SMTP; registro.
 
 ## Qué es esto
 
