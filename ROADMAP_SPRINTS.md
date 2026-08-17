@@ -854,6 +854,17 @@ Demo: crear niño → cargarle historial → graduarlo → entrar con su cuenta 
 
 ---
 
+## Sprint 16: Turnos inteligentes y catálogos (pedido 2026-08-17, tras Sprint 15)
+
+1. **Ciudad/provincia en turnos y médicos** — el link "Cómo llegar" hoy fuerza ", Ushuaia, Tierra del Fuego" cuando no hay coords (bug reportado por el usuario con "caba"). Campos nuevos opcionales con Ushuaia como sugerencia editable; deep link con lo que el usuario ponga.
+2. **Catálogo de especialidades médicas** (lista completa reconocida en Argentina) precargado + autocompletar por coincidencia en turnos/médicos. Médicos con MÚLTIPLES especialidades (join table; migrar el texto actual).
+3. **Catálogo REFES de establecimientos de salud** (dataset público datos.gob.ar) precargado: autocompletar de "Lugar" con filtro provincia/localidad; siempre editable a mano (el registro oficial puede estar desactualizado). Cards de "Lugares" y "Especialidades" en /inicio.
+4. **Revisión del flujo de llamada de emergencia**: el auto-llamado es INVIABLE en web/PWA (restricción de Android — el discador siempre pide el toque final); verificar que no haya pasos intermedios evitables (diálogo de Chrome).
+
+## Sprint 17 (OPCIONAL, esperando confirmación del usuario): Ingesta automática desde Gmail
+
+Conectar la cuenta de Gmail del usuario vía OAuth (gratuito) para que la app lea la etiqueta "historialmedico" periódicamente e importe los adjuntos al flujo de ingesta (extracción + revisión + visto bueno — nunca guarda sola). Aclarado al usuario el 2026-08-17: el conector de Gmail usado durante el desarrollo era una herramienta del asistente, no una función de la app. Alternativa ya operativa: Web Share Target desde la app de Gmail.
+
 ## Backlog de mejoras (post-lanzamiento, pedidas por el usuario)
 
 > Anotadas el 2026-08-14 durante el estreno en producción. Se encaran como tandas nuevas cuando el usuario lo pida, con el protocolo de siempre.
