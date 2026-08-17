@@ -79,6 +79,16 @@ export function AccionesTurno({
   // botón disparador, ahora dentro de una columna más angosta -texto corto,
   // sin truncar-, y el aviso "Sin coordenadas" se fuerza a su propia línea
   // completa (`chica:basis-full`) para no competir por ancho con los botones.
+  //
+  // Sprint 14 (tanda A): "iconos con label corto" del criterio del sprint —
+  // los tres disparadores llevan ahora DOS spans de texto ("Cómo llegar" /
+  // "Llegar", "Pedir viaje" / "Viaje", "Al calendario" / "Agenda"), mismo
+  // patrón `chica:hidden` / `hidden chica:inline` que `tarjeta-medicacion.tsx`:
+  // el texto completo queda en grande, el corto en chica, nunca los dos en el
+  // árbol de accesibilidad a la vez. A un tercio de los ~380px útiles cada
+  // botón, el label completo llegaba a envolver a dos líneas; el corto entra
+  // en una sola sin recortar información -son rótulos de botón, no datos
+  // clínicos: la acción sigue siendo la misma al tocarlo-.
   return (
     <div className="flex flex-col gap-2 pt-2 border-t border-border chica:flex-row chica:flex-wrap chica:items-start">
       {/* Cómo llegar */}
@@ -91,7 +101,14 @@ export function AccionesTurno({
           className="w-full justify-start chica:min-w-[30%] chica:flex-1 chica:justify-center chica:px-2 chica:text-xs"
         >
           <MapPinIcon className="size-4 mr-2 chica:mr-1.5 chica:size-4" aria-hidden="true" />
-          Cómo llegar
+          {/* Chica (Sprint 14, tanda A): label corto -"Llegar"- para que las
+              tres acciones entren en fila sin envolver el texto; el mismo
+              patrón `chica:hidden`/`hidden chica:inline` que ya usa
+              `tarjeta-medicacion.tsx`, así que el texto completo sigue en el
+              árbol de accesibilidad de GRANDE y el corto en el de CHICA,
+              nunca los dos a la vez. */}
+          <span className="chica:hidden">Cómo llegar</span>
+          <span className="hidden chica:inline">Llegar</span>
         </Boton>
       )}
 
@@ -106,7 +123,8 @@ export function AccionesTurno({
           >
             <span className="flex items-center">
               <CarIcon className="size-4 mr-2 chica:mr-1.5 chica:size-4" aria-hidden="true" />
-              Pedir viaje
+              <span className="chica:hidden">Pedir viaje</span>
+              <span className="hidden chica:inline">Viaje</span>
             </span>
             <ChevronDownIcon
               className={`size-4 transition-transform chica:size-3.5 ${expandidoViaje ? "rotate-180" : ""}`}
@@ -177,7 +195,8 @@ export function AccionesTurno({
           >
             <span className="flex items-center">
               <CalendarIcon className="size-4 mr-2 chica:mr-1.5 chica:size-4" aria-hidden="true" />
-              Al calendario
+              <span className="chica:hidden">Al calendario</span>
+              <span className="hidden chica:inline">Agenda</span>
             </span>
             <ChevronDownIcon
               className={`size-4 transition-transform chica:size-3.5 ${expandidoCalendario ? "rotate-180" : ""}`}

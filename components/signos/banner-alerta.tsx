@@ -38,6 +38,25 @@
  * rango en la misma pantalla no debería tener que tocar "Ya lo vi" dos veces
  * para una situación que ya miró entera. Con una sola alerta el botón
  * bulk no aporta nada y no se muestra.
+ *
+ * ## Chica (Sprint 14, tanda A): fila densa, SIN truncar el mensaje
+ *
+ * Cada `<li>` pasa de columna a fila -mensaje a la izquierda, "Ya lo vi"
+ * compacto a la derecha (`items-start`: el botón queda arriba, no centrado
+ * contra un mensaje de varias líneas)-, con menos aire alrededor.
+ *
+ * El encargo original de esta tanda pedía además truncar el mensaje a 2
+ * líneas. Se descarta a propósito: `alerta.mensaje` es texto clínico
+ * (`lib/signos/evaluar.ts#DESCARGO_CLINICO` incluido, "Presión sistólica
+ * alta: 170 mmHg (umbral de alerta: 160). Valor orientativo — no reemplaza
+ * el criterio médico." → 3-4 líneas reales a 14px), y docs/densidad.md §4
+ * regla 5 ("la densidad no saca contenido") junto con la regla explícita del
+ * encargo de esta misma tanda ("información clínica nunca se oculta") pesan
+ * más que la cifra "2 líneas". Truncar CUALQUIER cantidad de líneas de este
+ * mensaje con `line-clamp` sería esconder, no reorganizar -literalmente lo
+ * que ese comentario de más arriba ("NUNCA se recorta -ni `truncate` ni
+ * `line-clamp`- en ningún modo") ya decía antes de esta tanda-. Lo que se
+ * aprieta en chica sigue siendo el aire alrededor, nunca el texto.
  */
 
 import { useActionState, useTransition } from "react"
@@ -96,19 +115,33 @@ function FilaAlerta({ alerta }: { alerta: AlertaSinVer }) {
   const [estado, enviar, pendiente] = useActionState(marcarAlertaVista, ESTADO_INICIAL)
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-advertencia/30 bg-background/60 p-3 chica:gap-1.5 chica:p-2">
+    <li className="flex flex-col gap-2 rounded-lg border border-advertencia/30 bg-background/60 p-3 chica:flex-row chica:flex-wrap chica:items-start chica:justify-between chica:gap-2 chica:p-2">
       {/* El mensaje clínico NUNCA se recorta -ni `truncate` ni `line-clamp`-
-          en ningún modo: docs/densidad.md §4 regla 5. Lo que se aprieta en
-          chica es el aire alrededor (el `<li>` de arriba), no el texto. */}
-      <p>{alerta.mensaje}</p>
+          en ningún modo: docs/densidad.md §4 regla 5 (ver el comentario de
+          cabecera del archivo, sección Sprint 14). Lo que se aprieta en
+          chica es el aire alrededor y el eje (fila en vez de columna), no el
+          texto: envuelve las líneas que necesite. */}
+      {/* `/inicio` centra todo su contenido (`text-center` en el contenedor
+          raíz de `app/(app)/(con-nav)/inicio/page.tsx`), correcto para la
+          columna apilada de grande. En la fila de chica un párrafo de varias
+          líneas centrado contra un botón a la derecha queda irregular y
+          difícil de barrer con la vista -`chica:text-left` lo corrige sin
+          tocar la alineación de grande. */}
+      <p className="chica:min-w-0 chica:flex-1 chica:text-left">{alerta.mensaje}</p>
       {estado.error && (
-        <Alerta variante="error" className="text-sm">
+        <Alerta variante="error" className="text-sm chica:basis-full">
           {estado.error}
         </Alerta>
       )}
-      <form action={enviar}>
+      <form action={enviar} className="chica:shrink-0">
         <input type="hidden" name="alertaId" value={alerta.id} />
-        <Boton type="submit" variant="outline" size="sm" cargando={pendiente}>
+        <Boton
+          type="submit"
+          variant="outline"
+          size="sm"
+          cargando={pendiente}
+          className="chica:px-2.5 chica:text-xs"
+        >
           Ya lo vi
         </Boton>
       </form>

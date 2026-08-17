@@ -39,6 +39,20 @@
  * especialidad, médico, lugar, acciones). Compartido por `/inicio`
  * (`components/inicio/proximo-turno.tsx`) y por la lista completa de
  * `/turnos`: un solo lugar para el rediseño, sin duplicar el componente.
+ *
+ * ### Sprint 14 (tanda A): la columna angosta "a media altura"
+ *
+ * La retokenización de la tarea 14.1 ya achica `text-xl`/`text-2xl` solo con
+ * los tokens (sale gratis), pero la columna angosta seguía parada en 3
+ * renglones propios (fecha, hora, "cuánto falta") más el badge. Acá se
+ * REORGANIZA -no se saca nada, docs/densidad.md §4 regla 5-: fecha y hora se
+ * combinan en un solo renglón (`formatearFechaCortaTurno` + la hora de
+ * siempre, con `numeros-clinicos`) y "cuánto falta" queda como segundo
+ * renglón, mismo patrón `chica:hidden` / `hidden chica:block` que ya usa
+ * `tarjeta-medicacion.tsx` para droga+presentación: dos bloques con el MISMO
+ * dato, uno por modo, nunca los dos en el árbol de accesibilidad a la vez
+ * (`display:none` los saca del árbol). El badge es el mismo nodo en los dos
+ * modos, sin duplicar.
  */
 
 import Link from "next/link"
@@ -49,7 +63,7 @@ import { Boton } from "@/components/base/boton"
 import { BadgeEstadoTurno } from "@/components/turnos/badge-estado-turno"
 import { AccionesTurno } from "@/components/turnos/acciones-turno"
 import { Tarjeta } from "@/components/base/tarjeta"
-import { formatearFechaLargaTurno, formatearHoraTurno } from "@/lib/turnos/formato"
+import { formatearFechaCortaTurno, formatearFechaLargaTurno, formatearHoraTurno } from "@/lib/turnos/formato"
 import { tiempoRelativo } from "@/lib/turnos/tiempo-relativo"
 import { cn } from "@/lib/utils"
 import type { EstadoTurno } from "@/types/dominio"
@@ -80,10 +94,11 @@ export function TarjetaTurno({ turno, puedeEditar, ahora = new Date() }: Tarjeta
   const lugar = [turno.location_name, turno.location_address].filter(Boolean).join(" — ")
 
   return (
-    <Tarjeta className={cn("gap-3 px-(--card-spacing)", cancelado && "opacity-60")}>
+    <Tarjeta className={cn("gap-3 px-(--card-spacing) chica:gap-2", cancelado && "opacity-60")}>
       <div className="flex flex-col gap-3 chica:flex-row chica:items-stretch">
-        <div className="flex flex-wrap items-start justify-between gap-3 chica:w-[38%] chica:shrink-0 chica:flex-col chica:flex-nowrap chica:items-start chica:justify-start chica:gap-2 chica:border-r chica:border-borde-sutil chica:pr-3">
-          <div className="flex flex-col gap-0.5">
+        <div className="flex flex-wrap items-start justify-between gap-3 chica:w-[38%] chica:shrink-0 chica:flex-col chica:flex-nowrap chica:items-start chica:justify-start chica:gap-1.5 chica:border-r chica:border-borde-sutil chica:pr-3">
+          {/* Grande: sin cambios -fecha y hora en renglones grandes apilados, "cuánto falta" debajo-. */}
+          <div className="flex flex-col gap-0.5 chica:hidden">
             <p
               className={cn(
                 "text-xl font-semibold text-balance text-foreground capitalize",
@@ -101,6 +116,24 @@ export function TarjetaTurno({ turno, puedeEditar, ahora = new Date() }: Tarjeta
               {formatearHoraTurno(turno.appointment_date)} hs
             </p>
             <p className="text-sm text-muted-foreground">{tiempoRelativo(turno.appointment_date, ahora)}</p>
+          </div>
+
+          {/* Chica (Sprint 14, tanda A): "a media altura" del criterio del
+              sprint -fecha y hora COMBINADAS en un solo renglón (mismo dato
+              que en grande, sin sacar nada, docs/densidad.md §4 regla 5),
+              "cuánto falta" en el segundo. De 3 renglones de texto propios
+              pasa a 2, más el badge -que sigue siendo el mismo nodo, ver
+              abajo-. */}
+          <div className="hidden flex-col gap-0.5 chica:flex">
+            <p
+              className={cn(
+                "numeros-clinicos text-base font-bold text-balance text-foreground capitalize",
+                cancelado && "line-through decoration-2",
+              )}
+            >
+              {formatearFechaCortaTurno(turno.appointment_date)} · {formatearHoraTurno(turno.appointment_date)} hs
+            </p>
+            <p className="text-xs text-muted-foreground">{tiempoRelativo(turno.appointment_date, ahora)}</p>
           </div>
 
           <BadgeEstadoTurno estado={turno.status} />

@@ -122,12 +122,28 @@ export default async function PaginaInicio() {
       */}
       <BannerAlertasSignos alertas={alertasSinVer} className="w-full max-w-sm" />
 
+      {/*
+        Chica (Sprint 14, tanda A): "Estás viendo el historial de {nombre}" y
+        la bajada de permiso se ocultan -no es pérdida de contenido
+        (docs/densidad.md §4 regla 5, que protege datos CLÍNICOS): el
+        encabezado que pone `app/(app)/(con-nav)/layout.tsx`
+        (`components/navegacion/encabezado-perfil.tsx`) ya dice "Viendo a
+        {nombre}" -o "Tu historial" si es el perfil propio- en cada pantalla
+        con nav, así que era el mismo dato repetido dos veces en la misma
+        pantalla; la bajada de permiso es ayuda contextual sobre qué puede
+        hacer quien mira -mismo criterio que la descripción larga de cada
+        `TarjetaAcceso`, ya oculta en chica más abajo-, no un dato del
+        paciente-. El `<h1>` en sí NO se saca del DOM (`chica:sr-only`, no
+        `chica:hidden`): esta pantalla no tiene otro título, y una página sin
+        ningún `<h1>` visible-o-no es un salto de nivel real para un lector
+        de pantalla, no una mejora de densidad.
+      */}
       <div className="flex flex-col items-center gap-2">
-        <p className="text-lg text-muted-foreground">Estás viendo el historial de</p>
-        <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
+        <p className="text-lg text-muted-foreground chica:hidden">Estás viendo el historial de</p>
+        <h1 className="text-3xl font-semibold tracking-tight text-balance sm:text-4xl chica:sr-only">
           {perfil.full_name}
         </h1>
-        <p className="text-base text-muted-foreground">{descripcionRelacion(permisos)}</p>
+        <p className="text-base text-muted-foreground chica:hidden">{descripcionRelacion(permisos)}</p>
       </div>
 
       {/* Próximo turno (Sprint 6, tarea 6.3). En chica, `TarjetaTurno` se
@@ -137,9 +153,21 @@ export default async function PaginaInicio() {
       <ProximoTurno />
 
       {/* Grilla de accesos directos (Sprint 7 a 10): en grande, columna
-          apilada de siempre. En chica, grilla de 2 columnas de tiles
-          compactos -ver el comentario de cabecera de este archivo-. */}
-      <div className="flex w-full max-w-sm flex-col gap-8 chica:grid chica:max-w-none chica:grid-cols-2 chica:gap-3">
+          apilada de siempre. En chica, grilla de tiles compactos -ver el
+          comentario de cabecera de este archivo-.
+
+          Sprint 14 (tanda A): 3 columnas, no 2. La cantidad de columnas la
+          decide lo que entra bien en los ~383px útiles del Galaxy A71
+          (411px - `px-4` de los dos lados), no una cifra fija: medido en el
+          dispositivo, 3 columnas de ~121px cada una alcanzan para el ícono
+          (`size-11`, 38,5px) más el título en 1-2 líneas SIN truncar -el
+          mismo criterio "app nativa" que usan las grillas de accesos de
+          MercadoPago/bancos (3-4 tiles por fila con label corto)-, y ganan
+          una fila entera contra la grilla de 2 columnas del Sprint 13 (6
+          tiles: 2 filas de 3 en vez de 3 filas de 2). El único título que no
+          entraba así nomás es "Ficha para el médico" -ver `TarjetaAcceso`
+          más abajo, que le suma un label corto SOLO en chica-. */}
+      <div className="flex w-full max-w-sm flex-col gap-8 chica:grid chica:max-w-none chica:grid-cols-3 chica:gap-2">
         {/*
           Acceso a /medicacion (Sprint 7, tarea 7.2). Sin slot propio en la
           bottom nav todavía -llega en el Sprint 9-, así que por ahora el
@@ -213,6 +241,7 @@ export default async function PaginaInicio() {
             href="/ficha"
             Icono={ClipboardListIcon}
             titulo="Ficha para el médico"
+            tituloChico="Ficha médica"
             descripcion="Resumen de una página para imprimir o compartir"
           />
         )}
@@ -313,36 +342,57 @@ function textoResumenTomas(totalHoy: number, pendientes: number): string {
  * la regla 5 de docs/densidad.md §4 ("la densidad no saca contenido") porque
  * esa regla protege datos, no texto de ayuda, y el destino de la card sigue
  * mostrando el detalle completo.
+ *
+ * `tituloChico` (Sprint 14, tanda A, opcional): a 3 columnas -ver el
+ * comentario de la grilla más arriba- el único título de los seis que no
+ * entraba en 1-2 líneas sin partirse feo es "Ficha para el médico" (21
+ * caracteres en ~99px de ancho de contenido). En vez de truncar con
+ * elipsis -prohibido para cualquier texto de esta pantalla- o dejarlo
+ * envolver a 3 líneas, se le suma un label corto que SOLO existe en chica
+ * (mismo patrón `chica:hidden` / `hidden chica:block` que combina droga +
+ * presentación en `tarjeta-medicacion.tsx`: dos nodos con el mismo dato, uno
+ * por modo, nunca los dos en el árbol de accesibilidad a la vez). Sin
+ * `tituloChico`, la card muestra `titulo` en los dos modos -el caso de las
+ * otras cinco, que ya entran cómodas-. `title={titulo}` queda siempre en el
+ * `<Link>` con el texto COMPLETO, como referencia nativa del navegador.
  */
 function TarjetaAcceso({
   href,
   Icono,
   titulo,
+  tituloChico,
   descripcion,
 }: {
   href: string
   Icono: LucideIcon
   titulo: string
+  tituloChico?: string
   descripcion: string
 }) {
   return (
     <Link
       href={href}
+      title={titulo}
       className={cn(
         CLASE_TARJETA_BASE,
         CLASE_TARJETA_INTERACTIVA,
         "w-full max-w-sm flex-row items-center gap-3 px-(--card-spacing)",
-        "chica:max-w-none chica:flex-col chica:justify-center chica:gap-1.5 chica:px-3 chica:py-4 chica:text-center",
+        "chica:max-w-none chica:flex-col chica:justify-center chica:gap-1 chica:px-2 chica:py-3 chica:text-center",
       )}
     >
       <span
-        className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+        className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-9"
         aria-hidden="true"
       >
-        <Icono className="size-5" />
+        <Icono className="size-5 chica:size-4.5" />
       </span>
       <span className="flex flex-col text-left chica:items-center chica:text-center">
-        <span className="text-base font-semibold text-foreground">{titulo}</span>
+        <span className={cn("text-base font-semibold text-foreground", tituloChico && "chica:hidden")}>
+          {titulo}
+        </span>
+        {tituloChico && (
+          <span className="hidden text-base font-semibold text-foreground chica:block">{tituloChico}</span>
+        )}
         <span className="text-sm text-muted-foreground chica:hidden">{descripcion}</span>
       </span>
     </Link>

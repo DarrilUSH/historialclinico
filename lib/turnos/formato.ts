@@ -25,8 +25,19 @@ const FORMATO_HORA = new Intl.DateTimeFormat("es-AR", {
   hour12: false,
 })
 
+/** "13 ago" (Sprint 14, tanda A): la versión corta para la fila densa de `tarjeta-turno.tsx` en modo chica -combinada con la hora en un solo renglón, ver el comentario de cabecera de ese componente-. Sin año: el mismo criterio que ya regía en `FORMATO_FECHA_LARGA` (un turno de `/turnos` nunca es de otro año, y si lo fuera, `tiempoRelativo` ya lo deja claro en lenguaje natural). */
+const FORMATO_FECHA_CORTA = new Intl.DateTimeFormat("es-AR", {
+  timeZone: ZONA_HORARIA_TURNOS,
+  day: "numeric",
+  month: "short",
+})
+
 export function formatearFechaLargaTurno(fechaIso: string): string {
   return FORMATO_FECHA_LARGA.format(new Date(fechaIso))
+}
+
+export function formatearFechaCortaTurno(fechaIso: string): string {
+  return FORMATO_FECHA_CORTA.format(new Date(fechaIso))
 }
 
 export function formatearHoraTurno(fechaIso: string): string {

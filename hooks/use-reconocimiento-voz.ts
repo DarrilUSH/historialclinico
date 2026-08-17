@@ -57,11 +57,42 @@ export interface UseReconocimientoVozResultado {
 }
 
 export function useReconocimientoVoz(): UseReconocimientoVozResultado {
-  const [soportado] = React.useState(() => Boolean(obtenerConstructor()))
+  // Sprint 14 (tanda A): ANTES esto era `React.useState(() =>
+  // Boolean(obtenerConstructor()))`, un lazy initializer que igual corre en
+  // cada render inicial -también el PRIMER render del cliente, antes de
+  // hidratar-. `obtenerConstructor()` mira `typeof window`, así que en SSR
+  // daba `false` (sin `window`) y en el primer render del cliente daba `true`
+  // en cualquier navegador con la API -Chrome Android, el del Galaxy real-:
+  // el árbol que manda React en el HTML difería del que el cliente calculaba
+  // apenas hidrataba, así que React lo descartaba y reconstruía
+  // `BotonDictado` (que devuelve `null` cuando `!soportado`) en cada pantalla
+  // que usa `campo-texto.tsx` -el error de hydration mismatch en consola,
+  // reproducible en `/estudios` por su buscador con dictado-.
+  //
+  // El arreglo: arrancar SIEMPRE en `false` (server y primer render del
+  // cliente coinciden, cero mismatch) y recién detectar soporte real en un
+  // `useEffect` -que por definición solo corre en el cliente, después de
+  // hidratar-. El botón aparece un instante después del pintado inicial en
+  // vez de estar-o-no desde el primer render, pero eso es invisible en la
+  // práctica (mismo patrón que `activar-notificaciones.tsx`) y el dictado en
+  // sí no cambia: `iniciar()` sigue sin llamarse hasta el `onClick`.
+  const [soportado, setSoportado] = React.useState(false)
   const [estado, setEstado] = React.useState<EstadoReconocimientoVoz>("inactivo")
   const [transcripcion, setTranscripcion] = React.useState("")
   const [error, setError] = React.useState<string | null>(null)
   const reconocimientoRef = React.useRef<SpeechRecognition | null>(null)
+
+  // Corre una sola vez, después de hidratar: recién ahí es seguro mirar
+  // `window` sin arriesgar un mismatch contra el HTML que mandó el servidor.
+  // La función interna (mismo patrón que `activar-notificaciones.tsx#comprobar`)
+  // es lo que evita que `react-hooks/set-state-in-effect` marque el
+  // `setSoportado` como un `setState` síncrono directo del cuerpo del efecto.
+  React.useEffect(() => {
+    function comprobarSoporte() {
+      setSoportado(Boolean(obtenerConstructor()))
+    }
+    comprobarSoporte()
+  }, [])
 
   const detener = React.useCallback(() => {
     reconocimientoRef.current?.stop()

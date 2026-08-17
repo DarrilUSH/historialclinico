@@ -143,40 +143,75 @@ function BotonCargar({ tipo }: { tipo: SignoTipo }) {
 
 function SeccionTipo({ tipo, mediciones }: { tipo: SignoTipo; mediciones: MedicionSigno[] }) {
   return (
-    <div className="flex flex-col gap-3 chica:gap-2">
+    <div className="flex flex-col gap-3 chica:gap-1.5">
       <h2 className="text-lg font-semibold text-foreground">{ETIQUETA_TIPO[tipo]}</h2>
-      <ul className="flex flex-col gap-2 chica:gap-1.5">
+
+      {/* Grande: sin cambios (docs/densidad.md §4 regla 1) -tarjetas
+          apiladas, envueltas en `chica:hidden` en vez de tocadas-. */}
+      <ul className="flex flex-col gap-2 chica:hidden">
         {mediciones.map((medicion, indice) => (
           <li key={medicion.id}>
-            <Tarjeta className={cn("gap-1 px-(--card-spacing) chica:gap-0.5", indice === 0 && "ring-primary/40")}>
-              {/* Grande: sin cambios. */}
-              <div className="flex flex-wrap items-center justify-between gap-2 chica:hidden">
+            <Tarjeta className={cn("gap-1 px-(--card-spacing)", indice === 0 && "ring-primary/40")}>
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="numeros-clinicos text-xl font-bold text-foreground">
                   {formatearValorSigno(medicion)}
                 </p>
                 <p className="text-sm text-muted-foreground">{tiempoRelativo(medicion.measuredAt)}</p>
               </div>
-              <p className="text-sm text-muted-foreground chica:hidden">
+              <p className="text-sm text-muted-foreground">
                 {formatearFechaLargaTurno(medicion.measuredAt)} · {formatearHoraTurno(medicion.measuredAt)} hs
               </p>
-
-              {/* Chica (Sprint 13, tarea 13.4): valor y fecha en una sola
-                  fila -mismos datos que en grande (tiempo relativo, fecha
-                  larga y hora), sin sacar nada, envolviendo si no entra en
-                  vez de truncar (docs/densidad.md §4 regla 5)-. */}
-              <div className="hidden flex-wrap items-center justify-between gap-2 chica:flex">
-                <p className="numeros-clinicos text-lg font-bold text-foreground">
-                  {formatearValorSigno(medicion)}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {tiempoRelativo(medicion.measuredAt)} · {formatearFechaLargaTurno(medicion.measuredAt)} ·{" "}
-                  {formatearHoraTurno(medicion.measuredAt)} hs
-                </p>
-              </div>
             </Tarjeta>
           </li>
         ))}
       </ul>
+
+      {/* Chica (Sprint 14, tanda A): TABLA densa -el criterio del sprint
+          pide "columnas tipo/valor/fecha, una fila por medición". La
+          columna "tipo" no se repite en cada fila -sería el mismo texto en
+          las 5 filas de la sección- porque ya la da el `<h2>` de arriba: la
+          agrupación por tipo es la misma que armó la tarea 9.1
+          (`lib/signos/consultas.ts#obtenerUltimasMedicionesPorTipo`, para
+          que un tipo con muchas cargas no desplace a otro) y repetirla como
+          celda sería MENOS legible, no más. Una `<table>` real -no un grid
+          imitando tabla- es la semántica correcta para datos tabulares:
+          un lector de pantalla anuncia "columna Valor, fila 2" en vez de
+          leer divs sueltos. Ningún dato se saca -docs/densidad.md §4 regla
+          5-: valor, tiempo relativo, fecha larga y hora siguen los cuatro,
+          la columna Fecha los apila en dos renglones chicos. */}
+      <div className="hidden overflow-x-auto rounded-lg border border-border chica:block">
+        <table className="w-full border-collapse">
+          <caption className="sr-only">Últimas mediciones de {ETIQUETA_TIPO[tipo].toLowerCase()}</caption>
+          <thead>
+            <tr className="border-b border-border bg-muted/50">
+              <th scope="col" className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground">
+                Valor
+              </th>
+              <th scope="col" className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground">
+                Fecha
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {mediciones.map((medicion, indice) => (
+              <tr
+                key={medicion.id}
+                className={cn("border-b border-border last:border-0", indice === 0 && "bg-primary/5")}
+              >
+                <td className="numeros-clinicos px-2 py-1.5 text-left text-sm font-semibold text-foreground">
+                  {formatearValorSigno(medicion)}
+                </td>
+                <td className="px-2 py-1.5 text-right text-xs text-muted-foreground">
+                  <span className="block">{tiempoRelativo(medicion.measuredAt)}</span>
+                  <span className="block">
+                    {formatearFechaLargaTurno(medicion.measuredAt)} · {formatearHoraTurno(medicion.measuredAt)} hs
+                  </span>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

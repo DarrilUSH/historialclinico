@@ -112,57 +112,125 @@ function FilaToma({ toma, puedeRegistrar }: { toma: TomaDeHoyVista; puedeRegistr
   const [estadoRevertir, enviarRevertir] = useActionState(revertirToma, ESTADO_INICIAL)
 
   return (
-    <Tarjeta className="gap-3 px-(--card-spacing) chica:gap-2">
-      <div className="flex items-start justify-between gap-3 chica:gap-2">
-        <div className="flex items-center gap-2.5 chica:gap-2">
-          <span
-            className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-8"
-            aria-hidden="true"
-          >
-            <PillIcon className="size-4.5 chica:size-4" />
-          </span>
-          <div className="flex flex-col">
-            <span className="text-base font-semibold text-foreground">{toma.medicationName}</span>
-            <span className="text-sm text-muted-foreground">
-              {formatearHoraToma(toma.scheduledAt)}
-              {toma.doseAmount !== null && ` · ${textoDosis(toma.doseAmount, toma.doseUnit)}`}
+    <Tarjeta className="gap-3 px-(--card-spacing) chica:gap-0">
+      {/* ===== GRANDE: sin cambios (docs/densidad.md §4 regla 1). ===== */}
+      <div className="flex flex-col gap-3 chica:hidden">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span
+              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+              aria-hidden="true"
+            >
+              <PillIcon className="size-4.5" />
             </span>
+            <div className="flex flex-col">
+              <span className="text-base font-semibold text-foreground">{toma.medicationName}</span>
+              <span className="text-sm text-muted-foreground">
+                {formatearHoraToma(toma.scheduledAt)}
+                {toma.doseAmount !== null && ` · ${textoDosis(toma.doseAmount, toma.doseUnit)}`}
+              </span>
+            </div>
           </div>
+          <EstadoBadge toma={toma} />
         </div>
-        <EstadoBadge toma={toma} />
+
+        {estadoRegistrar.error && (
+          <Alerta variante="error" className="text-sm">
+            {estadoRegistrar.error}
+          </Alerta>
+        )}
+
+        {puedeRegistrar && toma.status === "pending" && (
+          <form action={enviarRegistrar}>
+            <input type="hidden" name="tomaId" value={toma.id} />
+            <Boton type="submit" size="lg" cargando={pendienteRegistrar} className="w-full">
+              <CheckIcon aria-hidden="true" />
+              Ya la tomé
+            </Boton>
+          </form>
+        )}
+
+        {puedeRegistrar && toma.status === "taken" && (
+          <DialogoConfirmacion
+            disparador={<Boton variant="outline" size="sm" />}
+            titulo={`¿Deshacer esta toma de ${toma.medicationName}?`}
+            consecuencia="Vuelve a quedar pendiente y se restituye exactamente el stock que se había descontado. Solo se puede deshacer el mismo día en que se registró."
+            accion={enviarRevertir}
+            camposOcultos={{ tomaId: toma.id }}
+            error={estadoRevertir.error}
+            textoConfirmar="Sí, deshacer"
+            textoCancelar="Volver"
+          >
+            <RotateCcwIcon aria-hidden="true" />
+            Me equivoqué, deshacer
+          </DialogoConfirmacion>
+        )}
       </div>
 
-      {estadoRegistrar.error && (
-        <Alerta variante="error" className="text-sm">
-          {estadoRegistrar.error}
-        </Alerta>
-      )}
+      {/* ===== CHICA (Sprint 14, tanda A): UNA fila -hora + nombre a la
+          izquierda, acción compacta a la derecha- en vez de las 2-3
+          secciones apiladas de arriba. Mismos datos (hora, nombre, dosis,
+          estado), reacomodados: la dosis pasa a segundo renglón chico en vez
+          de compartir renglón con la hora, y "Ya la tomé"/"Me equivoqué,
+          deshacer" se acortan a "Tomé"/"Tomada" -son rótulos de botón, la
+          acción real (y su confirmación en el caso de deshacer) es
+          idéntica-. ===== */}
+      <div className="hidden flex-col gap-1.5 chica:flex">
+        <div className="flex items-center gap-2">
+          <span
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"
+            aria-hidden="true"
+          >
+            <PillIcon className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="numeros-clinicos text-sm font-semibold text-foreground">
+              {formatearHoraToma(toma.scheduledAt)} · {toma.medicationName}
+            </p>
+            {toma.doseAmount !== null && (
+              <p className="text-xs text-muted-foreground">{textoDosis(toma.doseAmount, toma.doseUnit)}</p>
+            )}
+          </div>
 
-      {puedeRegistrar && toma.status === "pending" && (
-        <form action={enviarRegistrar}>
-          <input type="hidden" name="tomaId" value={toma.id} />
-          <Boton type="submit" size="lg" cargando={pendienteRegistrar} className="w-full">
-            <CheckIcon aria-hidden="true" />
-            Ya la tomé
-          </Boton>
-        </form>
-      )}
+          {puedeRegistrar && toma.status === "pending" && (
+            <form action={enviarRegistrar} className="shrink-0">
+              <input type="hidden" name="tomaId" value={toma.id} />
+              <Boton type="submit" size="sm" cargando={pendienteRegistrar}>
+                <CheckIcon aria-hidden="true" />
+                Tomé
+              </Boton>
+            </form>
+          )}
 
-      {puedeRegistrar && toma.status === "taken" && (
-        <DialogoConfirmacion
-          disparador={<Boton variant="outline" size="sm" />}
-          titulo={`¿Deshacer esta toma de ${toma.medicationName}?`}
-          consecuencia="Vuelve a quedar pendiente y se restituye exactamente el stock que se había descontado. Solo se puede deshacer el mismo día en que se registró."
-          accion={enviarRevertir}
-          camposOcultos={{ tomaId: toma.id }}
-          error={estadoRevertir.error}
-          textoConfirmar="Sí, deshacer"
-          textoCancelar="Volver"
-        >
-          <RotateCcwIcon aria-hidden="true" />
-          Me equivoqué, deshacer
-        </DialogoConfirmacion>
-      )}
+          {puedeRegistrar && toma.status === "taken" && (
+            <DialogoConfirmacion
+              disparador={<Boton variant="outline" size="sm" className="shrink-0 text-exito-fuerte" />}
+              titulo={`¿Deshacer esta toma de ${toma.medicationName}?`}
+              consecuencia="Vuelve a quedar pendiente y se restituye exactamente el stock que se había descontado. Solo se puede deshacer el mismo día en que se registró."
+              accion={enviarRevertir}
+              camposOcultos={{ tomaId: toma.id }}
+              error={estadoRevertir.error}
+              textoConfirmar="Sí, deshacer"
+              textoCancelar="Volver"
+            >
+              <CheckIcon aria-hidden="true" />
+              Tomada
+            </DialogoConfirmacion>
+          )}
+
+          {(!puedeRegistrar || (toma.status !== "pending" && toma.status !== "taken")) && (
+            <span className="shrink-0">
+              <EstadoBadge toma={toma} />
+            </span>
+          )}
+        </div>
+
+        {estadoRegistrar.error && (
+          <Alerta variante="error" className="text-xs">
+            {estadoRegistrar.error}
+          </Alerta>
+        )}
+      </div>
     </Tarjeta>
   )
 }
