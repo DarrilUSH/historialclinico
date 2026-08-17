@@ -46,7 +46,11 @@ export const metadata: Metadata = {
   title: "Turnos — Historial Médico",
 }
 
-const COLUMNAS = "id, specialty, doctor_name, appointment_date, location_name, location_address, status"
+// latitude/longitude/preparation_notes faltaban desde el Sprint 6: sin ellas
+// "Pedir viaje" nunca aparecía en la lista (sí en /inicio, que las trae).
+// Detectado por la tanda A del Sprint 14, corregido en su auditoría.
+const COLUMNAS =
+  "id, specialty, doctor_name, appointment_date, location_name, location_address, status, latitude, longitude, preparation_notes"
 
 export default async function PaginaTurnos({
   searchParams,
