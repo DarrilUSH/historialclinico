@@ -808,6 +808,52 @@ Demo en el dispositivo real: alternar A/a en 6 pantallas representativas, persis
 
 ---
 
+## Sprint 14: Densidad chica v2 — paridad con apps nativas
+
+> Pedido del usuario (2026-08-15, con el sitio ya en producción): la letra chica del Sprint 13 sigue siendo "enorme" — es una reducción del modo grande, no una densidad nativa. Objetivo: que el modo chico se sienta como una app de celular real (WhatsApp/Mercado Libre/home banking), con mejora percibida de ~80% en aprovechamiento de pantalla. Autorizado explícitamente: layouts multi-columna (2+ tarjetas/secciones por fila) donde aporte. **El modo grande NO se toca.** Además: **el DEFAULT pasa a CHICA** para todo el mundo (DB, cookie pre-sesión y backfill), recordando a quien elija grande con el A/a. Verificación en el Galaxy A71 real (reconectado, acceso total re-autorizado).
+>
+> ⚠️ CONTEXTO DEPLOY: push a main = PRODUCCIÓN (auto-deploy). Migraciones nuevas requieren `npx supabase db push` del usuario.
+
+### [Opus] - Retokenizado nativo + default chica
+
+Benchmark de métricas nativas (Material 3 / iOS HIG) y recalibración COMPLETA del set compacto en globals.css: cuerpo ~14px, secundario 12-13px, títulos de pantalla 18-20px, spacing base 4→3.5px o menor, paddings de tarjeta 12px, gaps 8px, radios ~10px, header ~56px, bottom nav ~64px, controles 40-44px (piso táctil WCAG 24, confort 40). Contraste dual re-verificado (tamaños menores → umbrales más exigentes). Default: migración `display_density` default 'chica' + backfill de filas en 'grande' (nadie eligió grande explícitamente aún) + default de cookie/lib en 'chica' + seed con Roberto explícito en 'grande' (persona mayor de la demo).
+
+- **Criterio:** en el Galaxy, /inicio y /medicacion en chica muestran ≥1.7× más contenido vertical que la chica v1 (medido en px de contenido visible); login sin cookie sale en chica; grande queda idéntico al píxel.
+
+### [Sonnet] - Tandas de re-compactado por layout (2 tandas)
+
+Tanda A: inicio (grilla de accesos 3 columnas si entra, cards de datos como FILAS densas), medicación (tarjetas → filas expandibles o tarjetas de media altura, tomas de hoy como lista), signos (últimas mediciones como tabla densa), turnos (filas). Tanda B: estudios (galería 2 columnas o filas densas), coberturas/médicos/familia (filas), SOS/ficha/ajustes menores. Multi-columna donde aporte; información clínica siempre visible; targets ≥40px.
+
+- **Criterio por tanda:** capturas comparativas v1 vs v2 en el dispositivo; sin truncados con datos reales; grande intacto (pixel diff).
+
+### Checkpoint Sprint 14
+
+Demo en el Galaxy: recorrido completo en chica v2 + métricas de contenido por pantalla vs v1 + grande intacto + suites completas. Tras aprobar: push (auto-deploy) + `db push` del usuario para la migración del default.
+
+---
+
+## Sprint 15: Perfiles de niños (gestionados) con graduación
+
+> Pedido del usuario (2026-08-15). El modelo YA soporta perfiles sin cuenta (`profiles.user_id NULL`, Roberto de la demo) pero NO hay UI para crearlos, y falta la pieza nueva: la **graduación** (vincular email+contraseña más adelante). Decisión de producto cerrada con el usuario: tras la graduación los accesos existentes SE MANTIENEN y el nuevo titular puede revocarlos desde Familia.
+
+### [Sonnet] - Crear perfil gestionado desde Familia
+
+Formulario en /familia: nombre + fecha de nacimiento (sin email). El creador queda con can_view/upload/manage (fila de family_permissions) y `created_by_profile_id`; puede autorizar a otros con el flujo existente. Sirve para niños Y para mayores sin email (mismo mecanismo, texto de UI neutro: "Crear un perfil para un familiar sin cuenta"). Respeta el trigger de no-orfandad y el consentimiento de acceso familiar (12.1) — el creador consiente como responsable/representante (Ley 25.326, patria potestad), texto legal acorde.
+
+- **Criterio:** crear "Lucas (2019)" desde Familia → aparece en el selector del creador como gestionado; un tercero autorizado lo ve; un no autorizado no; RLS arnesada.
+
+### [Opus] - Graduación: vincular cuenta propia al perfil gestionado
+
+Solo el CREADOR del perfil (created_by_profile_id) ve la acción "Darle su propia cuenta" en el perfil gestionado: carga email + contraseña inicial → server-side (service_role admin API) se crea la cuenta de auth con metadata `perfil_existente: <uuid>` → el trigger de alta (20260814140000) debe detectar ese metadata y VINCULAR (UPDATE profiles SET user_id WHERE id = X AND user_id IS NULL) en vez de crear un perfil nuevo, con consents del nuevo titular al primer ingreso (acepta legales él mismo — hasta entonces rige el consentimiento del representante). El chico entra desde su celular, cambia la contraseña con el flujo de recuperar existente, y como titular gestiona sus autorizados (los accesos previos se mantienen). Casos hostiles arnesados: graduar un perfil ya graduado (rechazado), email ya en uso (mensaje claro), un can_manage NO creador no puede graduar.
+
+- **Criterio:** flujo completo demostrado con dos cuentas reales en local; producción tras auditoría + db push del usuario.
+
+### Checkpoint Sprint 15
+
+Demo: crear niño → cargarle historial → graduarlo → entrar con su cuenta → revocar un acceso. **Fable aprueba antes de pushear.**
+
+---
+
 ## Backlog de mejoras (post-lanzamiento, pedidas por el usuario)
 
 > Anotadas el 2026-08-14 durante el estreno en producción. Se encaran como tandas nuevas cuando el usuario lo pida, con el protocolo de siempre.
