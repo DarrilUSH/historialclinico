@@ -312,17 +312,17 @@ export function FiltrosEstudios({ instituciones }: FiltrosEstudiosProps) {
       </div>
 
       {chips.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 chica:gap-1.5">
           {chips.map((chip) => (
             <button
               key={chip.id}
               type="button"
               onClick={chip.quitar}
               aria-label={`Quitar filtro ${chip.etiqueta}`}
-              className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/70"
+              className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/70 chica:gap-1 chica:px-2.5 chica:py-1 chica:text-xs"
             >
               {chip.etiqueta}
-              <XIcon className="size-3.5" aria-hidden="true" />
+              <XIcon className="size-3.5 chica:size-3" aria-hidden="true" />
             </button>
           ))}
 
@@ -330,7 +330,7 @@ export function FiltrosEstudios({ instituciones }: FiltrosEstudiosProps) {
             <button
               type="button"
               onClick={limpiarTodo}
-              className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+              className="text-sm font-medium text-primary underline-offset-4 hover:underline chica:text-xs"
             >
               Limpiar todo
             </button>

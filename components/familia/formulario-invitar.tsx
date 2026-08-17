@@ -55,7 +55,7 @@ export function FormularioInvitar({ perfilId, perfilNombre }: FormularioInvitarP
     <form
       ref={formRef}
       action={enviarAccion}
-      className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave chica:gap-3 chica:p-4"
+      className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave chica:gap-2.5 chica:p-3"
     >
       <input type="hidden" name="perfilId" value={perfilId} />
 
@@ -72,7 +72,7 @@ export function FormularioInvitar({ perfilId, perfilNombre }: FormularioInvitarP
         error={estado.error ?? undefined}
       />
 
-      <div className="flex flex-col gap-3 chica:gap-2">
+      <div className="flex flex-col gap-3 chica:gap-1.5">
         <label className="flex items-start gap-2.5 text-sm chica:gap-2">
           <Checkbox name="canUpload" className="mt-0.5" />
           <span>
@@ -95,7 +95,7 @@ export function FormularioInvitar({ perfilId, perfilNombre }: FormularioInvitarP
         </label>
       </div>
 
-      <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 chica:gap-1.5 chica:p-2.5">
+      <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3 chica:gap-1.5 chica:p-2">
         <p className="text-sm font-medium text-foreground">
           Vas a darle acceso a los datos de salud de <strong>{perfilNombre}</strong> a la
           persona con el email que ingresaste arriba.

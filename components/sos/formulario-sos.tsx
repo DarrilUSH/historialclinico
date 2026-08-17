@@ -113,7 +113,7 @@ export function FormularioSos({ valoresIniciales }: FormularioSosProps) {
   )
 
   return (
-    <form action={enviarAccion} className="flex flex-col gap-6 chica:gap-4">
+    <form action={enviarAccion} className="flex flex-col gap-6 chica:gap-3">
       <div className="flex flex-col gap-2 chica:gap-1.5">
         <Label htmlFor="grupoSanguineo-trigger">Grupo y factor sanguíneo</Label>
         <Select items={OPCIONES_GRUPO} value={grupo} onValueChange={(valor) => setGrupo(String(valor))}>

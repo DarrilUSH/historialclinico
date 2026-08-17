@@ -31,10 +31,10 @@ export function BotonExportar({ tipo, periodo }: BotonExportarProps) {
     <a
       href={url}
       download
-      className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 active:bg-primary/80"
+      className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 active:bg-primary/80 chica:min-h-tactil chica:gap-1.5 chica:px-3 chica:py-0 chica:text-xs"
       aria-label={`Descargar CSV de ${etiquetaTipo} (últimos ${etiquetaPeriodo.toLowerCase()})`}
     >
-      <DownloadIcon className="size-4" aria-hidden="true" />
+      <DownloadIcon className="size-4 shrink-0 chica:size-3.5" aria-hidden="true" />
       Descargar CSV
     </a>
   )

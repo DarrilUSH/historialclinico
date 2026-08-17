@@ -80,8 +80,17 @@ export interface GraficoSignoProps {
   className?: string
 }
 
-/** Alto del gráfico por densidad. `260` es el valor original (grande, sin cambios); `200` es la reducción de la tarea 13.4 -el contenedor se achica, Recharts se adapta solo vía `ResponsiveContainer`/`width`/`height` explícitos-. */
-const ALTURA_GRAFICO_POR_TAMANO: Record<Tamano, number> = { grande: 260, chica: 200 }
+/**
+ * Alto del gráfico por densidad. `260` es el valor original (grande, sin
+ * cambios). `200` fue la reducción de la tarea 13.4; la tanda B del Sprint 14
+ * la bajó a `180` -misma evaluación y mismo resultado que documenta el
+ * comentario gemelo de `components/estudios/grafico-metrica.tsx`: los ejes
+ * usan `fontSize` y `height`/`width` fijos, así que los 20px cedidos salen
+ * del área de trazado, y en tensión (2 líneas) y glucemia/peso (1 línea) del
+ * seed los ticks se leyeron completos en el dispositivo real, sin
+ * superponerse-.
+ */
+const ALTURA_GRAFICO_POR_TAMANO: Record<Tamano, number> = { grande: 260, chica: 180 }
 /** Mismo umbral y proporciones que `grafico-metrica.tsx`: por encima de esta cantidad de puntos el gráfico scrollea horizontalmente ADENTRO de su propio contenedor, nunca la página. */
 const UMBRAL_SCROLL_PUNTOS = 8
 const ANCHO_POR_PUNTO_PX = 64

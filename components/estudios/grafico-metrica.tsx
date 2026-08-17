@@ -102,8 +102,21 @@ export interface GraficoMetricaProps {
 }
 
 const DIA_MS = 24 * 60 * 60 * 1000
-/** Alto del gráfico por densidad. `260` es el valor original (grande, sin cambios); `200` es la reducción de la tarea 13.3 -el contenedor se achica, Recharts se adapta solo vía `ResponsiveContainer`/`width`/`height` explícitos-. */
-const ALTURA_GRAFICO_POR_TAMANO: Record<Tamano, number> = { grande: 260, chica: 200 }
+/**
+ * Alto del gráfico por densidad. `260` es el valor original (grande, sin
+ * cambios). `200` fue la reducción de la tarea 13.3; la tanda B del Sprint 14
+ * la volvió a bajar a `180` -evaluado en el dispositivo real contra el
+ * criterio del encargo ("¿180 mejora sin perder legibilidad de ejes?")-: con
+ * `XAxis`/`YAxis` en `fontSize: 13` fijo (no depende de los tokens de
+ * densidad, ver más abajo) y `height={28}`/`width={40}` también fijos, los
+ * 20px que se ceden salen enteros del área de trazado, no de los ejes -en
+ * los gráficos de 3-5 puntos del seed (Glucosa, Colesterol) los ticks del
+ * eje X y las etiquetas del eje Y se leyeron completos, sin superponerse, en
+ * el Galaxy A71 real-. Por debajo de 180 el área de trazado empieza a
+ * apretar la separación entre la banda de referencia y la línea; 180 es el
+ * piso que se resignó a mano, no el resultado de una fórmula.
+ */
+const ALTURA_GRAFICO_POR_TAMANO: Record<Tamano, number> = { grande: 260, chica: 180 }
 /** Más de esta cantidad de puntos activa el modo de scroll interno (requisito 4 de la tarea: nunca scroll horizontal de PÁGINA, pero el gráfico puede scrollear el suyo propio). */
 const UMBRAL_SCROLL_PUNTOS = 8
 const ANCHO_POR_PUNTO_PX = 64

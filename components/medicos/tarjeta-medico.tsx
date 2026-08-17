@@ -95,7 +95,19 @@ export function TarjetaMedicoActivo({
           criterio de aceptación del ROADMAP-, con menos aire entre ellos.
           `size="lg"` sigue siendo `min-h-tactil-amplio`, que en chica ya
           computa ~49,5px por el token (docs/densidad.md §5): siguen muy por
-          encima del piso de 40px sin tocar la altura a mano. */}
+          encima del piso de 40px sin tocar la altura a mano.
+
+          Sprint 14 (tanda B): "Cómo llegar" gana un label corto ("Llegar")
+          en chica -mismo patrón `chica:hidden`/`hidden chica:inline` que ya
+          usa `components/turnos/acciones-turno.tsx`: el texto completo
+          queda en el árbol de accesibilidad de GRANDE, el corto en el de
+          CHICA, nunca los dos a la vez-. "Llamar" ya es corto (7
+          caracteres) y no necesita una segunda versión. Siguen siendo
+          `size="lg"` con rótulo visible en los dos modos, no íconos SIN
+          texto: a diferencia de Editar/Dar de baja en `acciones-medico.tsx`
+          (acciones secundarias de administración), "Llamar" y "Cómo llegar"
+          son la acción principal de esta tarjeta para cualquier sesión
+          -incluida la de solo lectura, sin `puedeEditar`-. */}
       {(medico.phone || urlComoLlegar) && (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 chica:grid-cols-2 chica:gap-1.5">
           {medico.phone && (
@@ -118,7 +130,8 @@ export function TarjetaMedicoActivo({
               className="w-full chica:px-3 chica:text-base"
             >
               <MapPinnedIcon aria-hidden="true" />
-              Cómo llegar
+              <span className="chica:hidden">Cómo llegar</span>
+              <span className="hidden chica:inline">Llegar</span>
             </Boton>
           )}
         </div>
@@ -146,7 +159,7 @@ export function TarjetaMedicoBaja({
         </p>
       )}
 
-      {puedeEditar && <BotonReactivar medicoId={medico.id} />}
+      {puedeEditar && <BotonReactivar medicoId={medico.id} nombre={medico.full_name} />}
     </Tarjeta>
   )
 }

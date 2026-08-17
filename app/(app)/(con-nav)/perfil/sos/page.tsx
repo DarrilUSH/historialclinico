@@ -90,7 +90,7 @@ export default async function PaginaFichaSos({
   const ultimaRevision = formatearRevisionSos(perfil.sos_updated_at)
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-3 chica:py-3">
       <Link
         href="/inicio"
         className="inline-flex w-fit items-center gap-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"

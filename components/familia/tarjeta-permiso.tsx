@@ -16,6 +16,18 @@
  * formulario de edición ni el botón de revocar aparecen, porque la base los
  * va a rechazar igual -"la UI no debe ofrecer lo que la base va a
  * rechazar"-.
+ *
+ * ## Chica (Sprint 14, tanda B): fila densa + "Revocar acceso" como ícono
+ *
+ * "Revocar acceso" pasa a ícono-botón de 40px en chica -mismo patrón
+ * `chica:hidden`/`hidden chica:flex` que `components/medicacion/acciones-
+ * medicacion.tsx` (tanda A): dos árboles, nunca los dos en el DOM
+ * accesible a la vez, con `aria-label` propio para que dos revocaciones en
+ * la misma pantalla se anuncien distinto-. El mini-formulario de
+ * `canUpload`/`canManage` se queda con su botón de texto ("Guardar
+ * cambios"): a diferencia de una acción destructiva de un solo toque, acá
+ * hay que leer dos casillas antes de decidir, así que el rótulo visible
+ * ayuda a confirmar qué se está por guardar.
  */
 
 import type { ReactNode } from "react"
@@ -69,18 +81,18 @@ export function TarjetaPermiso({
   // desmonta esta tarjeta entera -diálogo incluido-, así que no hace falta
   // cerrarla a mano. Un error la deja abierta sola, porque nada la cierra.
   return (
-    <li className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave sm:flex-row sm:items-start sm:justify-between chica:gap-3 chica:p-4">
+    <li className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-suave sm:flex-row sm:items-start sm:justify-between chica:gap-2.5 chica:p-3">
       <div className="flex items-start gap-3 chica:gap-2">
         <span
           className={cn(
-            "flex size-11 shrink-0 items-center justify-center rounded-full text-base font-semibold text-avatar-foreground",
+            "flex size-11 shrink-0 items-center justify-center rounded-full text-base font-semibold text-avatar-foreground chica:size-9",
             colorAvatarPara(permiso.perfilVinculadoId),
           )}
           aria-hidden="true"
         >
           {inicialesDe(permiso.nombre)}
         </span>
-        <div className="flex flex-col gap-2 chica:gap-1.5">
+        <div className="flex flex-col gap-2 chica:gap-1">
           <span className="text-base font-semibold text-foreground">{permiso.nombre}</span>
           <div className="flex flex-wrap gap-1.5 chica:gap-1">
             <BadgeFlag icono={<EyeIcon className="size-3.5" aria-hidden="true" />}>
@@ -116,7 +128,7 @@ export function TarjetaPermiso({
             // mostrando un valor que ya no coincide con la base.
             key={`${permiso.canUpload}-${permiso.canManage}`}
             action={enviarEdicion}
-            className="flex flex-col gap-2.5 rounded-lg bg-muted/50 p-3 chica:gap-2 chica:p-2.5"
+            className="flex flex-col gap-2.5 rounded-lg bg-muted/50 p-3 chica:gap-1.5 chica:p-2.5"
           >
             <input type="hidden" name="perfilId" value={perfilId} />
             <input type="hidden" name="permisoId" value={permiso.id} />
@@ -152,18 +164,38 @@ export function TarjetaPermiso({
             <BotonGuardar />
           </form>
 
-          <DialogoConfirmacion
-            disparador={<Boton variant="destructivo" size="sm" />}
-            titulo={`¿Revocar el acceso de ${permiso.nombre}?`}
-            consecuencia="Deja de ver este historial de inmediato: sus próximas consultas van a devolver cero resultados. Lo que ya vio mientras tuvo acceso queda igual en el registro de accesos."
-            accion={enviarRevocacion}
-            camposOcultos={{ perfilId, permisoId: permiso.id }}
-            error={estadoRevocacion.error}
-            textoConfirmar="Sí, revocar"
-          >
-            <Trash2Icon className="size-4" aria-hidden="true" />
-            Revocar acceso
-          </DialogoConfirmacion>
+          {/* Grande: sin cambios. */}
+          <div className="chica:hidden">
+            <DialogoConfirmacion
+              disparador={<Boton variant="destructivo" size="sm" />}
+              titulo={`¿Revocar el acceso de ${permiso.nombre}?`}
+              consecuencia="Deja de ver este historial de inmediato: sus próximas consultas van a devolver cero resultados. Lo que ya vio mientras tuvo acceso queda igual en el registro de accesos."
+              accion={enviarRevocacion}
+              camposOcultos={{ perfilId, permisoId: permiso.id }}
+              error={estadoRevocacion.error}
+              textoConfirmar="Sí, revocar"
+            >
+              <Trash2Icon className="size-4" aria-hidden="true" />
+              Revocar acceso
+            </DialogoConfirmacion>
+          </div>
+
+          {/* Chica: mismo diálogo, disparador solo ícono + `aria-label`. */}
+          <div className="hidden chica:flex chica:justify-end">
+            <DialogoConfirmacion
+              disparador={
+                <Boton variant="destructivo" size="icon-sm" aria-label={`Revocar el acceso de ${permiso.nombre}`} />
+              }
+              titulo={`¿Revocar el acceso de ${permiso.nombre}?`}
+              consecuencia="Deja de ver este historial de inmediato: sus próximas consultas van a devolver cero resultados. Lo que ya vio mientras tuvo acceso queda igual en el registro de accesos."
+              accion={enviarRevocacion}
+              camposOcultos={{ perfilId, permisoId: permiso.id }}
+              error={estadoRevocacion.error}
+              textoConfirmar="Sí, revocar"
+            >
+              <Trash2Icon aria-hidden="true" />
+            </DialogoConfirmacion>
+          </div>
         </div>
       )}
     </li>

@@ -118,14 +118,18 @@ export async function ListaEstudios({ perfilId, hasta, puedeSubir, filtros }: Li
               app no hace glassmorphism en ningún lado, docs/design-system.md
               §5-.
 
-              Chica (Sprint 13, tarea 13.3): `EncabezadoPerfil` baja de alto
-              -menos padding vertical (`chica:py-2` contra `py-2.5`), sin
-              cambiar el tamaño del avatar-, así que el offset sticky también
-              baja (`chica:top-[57px]`, medido en el navegador contra el header
-              compacto real) y el propio encabezado de mes se aprieta
-              (`chica:py-1.5`) para no comerse más alto del que el modo
-              compacto está pensado para ahorrar. */}
-          <h2 className="sticky top-[73px] z-20 -mx-4 border-b border-borde-sutil bg-background px-4 py-2 text-sm font-semibold tracking-wide text-muted-foreground uppercase sm:mx-0 sm:rounded-t-lg sm:px-1 chica:top-[57px] chica:py-1.5">
+              Chica (Sprint 13, tarea 13.3; encabezado más chico en la tanda B
+              del Sprint 14): `EncabezadoPerfil` baja de alto -menos padding
+              vertical (`chica:py-2` contra `py-2.5`), sin cambiar el tamaño
+              del avatar-, así que el offset sticky también baja
+              (`chica:top-[57px]`, medido en el navegador contra el header
+              compacto real). El propio encabezado de mes se aprieta
+              (`chica:py-1` y `chica:text-xs`, un escalón más chico que
+              `text-sm`) para no comerse más alto del que el modo compacto
+              está pensado para ahorrar: sigue siendo un rótulo de sección,
+              nunca un dato clínico, así que bajarle un escalón de tamaño no
+              pisa la regla 5 de docs/densidad.md §4. */}
+          <h2 className="sticky top-[73px] z-20 -mx-4 border-b border-borde-sutil bg-background px-4 py-2 text-sm font-semibold tracking-wide text-muted-foreground uppercase sm:mx-0 sm:rounded-t-lg sm:px-1 chica:top-[57px] chica:py-1 chica:text-xs">
             {grupo.etiqueta}
           </h2>
 

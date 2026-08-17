@@ -97,7 +97,7 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
   )
 
   return (
-    <div className="flex flex-col gap-6 chica:gap-4">
+    <div className="flex flex-col gap-6 chica:gap-3">
       <header className="flex flex-col gap-1 text-center">
         <h1 className="text-3xl font-bold tracking-tight text-balance sm:text-4xl">
           {perfil.full_name}
@@ -131,7 +131,7 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
           docs/densidad.md §5), vía el mismo token de tipografía que ya
           compacta el resto de la app: ni esta tarjeta ni el resto de la
           ficha necesitan una clase `chica:text-*` acá para lograrlo. */}
-      <Tarjeta variante="destacada" className="items-center gap-1 py-6 text-center chica:py-4">
+      <Tarjeta variante="destacada" className="items-center gap-1 py-6 text-center chica:py-3">
         <p className="px-(--card-spacing) text-lg font-medium">Grupo y factor sanguíneo</p>
         <p className="px-(--card-spacing) text-6xl font-extrabold tracking-tight">
           {perfil.blood_type ?? "No registrado"}
@@ -155,9 +155,9 @@ export function FichaSos({ perfil, coberturaPrincipal }: FichaSosProps) {
       />
 
       {hayContacto && (
-        <Tarjeta className="gap-3 chica:gap-2">
+        <Tarjeta className="gap-3 chica:gap-1.5">
           <h2 className={CLASE_TITULO_SECCION}>Contacto de emergencia</h2>
-          <div className="flex flex-col gap-3 px-(--card-spacing) chica:gap-2">
+          <div className="flex flex-col gap-3 px-(--card-spacing) chica:gap-1.5">
             {perfil.emergency_contact_phone ? (
               // Excepción deliberada al piso táctil de 40px del modo chico
               // (docs/densidad.md §4, regla 2): este `<a>` sigue usando

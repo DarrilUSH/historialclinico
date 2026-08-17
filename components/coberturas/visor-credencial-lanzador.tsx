@@ -40,7 +40,7 @@ export function VisorCredencialLanzador({
 
   return (
     <>
-      <div className="flex gap-3 chica:gap-2">
+      <div className="flex shrink-0 gap-3 chica:gap-1.5">
         {tieneFrente && (
           <button
             type="button"

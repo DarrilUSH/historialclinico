@@ -50,6 +50,7 @@ export function TarjetaEstudio({ documento }: { documento: DocumentoDeGaleria })
   return (
     <Link
       href={`/estudios/${documento.id}`}
+      title={documento.title}
       className={cn(CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA, "px-(--card-spacing)")}
     >
       <div className="flex items-start gap-3 chica:gap-2">
@@ -64,6 +65,19 @@ export function TarjetaEstudio({ documento }: { documento: DocumentoDeGaleria })
           <Icono className="size-5 chica:size-4" />
         </span>
 
+        {/* Sprint 14 (tanda B): se evaluaron dos layouts contra los títulos
+            REALES del seed ("Análisis de sangre completo — Laboratorio
+            Central", 49 caracteres; "Informe administrativo — Antecedentes
+            médicos", 47) -criterio del encargo, "el que trunque feo
+            pierde"-. Una grilla de 2 columnas deja ~150px de ancho de texto
+            por tile a 411px: esos títulos largos entrarían en 3-4 líneas o
+            forzarían un `line-clamp` que les cortaría información real
+            (prohibido por docs/densidad.md §4 regla 5 para un dato que la
+            persona misma tituló). En fila -1 columna, ancho completo- el
+            mismo texto entra en 1-2 líneas sin recortar nada. Filas ganan.
+            `title` en el `<Link>` (arriba) queda como referencia nativa
+            completa del navegador en los dos modos, mismo patrón que
+            `inicio/page.tsx#TarjetaAcceso`. */}
         <div className="flex min-w-0 flex-1 flex-col gap-1 chica:gap-0.5">
           {/* Grande: 4 líneas -categoría, título, fecha+institución, resumen-.
               Chica (Sprint 13, tarea 13.3): la categoría y la fecha+institución

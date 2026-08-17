@@ -66,7 +66,7 @@ export function TarjetaUltimoValor({
   return (
     <TarjetaInteractiva
       onClick={onSeleccionar}
-      className="flex flex-col gap-3 px-4 py-3 chica:gap-2 chica:px-3 chica:py-2.5"
+      className="flex flex-col gap-3 px-4 py-3 chica:gap-1.5 chica:px-3 chica:py-2"
     >
       {/* Encabezado: etiqueta de la métrica */}
       <div className="flex items-start justify-between gap-2">
@@ -77,11 +77,11 @@ export function TarjetaUltimoValor({
 
       {/* Valor grande con unidad */}
       <div className="flex items-baseline gap-1">
-        <span className="numeros-clinicos text-3xl font-semibold text-foreground">
+        <span className="numeros-clinicos text-3xl font-semibold text-foreground chica:text-2xl">
           {formatearValor(resumen.valor)}
         </span>
         {resumen.unidad && (
-          <span className="text-sm text-muted-foreground">{resumen.unidad}</span>
+          <span className="text-sm text-muted-foreground chica:text-xs">{resumen.unidad}</span>
         )}
       </div>
 
@@ -90,19 +90,20 @@ export function TarjetaUltimoValor({
         Última: {formatearFechaCorta(resumen.fecha)}
       </div>
 
-      {/* Badge de rango + Variación */}
-      <div className="flex flex-col gap-2 pt-1">
+      {/* Badge de rango + Variación: mismo dato, en fila -no apilado- en
+          chica (Sprint 14, tanda B), así el tile gana un renglón de alto. */}
+      <div className="flex flex-col gap-2 pt-1 chica:flex-row chica:flex-wrap chica:items-center chica:gap-x-2 chica:gap-y-1 chica:pt-0.5">
         {/* Badge de rango (solo si hay rango definido) */}
         {resumen.enRango !== null && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 chica:gap-1">
             {resumen.enRango ? (
               <>
-                <CheckCircleIcon className="size-4 shrink-0 text-exito" aria-hidden="true" />
+                <CheckCircleIcon className="size-4 shrink-0 text-exito chica:size-3.5" aria-hidden="true" />
                 <span className="text-xs font-medium text-exito">En rango</span>
               </>
             ) : (
               <>
-                <AlertCircleIcon className="size-4 shrink-0 text-advertencia" aria-hidden="true" />
+                <AlertCircleIcon className="size-4 shrink-0 text-advertencia chica:size-3.5" aria-hidden="true" />
                 <span className="text-xs font-medium text-advertencia">Fuera de rango</span>
               </>
             )}
@@ -111,7 +112,7 @@ export function TarjetaUltimoValor({
 
         {/* Variación o "Primera medición" */}
         {resumen.variacion ? (
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground chica:gap-1">
             {resumen.variacion.direccion === "subio" && (
               <>
                 <ArrowUpIcon className="size-3 shrink-0" aria-hidden="true" />
