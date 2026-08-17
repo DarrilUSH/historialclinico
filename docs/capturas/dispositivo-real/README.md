@@ -47,7 +47,66 @@ Samsung Galaxy A71 (SM-A715F), Android 13, Chrome — 2026-08-13, vía ADB (`adb
 | sprint13-t5-chica-ficha.png | `/ficha` (tarea 13.6, Tanda 5 — LA ÚLTIMA) en CHICA, dispositivo real: el aviso de minimización quedó recortado a la frase esencial ("...no quieras compartir con un servicio externo.", sin el ejemplo entre paréntesis ni la explicación técnica, ocultos con `chica:hidden`) y "Generar ficha" sigue siendo un botón grande y de un solo toque |
 | sprint13-t5-chica-login.png | `/login` en CHICA, dispositivo real, **sin sesión** (logout real por CDP y re-login por CDP para no arriesgar el password manager del dueño del equipo): confirma que las pantallas pre-sesión sí heredan el modo compacto de la cookie `tamano` -sin necesitar `profiles.display_density`, que no existe todavía para quien no inició sesión- tal como predice `curl -b tamano=chica http://localhost:3000/login` (`data-tamano="chica"` en el HTML) |
 
+| sprint14-tokens-login.png | `/login` (tarea 14.1) en el dispositivo real **sin ninguna cookie**, después del cambio de default: el HTML llega con `data-tamano="chica"` y la pantalla se pinta en la densidad nativa v2 sin que nadie haya elegido nada. Se ven los tres pisos nuevos conviviendo: cuerpo de 14px, y los DOS campos en 16px —más grandes que el cuerpo, que es exactamente lo que la regla sin capa del piso de iOS produce a propósito—. La tarjeta del formulario mide 362,4px contra los 429px de la chica v1 |
+| sprint14-tokens-offline.png | `/offline` en chica v2, dispositivo real: la pantalla **entra entera sin scroll** (documento de 775px contra un viewport de 775px), cuando en la chica v1 medía 861px y obligaba a scrollear para llegar al último párrafo. El botón "Abrir mi ficha SOS" y los tres accesos guardados conservan su alto táctil |
+| sprint14-tokens-estilos.png | `/estilos` (kitchen sink del sistema) en chica v2, dispositivo real, tramo de Botones y Campos de Texto: los tamaños `Pequeño` / `Default` / `Grande` miden 40,5 / 40,5 / 45px —el `Pequeño` es el que la tarea tuvo que rescatar con `chica:min-h-tactil`, porque con la unidad de espaciado en 3,5px su `h-10` literal daba 35px— y el campo de texto muestra el piso de 16px |
+
 Flujo verificado con toques e ingreso de texto reales por ADB: login de María → selección del perfil gestionado de Roberto → inicio. El camino de error (submit vacío) también se verificó en pantalla física.
+
+## Sprint 14 · tarea 14.1 — Retokenizado nativo del modo compacto: medición en el dispositivo
+
+**2026-08-17.** Samsung Galaxy A71 (SM-A715F), Chrome 151, `adb reverse tcp:3000 tcp:3000` + `adb forward tcp:9222 localabstract:chrome_devtools_remote`, ancho CSS real reportado por el propio navegador: **411px**.
+
+**Método.** La misma página, el mismo DOM y el mismo dispositivo, medidos con `Runtime.evaluate` por CDP (WebSocket nativo de Node 24, sin librerías). Las dos densidades se obtienen flipeando `document.documentElement.dataset.tamano`, que es la técnica que documenta `docs/densidad.md` §5. Las dos versiones del código se obtienen con `git stash` / `git stash pop` sobre el árbol, con el `next dev` recompilando en el medio: así la comparación v1 vs v2 es contra el código real de cada una, no contra una simulación de tokens.
+
+### El modo grande quedó IDÉNTICO (criterio "ni un píxel")
+
+Medido elemento por elemento en las tres páginas, con v1 y con v2:
+
+| Medición en GRANDE | Chica v1 (código del Sprint 13) | Chica v2 (código del Sprint 14) |
+|---|---|---|
+| `/estilos` — alto del documento | 10281px | **10281px** |
+| `/estilos` — alto de las 8 primeras tarjetas | 150 / 152,3 / 183,6 / 158,5 / 159,6 / 198,8 / 204,1 / 215,7 | **idénticas** |
+| `/estilos` — alto y tipografía de los 10 botones visibles | 49,5×7, 45, 49,5, 58,5px | **idénticos** |
+| `/estilos` — alto y tipografía de los campos | 49,5px / 18px | **idénticos** |
+| `/estilos` — `h1` y `h2` | 28px/36,4px y 32px/39,04px | **idénticos** |
+| `/login` y `/offline` — documento, tarjetas, botones, campos | — | **idénticos** |
+
+Cero diferencias. Es una comparación numérica y no visual a propósito: un pixel-diff de capturas del teléfono arrastra la barra de estado (reloj, batería) y produce falsos positivos; `getBoundingClientRect` y `getComputedStyle` no.
+
+### Lo que ganó el modo compacto
+
+| Medición en CHICA | v1 | v2 | Ratio |
+|---|---|---|---|
+| `/estilos` — alto total del documento | 8453px | 6816px | **1,24×** |
+| `/estilos` — alto de las 7 tarjetas simples | 129,2 / 130,6 / 132,9 / 135 / 135,9 / 137,6 / 171,3px | 96,3 / 98 / 99,7 / 100,3 / 100,9 / 102,6 / 104,1px | **1,32× a 1,65×** |
+| `/login` — tarjeta del formulario | 429px | 362,4px | **1,18×** |
+| `/offline` — alto total del documento | 861px (con scroll) | 775px (**entra entera**) | 1,11× |
+| Cuerpo de texto (caja de línea) | 16px / 24px | 14px / 19,6px | 1,22× |
+| `h2` de sección (`text-3xl`) | 26px / 31,2px | 20px / 24px | 1,30× |
+| Padding y gap de tarjeta (`--card-spacing`) | 20px | 12,25px | 1,63× |
+
+**El criterio de ≥1,7× NO se alcanza con tokens, y la medición muestra por qué.** Un botón mide 40,5px, de los cuales 19,6px son la caja de línea de su etiqueta y el resto es el piso táctil de 40px que el ROADMAP fija y que esta tarea no mueve. Los controles no se achican; en una pantalla como `/medicacion` son una fracción grande del alto. El techo estructural de la retokenización está entre 1,25× y 1,35×, y el resto del camino es reorganización de layout (tarjetas → filas, grillas a 2-3 columnas), que es lo que el ROADMAP le asigna a las tandas de la tarea 14.2. Ver `docs/densidad.md` §5-bis.
+
+### Verificaciones adicionales en el dispositivo y contra el servidor
+
+- **Default chica sin sesión, en el teléfono:** `/login` cargó con `data-tamano="chica"` y `innerWidth === 411`, sin ninguna cookie `tamano` y sin sesión (la del sprint anterior murió con el `db reset`).
+- **Resolución pre-sesión, contra el servidor:** `curl -s http://localhost:3000/login` → `data-tamano="chica"`; ídem `/registro` y `/offline`; `curl -s -b "tamano=grande" http://localhost:3000/login` → `data-tamano="grande"` (la cookie sigue teniendo prioridad sobre el default).
+- **Los tres pisos, medidos y no supuestos:** cuerpo `14.0004px`, campos de formulario `16.0002px` (los cuatro `input` de `/estilos`), objetivo táctil `40,5px` en los diez botones visibles salvo el `lg` (45px).
+- **Tokens efectivos leídos del `<html>` del teléfono:** `--spacing: .1944rem`, `--radius: .5556rem`, `--spacing-bottom-nav: 3.5556rem`, `--spacing-tactil: max(40px, 2.25rem)`, `--card-spacing: calc(.1944rem * 3.5)`.
+
+### Lo que NO se pudo verificar en el dispositivo, y por qué
+
+`/inicio` y `/medicacion` —las dos pantallas que nombra el criterio de aceptación, con la tarjeta de Enalapril del seed— **exigen sesión iniciada**, y la sesión del Sprint 13 quedó invalidada por el `npx supabase db reset` de esta tarea. Iniciarla implica escribir una contraseña en un formulario, que es una acción que el ejecutor no realiza. Queda para que la corra el usuario o el orquestador, en un minuto:
+
+```
+adb reverse tcp:3000 tcp:3000
+adb forward tcp:9222 localabstract:chrome_devtools_remote
+# login de María en el teléfono (receta de más abajo en este archivo)
+# y después, con la sesión viva, el mismo medidor que produjo las tablas de arriba
+```
+
+Las mediciones de arriba cubren, sobre pantallas reales, los mismos primitivos con los que están hechas esas dos pantallas: tarjeta (`Tarjeta` / `Card`), botón en sus tres tamaños, campo de texto, tipografía completa y el shell tipográfico.
 
 ## Sprint 13 · tarea 13.6 — Tanda 5 (LA ÚLTIMA): ficha, compartir, offline y auth compactos — verificación completa
 

@@ -27,13 +27,20 @@ const buttonVariants = cva(
         default:
           "min-h-tactil gap-2 px-4 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3",
         xs: "h-8 gap-1 rounded-[min(var(--radius-md),10px)] px-2.5 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-4",
-        sm: "h-10 gap-1.5 rounded-[min(var(--radius-md),12px)] px-3 text-sm in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5 [&_svg:not([class*='size-'])]:size-4.5",
+        // `chica:min-h-tactil` (Sprint 14): con la unidad de espaciado del modo
+        // compacto en 3,5px, `h-10` mide 35px y perdería el piso táctil de
+        // 40px que fija docs/densidad.md §4 regla 2 (con la unidad en 4px de
+        // la v1 medía 40px justos). El `min-h` gana sobre el `h-10` sin
+        // tocarlo, así que en grande el botón sigue midiendo exactamente lo
+        // mismo que antes.
+        sm: "h-10 gap-1.5 rounded-[min(var(--radius-md),12px)] px-3 text-sm in-data-[slot=button-group]:rounded-lg chica:min-h-tactil has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5 [&_svg:not([class*='size-'])]:size-4.5",
         lg: "min-h-tactil-amplio gap-2.5 px-5 text-lg has-data-[icon=inline-end]:pr-4 has-data-[icon=inline-start]:pl-4 [&_svg:not([class*='size-'])]:size-6",
         icon: "size-tactil",
         "icon-xs":
           "size-8 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-4",
+        // `chica:size-tactil`: mismo caso que `sm`, en las dos dimensiones.
         "icon-sm":
-          "size-10 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-4.5",
+          "size-10 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg chica:size-tactil [&_svg:not([class*='size-'])]:size-4.5",
         "icon-lg": "size-tactil-amplio [&_svg:not([class*='size-'])]:size-6",
       },
     },

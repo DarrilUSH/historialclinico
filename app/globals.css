@@ -359,11 +359,36 @@
 }
 
 /* ===========================================================================
-   5. DENSIDAD COMPACTA — "MODO DE LETRA CHICA" (Sprint 13)
+   5. DENSIDAD COMPACTA — "MODO DE LETRA CHICA" (Sprint 13; retokenizada en el
+      Sprint 14 contra métricas de apps nativas)
    ---------------------------------------------------------------------------
-   Todo lo de arriba es el modo GRANDE, que es el default y NO SE TOCA: este
-   bloque no modifica una sola declaración de las secciones 1 a 4. Acá abajo
-   viven, y solo acá, los valores del modo compacto.
+   Todo lo de arriba es el modo GRANDE, que sigue siendo el diseño Senior UX y
+   NO SE TOCA: este bloque no modifica una sola declaración de las secciones 1
+   a 4. Acá abajo viven, y solo acá, los valores del modo compacto.
+
+   ── QUÉ CAMBIÓ EN EL SPRINT 14 (v2) Y POR QUÉ
+
+   La v1 (Sprint 13) era una REDUCCIÓN del modo grande: -12% abajo, -24%
+   arriba. Con el sitio en producción el veredicto del usuario fue "sigue
+   siendo enorme", y tenía razón por una cuestión de origen: una escala
+   derivada de 18px de cuerpo aterriza en 16px de cuerpo, que es el cuerpo de
+   una app de ESCRITORIO cómoda, no el de una app de celular. Las apps nativas
+   que sirven de referencia no parten de ahí (ver la tabla de benchmark en
+   docs/densidad.md §5-bis):
+
+     · Material 3 — body-medium 14sp/20sp, body-small 12sp, title-medium 16sp,
+       ítem de lista 56-72dp, nav bar 80dp, margen de pantalla 16dp, padding de
+       tarjeta 16dp (12dp en denso), corner medium 12dp, botón estándar 40dp.
+     · iOS HIG — body 17pt, pero 15pt (subhead) en listas densas, footnote 13,
+       caption 12, tab bar 49pt, fila de tabla 44pt, margen 16pt.
+
+   La v2 no reduce la escala grande: la RECONSTRUYE sobre esos números. El
+   cuerpo pasa a 14px (body-medium de Material), el secundario a 12-13px
+   (body-small / footnote), el título de tarjeta a 16px (title-medium) y el de
+   pantalla a 20px. Nada baja de 12px, y el cuerpo no baja de 14px: Atkinson
+   Hyperlegible —una tipografía diseñada para baja visión— aguanta 14px con
+   holgura, pero el piso está puesto donde lo fija el ROADMAP y no un píxel más
+   abajo.
 
    ── POR QUÉ SON TOKENS REDEFINIDOS Y NO UN ZOOM
 
@@ -399,122 +424,147 @@
    =========================================================================== */
 
 html[data-tamano="chica"] {
-  /* ESCALA TIPOGRÁFICA COMPACTA.
-     Reducción progresiva, no uniforme: -12% abajo (donde el límite es la
-     legibilidad) y hasta -24% arriba (donde el límite es el aire). El
-     resultado es que cada escalón compacto cae, más o menos, sobre el escalón
-     ANTERIOR de la escala grande -`text-lg` chica = 18px = `text-base`
-     grande-, que es lo que hace que la app se lea como la misma app y no como
-     otra.
+  /* ESCALA TIPOGRÁFICA COMPACTA (v2, Sprint 14).
+     No es la escala grande reducida: es la escala de Material 3 / iOS HIG
+     escrita en los escalones que ya usa la app. Cada escalón compacto cae
+     ahora DOS escalones por debajo del grande -`text-xl` chica = 16px =
+     title-medium de Material-, y la reducción es del orden del 22% al 38%
+     según el escalón, contra el 11-24% de la v1.
 
-     | token      | grande | chica |   Δ  | criterio                        |
-     |------------|--------|-------|------|---------------------------------|
-     | text-xs    |  16px  |  14px | -12% | piso del modo compacto          |
-     | text-sm    |  17px  |  15px | -12% | apoyo, ayudas de campo          |
-     | text-base  |  18px  |  16px | -11% | cuerpo. NO baja de 16px (*)     |
-     | text-lg    |  21px  |  18px | -14% | = cuerpo del modo grande        |
-     | text-xl    |  24px  |  20px | -17% | título de tarjeta               |
-     | text-2xl   |  28px  |  23px | -18% | título de sección               |
-     | text-3xl   |  32px  |  26px | -19% | título de pantalla              |
-     | text-4xl   |  39px  |  31px | -21% | título grande                   |
-     | text-5xl   |  48px  |  37px | -23% | cifra destacada                 |
-     | text-6xl   |  58px  |  44px | -24% | reservado (SOS)                 |
+     | token      | grande | v1   | v2   | Δ vs grande | referencia nativa    |
+     |------------|--------|------|------|-------------|----------------------|
+     | text-xs    |  16px  | 14px | 12px |  -25%       | M3 body-small 12sp   |
+     | text-sm    |  17px  | 15px | 13px |  -24%       | iOS footnote 13pt    |
+     | text-base  |  18px  | 16px | 14px |  -22%       | M3 body-medium 14sp  |
+     | text-lg    |  21px  | 18px | 15px |  -29%       | iOS subhead 15pt     |
+     | text-xl    |  24px  | 20px | 16px |  -33%       | M3 title-medium 16sp |
+     | text-2xl   |  28px  | 23px | 18px |  -36%       | título de sección    |
+     | text-3xl   |  32px  | 26px | 20px |  -38%       | título de pantalla   |
+     | text-4xl   |  39px  | 31px | 24px |  -38%       | M3 headline-small 24 |
+     | text-5xl   |  48px  | 37px | 30px |  -38%       | cifra destacada      |
+     | text-6xl   |  58px  | 44px | 36px |  -38%       | reservado (SOS)      |
 
-     (*) 16px es un piso DURO, no una preferencia: iOS Safari hace zoom
-     automático al enfocar un campo cuya letra mida menos de 16px, y los
-     primitivos de `components/ui/` usan `text-base`. Bajar este escalón un
-     solo píxel convierte cada formulario de la app en un salto de viewport en
-     iPhone. Si alguna vez hay que apretar más, se aprieta el espaciado.
+     LOS PISOS, y de dónde salen (son TRES, y desde el Sprint 14 ya no son el
+     mismo número):
 
-     Los interlineados bajan un escalón propio (1.6 → 1.5 en el cuerpo): la
-     caja de línea del texto base pasa de 28,8px a 24px, que es de dónde sale
-     la mayor parte de la densidad real de una lista larga. */
-  --text-xs: 0.7778rem; /* 14px */
-  --text-xs--line-height: 1.45;
-  --text-sm: 0.8333rem; /* 15px */
-  --text-sm--line-height: 1.45;
-  --text-base: 0.8889rem; /* 16px */
-  --text-base--line-height: 1.5;
-  --text-lg: 1rem; /* 18px */
-  --text-lg--line-height: 1.45;
-  --text-xl: 1.1111rem; /* 20px */
-  --text-xl--line-height: 1.35;
-  --text-2xl: 1.2778rem; /* 23px */
+       · **12px el texto secundario** y **14px el cuerpo**: los fija el ROADMAP
+         del Sprint 14. Coinciden con body-small y body-medium de Material 3,
+         que es el piso de una interfaz nativa legible, y con la tipografía de
+         esta app (Atkinson Hyperlegible, diseñada por el Braille Institute
+         para baja visión) sobran trazos distinguibles a esos tamaños. Por
+         debajo de ahí ya no es densidad, es letra chica de contrato.
+       · **16px en los CAMPOS de formulario**, que ya NO es lo mismo que
+         `text-base`. Hasta la v1 los dos números eran el mismo porque el
+         cuerpo medía 16px; ahora se separan y el piso viaja a donde
+         corresponde. iOS Safari hace zoom automático al enfocar un `input`,
+         `select` o `textarea` cuya letra mida menos de 16px, y eso —un salto
+         de viewport en cada campo— es un problema de los CAMPOS, no del texto
+         de la app. Lo garantiza la regla sin capa que está debajo de este
+         bloque, no el escalón `text-base`.
+
+     Los interlineados bajan con la escala y se apoyan en los mismos
+     benchmarks: el cuerpo queda en 14×1,4 = 19,6px (Material especifica
+     14sp/20sp) contra los 24px de la v1, que es de donde sale la mayor parte
+     de la densidad real de una lista larga. */
+  --text-xs: 0.6667rem; /* 12px */
+  --text-xs--line-height: 1.35;
+  --text-sm: 0.7222rem; /* 13px */
+  --text-sm--line-height: 1.38;
+  --text-base: 0.7778rem; /* 14px */
+  --text-base--line-height: 1.4;
+  --text-lg: 0.8333rem; /* 15px */
+  --text-lg--line-height: 1.35;
+  --text-xl: 0.8889rem; /* 16px */
+  --text-xl--line-height: 1.3;
+  --text-2xl: 1rem; /* 18px */
   --text-2xl--line-height: 1.25;
-  --text-3xl: 1.4444rem; /* 26px */
+  --text-3xl: 1.1111rem; /* 20px */
   --text-3xl--line-height: 1.2;
-  --text-4xl: 1.7222rem; /* 31px */
-  --text-4xl--line-height: 1.12;
-  --text-5xl: 2.0556rem; /* 37px */
-  --text-5xl--line-height: 1.08;
-  --text-6xl: 2.4444rem; /* 44px */
+  --text-4xl: 1.3333rem; /* 24px */
+  --text-4xl--line-height: 1.15;
+  --text-5xl: 1.6667rem; /* 30px */
+  --text-5xl--line-height: 1.1;
+  --text-6xl: 2rem; /* 36px */
   --text-6xl--line-height: 1.05;
 
   /* UNIDAD DE ESPACIADO. Es el token del que cuelga TODA la escala de
      espaciado de Tailwind 4: `p-4` compila a `calc(var(--spacing) * 4)`,
-     `gap-3` a `calc(var(--spacing) * 3)`, `size-10` a
-     `calc(var(--spacing) * 10)`. Redefinirlo acá comprime paddings, gaps,
-     márgenes y tamaños de ícono de toda la app de una sola vez —incluido
-     `--card-spacing` de las tarjetas de shadcn, que también es un múltiplo de
-     esta unidad—.
+     `gap-3` a `calc(var(--spacing) * 3)`, `size-7` a
+     `calc(var(--spacing) * 7)`. Redefinirlo acá comprime paddings, gaps,
+     márgenes y tamaños de ícono de toda la app de una sola vez.
 
-     4,5px → 4px es -11%: el mismo orden que la tipografía, para que la
-     relación entre texto y aire no se distorsione, y encima cae exactamente
-     sobre la grilla de 4px. Un valor más agresivo acá sería un atajo: la
-     densidad que falta la aportan las tandas de rediseño reorganizando
-     grillas y listas con `chica:`, no apretando el aire hasta que los
-     controles se toquen entre sí. */
-  --spacing: 0.2222rem; /* 4px, contra 4,5px del modo grande */
+     4,5px (grande) → 4px (v1) → **3,5px (v2)**. Los escalones que la app usa
+     de verdad aterrizan así: `gap-2` = 7px, `p-3`/`gap-3` = 10,5px,
+     `p-4`/`gap-4` = 14px, `p-5` = 17,5px, `size-7` = 24,5px (el ícono de la
+     bottom nav, contra los 24dp que pide Material), `size-5` = 17,5px. Es la
+     grilla de 4/8/12/16 de Material corrida un 12% hacia adentro, que es
+     exactamente lo que un modo compacto debería ser.
 
-  /* OBJETIVOS TÁCTILES. El piso baja de 48px a 40px —el mínimo que fija el
-     ROADMAP para el modo compacto—, y se mantiene la forma `max(px, rem)`
-     para que sigan creciendo si la persona agranda la tipografía del sistema.
+     ⚠️ CONSECUENCIA QUE HAY QUE CONOCER: por debajo de 4px, las alturas
+     LITERALES de la escala dejan de cumplir el piso táctil. `h-10` medía
+     40px justos con la unidad en 4px y mide 35px con 3,5px. Los dos lugares
+     donde eso pasaba —`size="sm"`/`size="icon-sm"` de
+     `components/ui/button.tsx` y `data-[size=sm]` de
+     `components/ui/select.tsx`— llevan ahora su `chica:` que los devuelve al
+     token `--spacing-tactil`. Al escribir una pantalla nueva: alturas por
+     token (`min-h-tactil`, `size-tactil`, `objetivo-tactil`), nunca literales. */
+  --spacing: 0.1944rem; /* 3,5px, contra 4,5px del modo grande */
 
-     La escalera queda desplazada un escalón, que es lo elegante del caso: el
-     objetivo "amplio" del modo compacto (48px) es exactamente el objetivo
-     NORMAL del modo grande. Nadie termina con un control más chico que 40px
-     ni con uno que la mano no encuentre. */
+  /* OBJETIVOS TÁCTILES. El piso se queda en 40px —el mínimo que fija el
+     ROADMAP para el modo compacto y el único número de este bloque que la v2
+     NO mueve—, y se mantiene la forma `max(px, rem)` para que sigan creciendo
+     si la persona agranda la tipografía del sistema.
+
+     El objetivo "amplio" sí baja, de 48px a 44px: es el mínimo táctil de iOS
+     HIG y el alto de una fila de tabla de UIKit, así que la escalera compacta
+     queda 40 / 44, que es la de una app nativa, en vez de 40 / 48. */
   --spacing-tactil: max(40px, 2.25rem); /* 40,5px por defecto */
-  --spacing-tactil-amplio: max(48px, 2.75rem); /* 49,5px por defecto */
+  --spacing-tactil-amplio: max(44px, 2.5rem); /* 45px por defecto */
 
   /* El botón SOS también se compacta (decisión del usuario, ROADMAP Sprint
-     13), pero sigue siendo el control más grande de la app por un margen
-     amplio: 58,5px contra los 40,5px del objetivo táctil compacto. Un botón
-     de emergencia que se confunda con un botón común no sirve, y en el modo
-     compacto la distancia relativa contra el resto de los controles crece
-     (1,44× contra 1,36× en el modo grande). */
+     13) pero la v2 NO lo toca: mantiene su excepción alta a propósito. Con
+     todo lo demás 20-38% más chico, dejarlo en 58,5px lo vuelve todavía más
+     dominante frente a los 40,5px del objetivo táctil compacto (1,44×). Un
+     botón de emergencia que se confunda con un botón común no sirve. */
   --spacing-sos-boton: max(56px, 3.25rem); /* 58,5px por defecto */
 
-  /* Bottom nav: 85,5px → 72px. Sigue entrando el ícono (20px) más su etiqueta
-     de texto -que nunca se saca, regla Senior UX del ROADMAP- con aire
-     suficiente. El shell de app/(app)/(con-nav)/layout.tsx reserva este mismo
-     token como padding inferior del contenido, así que el hueco se ajusta
-     solo. */
-  --spacing-bottom-nav: 4rem; /* 72px por defecto */
+  /* Bottom nav: 85,5px (grande) → 72px (v1) → 64px (v2). Sigue entrando el
+     ícono -`size-7`, o sea 24,5px, el tamaño nativo de Material- más su
+     etiqueta de texto de 12px, que nunca se saca (regla Senior UX del
+     ROADMAP), con 10px de aire arriba y abajo. Es la tab bar de iOS (49pt) y
+     la nav bar de Material (80dp) promediadas hacia abajo, que es donde vive
+     una nav de app real de cuatro accesos con etiqueta.
 
-  /* Radios: 13,5px → 11,25px. Un radio que no acompaña la reducción se ve
-     desproporcionado en una tarjeta más chica -la curva se come el contenido-.
-     Toda la escala derivada (`rounded-sm` a `rounded-4xl`) se recalcula sola
-     porque el bloque `@theme inline` de la sección 3 la define como múltiplos
-     de este token. */
-  --radius: 0.625rem;
+     El shell de app/(app)/(con-nav)/layout.tsx reserva este mismo token como
+     padding inferior del contenido, así que los 8px que se liberan se los
+     queda el contenido sin tocar una línea del layout. */
+  --spacing-bottom-nav: 3.5556rem; /* 64px por defecto */
+
+  /* Radios: 13,5px (grande) → 11,25px (v1) → 10px (v2), que es el radio de
+     una tarjeta agrupada de iOS y queda entre `corner-small` (8dp) y
+     `corner-medium` (12dp) de Material. Toda la escala derivada
+     (`rounded-sm` a `rounded-4xl`) se recalcula sola porque el bloque
+     `@theme inline` de la sección 3 la define como múltiplos de este token:
+     `rounded-lg` = 10px, `rounded-xl` = 14px (las tarjetas). */
+  --radius: 0.5556rem;
 
   /* COMPENSACIÓN DE CONTRASTE (la parte que no es geometría).
      WCAG mide contraste sin mirar el tamaño salvo por el corte de "texto
      grande", pero la percepción sí: los mismos trazos, más finos y más
-     juntos, se leen peor. Dos tokens se endurecen apenas en el modo compacto:
+     juntos, se leen peor. Dos tokens se endurecen en el modo compacto, y la
+     v2 los endurece un escalón MÁS porque el texto que los usa se achicó otra
+     vez (el secundario pasó de 15px a 13px):
 
-       · `--muted-foreground`: el texto secundario pasa de 17px a 15px, que es
-         donde más se nota. Medido contra el fondo de página, sube de 6,40:1 a
-         7,39:1 en claro y de 8,34:1 a 9,41:1 en oscuro.
+       · `--muted-foreground`: contra el fondo de página sube de 6,40:1 (base)
+         a 7,75:1 en claro y de 8,34:1 a 9,60:1 en oscuro.
        · `--borde-sutil`: la hairline que separa filas dentro de una tarjeta
          tiene que trabajar más cuando las filas están más cerca.
 
      No son colores nuevos: son el mismo tono y el mismo croma, con la
      luminosidad corrida hacia el contraste. `node scripts/verificar-contraste.mjs`
      los mide en las cuatro combinaciones de tema × densidad. */
-  --muted-foreground: oklch(0.43 0.021 165);
-  --borde-sutil: oklch(0.855 0.013 155);
+  --muted-foreground: oklch(0.415 0.022 165);
+  --borde-sutil: oklch(0.845 0.013 155);
 }
 
 /* La densidad y el tema son ejes independientes y los dos se escriben en el
@@ -523,8 +573,44 @@ html[data-tamano="chica"] {
    compuesto sin descendencia, y no `.dark html[...]`. Especificidad 0-2-1,
    le gana a `.dark` (0-1-0) y a `html[data-tamano="chica"]` (0-1-1). */
 html.dark[data-tamano="chica"] {
-  --muted-foreground: oklch(0.79 0.019 155);
-  --borde-sutil: oklch(0.39 0.017 168);
+  --muted-foreground: oklch(0.805 0.02 155);
+  --borde-sutil: oklch(0.405 0.017 168);
+}
+
+/* ---------------------------------------------------------------------------
+   EL PISO DE 16px DE LOS CAMPOS — la única regla de este archivo que vive
+   FUERA DE TODA CAPA, y por qué tiene que ser así.
+
+   iOS Safari hace zoom automático al enfocar un `input`, `select` o
+   `textarea` cuya letra computada mida menos de 16px. Hasta la v1 eso lo
+   garantizaba el escalón `text-base` (16px), pero en la v2 el cuerpo mide
+   14px y los primitivos de `components/ui/` siguen usando `text-base`: sin
+   esta regla, cada campo de cada formulario sería un salto de viewport en
+   iPhone.
+
+   La alternativa obvia -mantener `text-base` en 16px- fue la que hizo que la
+   v1 se sintiera de escritorio: ataba el tamaño del CUERPO DE TEXTO de la app
+   entera a una restricción que en realidad es de tres elementos de
+   formulario. La v2 separa las dos cosas y le pone el piso a los tres.
+
+   ¿Por qué sin capa? Porque `@layer base` PERDERÍA. Tailwind 4 declara
+   `@layer theme, base, components, utilities`, y en el orden de capas la
+   última gana sin importar la especificidad: `text-base` (una utilidad) le
+   ganaría a cualquier regla que escribiéramos en `base`, por específica que
+   fuese. El CSS sin capa, en cambio, gana sobre TODAS las capas. Es la
+   herramienta correcta para un piso de accesibilidad que no debe poder
+   pisarse por accidente desde una clase de una pantalla.
+
+   `max(16px, 0.8889rem)`: 16px con la raíz por defecto, y crece si la persona
+   agrandó la tipografía del sistema operativo -la misma forma que los tokens
+   táctiles, por el mismo motivo-. Solo se toca el tamaño de letra: el alto lo
+   siguen fijando `min-h-tactil` y compañía.
+
+   Alcance: SOLO el modo compacto. En grande no hace falta (los campos miden
+   18px) y tocarlo violaría la regla 1 de docs/densidad.md §4.
+   --------------------------------------------------------------------------- */
+html[data-tamano="chica"] :is(input, select, textarea) {
+  font-size: max(16px, 0.8889rem);
 }
 
 /* ===========================================================================

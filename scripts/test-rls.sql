@@ -3969,15 +3969,41 @@ update public.family_permissions
    set can_manage = true
  where owner_profile_id = :p_a and granted_profile_id = :p_b;
 
--- El default del producto es el modo grande, y toda fila existente lo heredó
--- del `ALTER TABLE ... DEFAULT` sin migración de datos.
+-- El default del producto pasó a ser el modo CHICO en el Sprint 14 (migración
+-- 20260817150000): quien no eligió nada ve la densidad nativa. Toda fila que no
+-- haya elegido explícitamente tiene que estar ahí — las de este arnés, que se
+-- crean sin nombrar la columna, y las del seed.
+--
+-- La excepción es deliberada y está en el seed: el perfil de Diego
+-- (660e8400-…0002) declara `display_density = 'grande'` a mano, para que la
+-- demo tenga las DOS densidades y para que se vea que una elección explícita
+-- convive con el default nuevo. Se la excluye del conteo por id y se la
+-- verifica aparte, en vez de aflojar el conteo: así el caso sigue detectando
+-- cualquier OTRA fila que se haya desviado del default.
 select pruebas_rls.registrar('17. densidad',
-       'Toda fila de profiles arranca en el modo grande (default de la columna)',
-       '0 filas distintas de grande',
-       count(*) || ' filas distintas de grande')
-  from public.profiles where display_density <> 'grande';
+       'Toda fila de profiles que no eligió arranca en el modo chico (default nuevo)',
+       '0 filas distintas de chica',
+       count(*) || ' filas distintas de chica')
+  from public.profiles
+ where display_density <> 'chica'
+   and id <> '660e8400-e29b-41d4-a716-446655440002'::uuid;
+
+-- La contracara: la elección explícita del seed sigue en pie. Corre sobre la
+-- base que deja `npx supabase db reset` (migraciones + seed), que es la forma
+-- documentada de correr este arnés; si la fila no estuviera, el caso lo dice
+-- con todas las letras en vez de pasar por no encontrar el objetivo.
+select pruebas_rls.registrar('17. densidad',
+       'La elección explícita del seed (Diego en grande) convive con el default nuevo',
+       'grande',
+       coalesce((select display_density::text from public.profiles
+                  where id = '660e8400-e29b-41d4-a716-446655440002'),
+                'no existe la fila del seed'));
 
 -- ── El titular SÍ cambia la suya.
+-- Cambia a 'grande' y no a 'chica': desde que 'chica' es el default, un UPDATE
+-- a 'chica' no distinguiría "se escribió" de "estaba así", y además el trigger
+-- (`is distinct from`) ni siquiera se despertaría. 'grande' es el único valor
+-- que no puede salir de un default.
 begin;
 select set_config('request.jwt.claims', :jwt_a, true);
 set local role authenticated;
@@ -3985,7 +4011,7 @@ set local role authenticated;
 do $$
 declare v integer;
 begin
-    update public.profiles set display_density = 'chica'
+    update public.profiles set display_density = 'grande'
      where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     get diagnostics v = row_count;
     perform pruebas_rls.registrar('17. densidad',
@@ -3994,7 +4020,7 @@ begin
 end $$;
 
 select pruebas_rls.registrar('17. densidad',
-       'El valor quedó persistido en la fila de A', 'chica', display_density::text)
+       'El valor quedó persistido en la fila de A', 'grande', display_density::text)
   from public.profiles where id = :p_a;
 
 -- Nadie más que el titular: A administra el perfil GESTIONADO de Rosa (:p_g3,
@@ -4007,11 +4033,16 @@ select pruebas_rls.registrar('17. densidad',
 -- encuentra fila no lanza nada — la prueba "pasaba por no existir el objetivo".
 -- Reportar cuántas filas tocó convierte ese escenario en un resultado distinto
 -- y visible ('sin fila objetivo') en vez de un falso 'cambiado'.
+--
+-- El valor que se intenta escribir tiene que ser el que NO es el default
+-- ('grande' desde el Sprint 14): el trigger compara con `is distinct from`, así
+-- que reenviarle a un perfil gestionado su propio 'chica' no sería un cambio y
+-- pasaría legítimamente, dejando el caso vacío.
 do $$
 declare v text; n integer;
 begin
     begin
-        update public.profiles set display_density = 'chica'
+        update public.profiles set display_density = 'grande'
          where id = 'f0000000-0000-4000-8000-00000000f001';
         get diagnostics n = row_count;
         v := case when n = 0 then 'sin fila objetivo' else 'cambiado' end;
@@ -4035,7 +4066,7 @@ do $$
 declare v text;
 begin
     begin
-        update public.profiles set display_density = 'grande'
+        update public.profiles set display_density = 'chica'
          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
         v := 'cambiado';
     exception when insufficient_privilege then v := 'rechazado (42501)';
@@ -4047,7 +4078,7 @@ begin
 end $$;
 
 select pruebas_rls.registrar('17. densidad',
-       'La preferencia de A siguió intacta después del intento de B', 'chica',
+       'La preferencia de A siguió intacta después del intento de B', 'grande',
        (select display_density::text from public.profiles
          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'));
 
@@ -4091,7 +4122,7 @@ end $$;
 -- LECTURA SÍ ES VISIBLE" en la migración 20260814120000 y docs/densidad.md §6.
 select pruebas_rls.registrar('17. densidad',
        'B (autorizado sobre A) LEE la preferencia de A: se acepta a propósito, no es dato de salud',
-       'chica',
+       'grande',
        (select display_density::text from public.profiles
          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'));
 
@@ -4104,11 +4135,16 @@ commit;
 -- `profiles_densidad_solo_con_cuenta`, y tiene que alcanzar: un bug de un job
 -- con service_role tampoco puede dejar una preferencia colgada de un perfil que
 -- nadie usa para mirar.
+--
+-- El valor probado es 'grande' porque el CHECK clava los perfiles gestionados
+-- en el DEFAULT de la columna, y desde el Sprint 14 ese default es 'chica'
+-- (migración 20260817150000 §4). Escribirles 'chica' sería escribirles lo que
+-- ya tienen; 'grande' es lo que el CHECK tiene que rechazar.
 do $$
 declare v text; n integer;
 begin
     begin
-        update public.profiles set display_density = 'chica'
+        update public.profiles set display_density = 'grande'
          where id = 'f0000000-0000-4000-8000-00000000f001';
         get diagnostics n = row_count;
         v := case when n = 0 then 'sin fila objetivo' else 'cambiado' end;
@@ -4141,9 +4177,11 @@ select pruebas_rls.registrar('17. densidad',
          where t.typname = 'display_density'));
 
 -- Se restaura el estado para no arrastrar la preferencia ni el grupo sanguíneo
--- editado a los totales de otras corridas.
-update public.profiles set display_density = 'grande' where id = :p_a;
-update public.profiles set blood_type = 'A+'           where id = :p_a;
+-- editado a los totales de otras corridas: la fila de A vuelve al DEFAULT del
+-- producto ('chica' desde el Sprint 14), que es donde la encontró el primer
+-- caso de este bloque.
+update public.profiles set display_density = 'chica' where id = :p_a;
+update public.profiles set blood_type = 'A+'          where id = :p_a;
 
 
 -- =============================================================================
@@ -4443,9 +4481,13 @@ select pruebas_rls.registrar('19. alta de cuenta',
        (select coalesce(created_by_profile_id::text, 'NULL') from public.profiles
          where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
 
+-- El trigger de alta no nombra `display_density`: la fila toma el DEFAULT de la
+-- columna, que el Sprint 14 movió a 'chica' (migración 20260817150000 §2). Este
+-- caso es el que ata las dos migraciones: si alguien cambiara el default sin
+-- pasar por acá, se enteraría en esta línea.
 select pruebas_rls.registrar('19. alta de cuenta',
-       'El perfil nace en el modo de letra grande (default del producto)',
-       'grande',
+       'El perfil nace en el modo de letra chica (default del producto desde el Sprint 14)',
+       'chica',
        (select display_density::text from public.profiles
          where user_id = 'f1900aaa-1111-4111-8111-111111111111'));
 

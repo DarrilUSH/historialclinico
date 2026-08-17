@@ -65,6 +65,19 @@ values ('$U_A','00000000-0000-0000-0000-000000000000','authenticated','authentic
         'maria@ejemplo.ar','x',now(),now(),now(),'{"provider":"email"}','{}'),
        ('$U_B','00000000-0000-0000-0000-000000000000','authenticated','authenticated',
         'diego@ejemplo.ar','x',now(),now(),now(),'{"provider":"email"}','{}');
+-- El trigger `auth_users_crear_perfil_de_cuenta` (migración 20260814140000, el
+-- hotfix del alta de cuenta) YA le creó a cada cuenta de arriba su perfil
+-- propio, con un id ALEATORIO. Este arnés necesita ids FIJOS -las rutas de
+-- Storage son `{profile_id}/...` y las políticas los comparan contra
+-- `family_permissions`-, así que descarta el perfil automático y carga el suyo.
+--
+-- Sin este DELETE, el INSERT de abajo choca contra `profiles_user_id_unico`, los
+-- perfiles P_A y P_B no existen, y las SEIS pruebas de camino feliz de este
+-- script fallan con 400. Es exactamente el mismo paso que ya hacen
+-- `supabase/seed.sql` §2 y `scripts/test-rls.sql`; este script se quedó sin
+-- adaptar cuando entró aquel hotfix.
+delete from public.profiles where user_id in ('$U_A','$U_B');
+
 insert into public.profiles (id, user_id, full_name) values
   ('$P_A','$U_A','María Gómez'), ('$P_B','$U_B','Diego Gómez');
 SQL

@@ -150,8 +150,18 @@ beforeEach(() => {
    ------------------------------------------------------------------------- */
 
 describe("lib/densidad/tamano.ts", () => {
-  it("el default del producto es el modo grande", () => {
-    expect(TAMANO_POR_DEFECTO).toBe("grande")
+  /**
+   * Sprint 14: el default se invirtió. Hasta el Sprint 13 era `grande` porque
+   * lo compacto era "la app apretada"; con la retokenización nativa de
+   * `app/globals.css` §5 lo compacto pasó a ser la densidad que cualquiera
+   * reconoce como la de una app de celular, y el default del producto se mudó
+   * ahí. El modo grande queda a un toque del botón A/a y, elegido, se recuerda.
+   *
+   * El espejo del lado de la base es el `alter column ... set default 'chica'`
+   * de `supabase/migrations/20260817150000_default_chica.sql` §2.
+   */
+  it("el default del producto es el modo chico", () => {
+    expect(TAMANO_POR_DEFECTO).toBe("chica")
   })
 
   /**
@@ -207,19 +217,26 @@ describe("lib/densidad/tamano.ts", () => {
    2. Resolución
    ------------------------------------------------------------------------- */
 
+/**
+ * Nota de lectura para todo este bloque (Sprint 14): desde que el default es
+ * `chica`, un caso que espere `"chica"` pasaría igual aunque la resolución
+ * estuviera rota y cayera al default. Por eso los caminos que tienen que
+ * demostrar que se leyó ALGO —la cookie, la fila de la base— usan `"grande"`,
+ * que es el único valor que no puede salir de un fallback.
+ */
 describe("obtenerTamano", () => {
   it("con cookie válida devuelve ese modo SIN consultar la base", async () => {
-    almacenCookies.set(COOKIE_TAMANO, "chica")
+    almacenCookies.set(COOKIE_TAMANO, "grande")
 
-    expect(await obtenerTamano()).toBe("chica")
+    expect(await obtenerTamano()).toBe("grande")
     expect(mockCreateClient).not.toHaveBeenCalled()
     expect(mockClient.auth.getUser).not.toHaveBeenCalled()
   })
 
-  it("con cookie 'grande' devuelve grande, también sin consultar", async () => {
-    almacenCookies.set(COOKIE_TAMANO, "grande")
+  it("con cookie 'chica' devuelve chica, también sin consultar", async () => {
+    almacenCookies.set(COOKIE_TAMANO, "chica")
 
-    expect(await obtenerTamano()).toBe("grande")
+    expect(await obtenerTamano()).toBe("chica")
     expect(mockCreateClient).not.toHaveBeenCalled()
   })
 
@@ -230,9 +247,9 @@ describe("obtenerTamano", () => {
 
   it("sin cookie y con sesión lee la fila de la CUENTA (user_id = auth.uid())", async () => {
     conSesion()
-    mockClient.__responderLectura({ data: { display_density: "chica" }, error: null })
+    mockClient.__responderLectura({ data: { display_density: "grande" }, error: null })
 
-    expect(await obtenerTamano()).toBe("chica")
+    expect(await obtenerTamano()).toBe("grande")
 
     expect(mockClient.from).toHaveBeenCalledWith("profiles")
     const filtro = mockClient.__llamadas.find((l) => l.metodo === "eq")
@@ -241,19 +258,19 @@ describe("obtenerTamano", () => {
 
   it("resuelto desde la base, deja la cookie espejo escrita", async () => {
     conSesion()
-    mockClient.__responderLectura({ data: { display_density: "chica" }, error: null })
+    mockClient.__responderLectura({ data: { display_density: "grande" }, error: null })
 
     await obtenerTamano()
 
-    expect(almacenCookies.get(COOKIE_TAMANO)).toBe("chica")
+    expect(almacenCookies.get(COOKIE_TAMANO)).toBe("grande")
   })
 
   it("una cookie con basura se ignora y manda la base", async () => {
     almacenCookies.set(COOKIE_TAMANO, "gigante")
     conSesion()
-    mockClient.__responderLectura({ data: { display_density: "chica" }, error: null })
+    mockClient.__responderLectura({ data: { display_density: "grande" }, error: null })
 
-    expect(await obtenerTamano()).toBe("chica")
+    expect(await obtenerTamano()).toBe("grande")
   })
 
   it("con sesión pero sin fila de perfil cae al default", async () => {
@@ -280,7 +297,8 @@ describe("obtenerTamano", () => {
   /**
    * El atributo `data-tamano` se pinta en `<html>`: si esta función lanzara,
    * se caería el render de TODA la app —incluida `/sos`— por no poder leer una
-   * preferencia de interfaz. El default grande es el modo seguro.
+   * preferencia de interfaz. Caer en `TAMANO_POR_DEFECTO` es la salida segura:
+   * la app se pinta igual que en el camino feliz y nadie se entera del fallo.
    */
   it("si el cliente de Supabase explota cae al default en vez de lanzar", async () => {
     almacenCookies.set(COOKIE_TAMANO, "no-es-un-modo")
@@ -317,7 +335,9 @@ describe("cookie espejo", () => {
   })
 
   it("sincronizarCookieTamano sin preferencia guardada deja el default", async () => {
-    almacenCookies.set(COOKIE_TAMANO, "chica")
+    // La cookie de partida es la del OTRO modo (el que no es el default): si
+    // fuera ya la del default, el caso pasaría sin hacer nada.
+    almacenCookies.set(COOKIE_TAMANO, "grande")
     conSesion()
     mockClient.__responderLectura({ data: null, error: null })
 

@@ -5,6 +5,10 @@
 --   - 2 usuarios en auth.users (María y Diego)
 --   - 3 perfiles: María (con cuenta), Diego (con cuenta), Roberto (gestionado)
 --   - Familia del modelo de permisos: María administra a Roberto, Diego solo ve
+--   - Densidad (Sprint 14): María hereda el default nuevo ('chica'), Diego elige
+--     'grande' explícito, Roberto la lleva inerte en el default por ser un
+--     perfil gestionado. Las dos cuentas miran el MISMO perfil con densidades
+--     distintas, que es la idea central de docs/densidad.md §1.
 --   - Datos de Roberto: 5 documentos, 20 métricas de lab, 3 turnos, 2 medicaciones,
 --     algunas tomas registradas, 10 signos vitales, 2 médicos, 1 cobertura, 1 suscripción push
 --
@@ -125,9 +129,33 @@ insert into public.profiles (
 ) on conflict (id) do nothing;
 
 -- Diego Gómez (titular, con cuenta, familiar)
+--
+-- `display_density = 'grande'` EXPLÍCITO, y es el único lugar de todo el seed
+-- donde esta columna se escribe a mano (Sprint 14, tarea 14.1). Tres cosas que
+-- conviene tener claras antes de tocarlo:
+--
+--   1. **Desde el Sprint 14 el default de la columna es 'chica'** (migración
+--      20260817150000). María, que no la declara, la hereda: es la cuenta que
+--      "ve bien" del guion del ROADMAP y le corresponde la densidad nativa.
+--   2. **Diego representa a quien prefiere el modo grande.** En el guion ese
+--      papel es de Roberto (80 años), pero Roberto NO PUEDE tenerlo: su perfil
+--      es gestionado (`user_id is null`), nunca inicia sesión, y el CHECK
+--      `profiles_densidad_solo_con_cuenta` clava su densidad en el default
+--      justamente porque un perfil que no mira nada no tiene preferencia (ver
+--      la migración 20260814120000, "PERFILES GESTIONADOS"). La preferencia es
+--      de quien MIRA, y en el seed los que miran son María y Diego.
+--   3. **Es lo que hace demostrable la idea central del subsistema.** Con esta
+--      línea, las dos cuentas del seed miran EL MISMO perfil (el de Roberto) y
+--      lo ven con densidades distintas: María compacta, Diego grande. Sin ella,
+--      después del cambio de default el seed entero sería chica y esa
+--      distinción no se podría demostrar en la demo.
+--
+-- Sirve además de prueba viva de que una elección explícita convive con el
+-- default nuevo: el CHECK la acepta (tiene cuenta) y ninguna migración la pisa.
 insert into public.profiles (
     id, user_id, full_name, date_of_birth, role,
     blood_type, allergies, chronic_conditions,
+    display_density,
     created_at, updated_at
 ) values (
     '660e8400-e29b-41d4-a716-446655440002'::uuid,
@@ -138,6 +166,7 @@ insert into public.profiles (
     'O-',
     '{}',
     '{}',
+    'grande',
     now(),
     now()
 ) on conflict (id) do nothing;
@@ -152,12 +181,27 @@ insert into public.profiles (
 -- se le manda a Gemini. Con las columnas en NULL, esa verificación contra el
 -- seed sería vacua: no se puede probar que no viaja un dato que no existe.
 -- Ver `docs/minimizacion-datos.md` §7.3.
+--
+-- `display_density = 'chica'` EXPLÍCITO, y no significa que Roberto prefiera la
+-- letra chica: significa que **no tiene preferencia**. Un perfil gestionado no
+-- tiene cuenta, nunca inicia sesión y nunca mira nada, así que su densidad es
+-- inerte y el CHECK `profiles_densidad_solo_con_cuenta` la clava en el DEFAULT
+-- de la columna —que desde el Sprint 14 es 'chica' (migración 20260817150000)—.
+-- La densidad con la que se ve el historial de Roberto sale siempre de la fila
+-- de la cuenta que lo esté mirando: María lo ve compacto, Diego lo ve grande.
+--
+-- Se escribe a mano en vez de dejarlo al default a propósito: si algún día el
+-- default de la columna volviera a moverse, este INSERT se caería contra el
+-- CHECK y obligaría a revisar este comentario, en vez de quedar desalineado en
+-- silencio. Es la misma clase de red que la constante de legales duplicada en
+-- `completar_alta_de_cuenta`.
 insert into public.profiles (
     id, user_id, full_name, national_id, phone, date_of_birth, role,
     created_by_profile_id,
     blood_type, allergies, chronic_conditions,
     critical_medication, emergency_contact, emergency_contact_phone,
     emergency_contact_relationship, sos_notes,
+    display_density,
     created_at, updated_at
 ) values (
     '660e8400-e29b-41d4-a716-446655440003'::uuid,
@@ -176,6 +220,7 @@ insert into public.profiles (
     '+54 9 2901 234567',
     'Hija',
     'Marcapasos colocado en 2019. Usa lentes. Prefiere atención en español.',
+    'chica',
     now(),
     now()
 ) on conflict (id) do nothing;

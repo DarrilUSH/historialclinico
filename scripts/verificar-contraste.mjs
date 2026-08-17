@@ -282,12 +282,15 @@ const GRUPOS = [
   {
     grupo: "Botón SOS (Sprint 8)",
     pares: [
-      // `components/inicio/boton-sos.tsx`: `text-xl font-bold`. En grande son
-      // 24px y en compacta 20px; las dos veces por encima del corte de 14pt en
-      // negrita, así que el par se mide contra 3:1 en los dos modos. Está a
-      // 1,3px del corte en compacta: si una tanda le sacara la negrita o le
-      // bajara el escalón, este par pasaría a exigir 4,5:1 y el script lo diría
-      // acá mismo en vez de dejarlo pasar.
+      // `components/inicio/boton-sos.tsx`: `text-xl font-bold`. **Es el único
+      // par del sistema que cambia de umbral entre densidades**, y desde el
+      // Sprint 14 el cambio es real y no hipotético: en grande mide 24px, por
+      // encima del corte de 14pt en negrita (18,66px), así que le alcanza 3:1;
+      // en compacta mide 16px, por debajo del corte, y pasa a exigir 4,5:1.
+      // Cumple los dos (5,77:1 en claro, 4,94:1 en oscuro) sin tocar un color,
+      // y el resumen del final del script lo lista por nombre. Este par es la
+      // razón de ser del check dual: con un solo umbral fijo, la
+      // retokenización del Sprint 14 lo habría aflojado en silencio.
       ["sos-foreground", "sos", texto("xl", { negrita: true }), "Etiqueta SOS sobre el rojo señal"],
       ["sos", "background", GRAFICO, "Botón SOS contra el fondo de página"],
       ["sos", "card", GRAFICO, "Botón SOS contra una tarjeta"],
@@ -455,20 +458,63 @@ if (!mTactil) {
   );
 }
 
-// 3. Piso de 16px del cuerpo de texto: por debajo, iOS Safari hace zoom
-//    automático al enfocar un campo, y los primitivos de components/ui usan
-//    `text-base`.
-const PISO_CUERPO_PX = 16;
-const pxBaseChica = PX_CHICA.get("base");
-if (pxBaseChica === undefined || pxBaseChica < PISO_CUERPO_PX - 0.01) {
+// 3. Piso de 16px en los CAMPOS de formulario: por debajo, iOS Safari hace
+//    zoom automático al enfocar un `input`, `select` o `textarea`.
+//
+//    Hasta el Sprint 13 este piso lo garantizaba el escalón `text-base`, que
+//    medía 16px. En el Sprint 14 el cuerpo bajó a 14px (métricas nativas,
+//    app/globals.css §5) y el piso se mudó a donde en realidad corresponde:
+//    una regla SIN CAPA que le pone `font-size: max(16px, …)` a los tres
+//    elementos de formulario. Sin capa y no en `@layer base` porque las
+//    utilidades de Tailwind viven en `@layer utilities`, que gana por orden de
+//    capas sin importar la especificidad — una regla en `base` perdería contra
+//    el `text-base` de los primitivos de `components/ui/`.
+//
+//    Esta invariante busca esa regla y verifica su piso. Si alguien la borra
+//    "porque el cuerpo ya mide bastante", el script lo dice acá.
+const PISO_CAMPO_PX = 16;
+const mCampos = css.match(
+  /html\[data-tamano="chica"\]\s*:is\(\s*input,\s*select,\s*textarea\s*\)\s*\{[^}]*?font-size:\s*max\(\s*(\d+)px/,
+);
+if (!mCampos) {
   fallas++;
   console.log(
-    `  FAIL  Cuerpo compacto: text-base mide ${pxBaseChica?.toFixed(1)}px y el piso es ${PISO_CUERPO_PX}px (auto-zoom de iOS en campos de formulario).`,
+    '  FAIL  Piso de los campos: no se encontró la regla sin capa html[data-tamano="chica"] :is(input, select, textarea)',
+  );
+  console.log(
+    `        con font-size: max(${PISO_CAMPO_PX}px, …). Sin ella, cada campo de formulario dispara el auto-zoom de iOS en modo compacto.`,
+  );
+} else if (Number(mCampos[1]) < PISO_CAMPO_PX) {
+  fallas++;
+  console.log(
+    `  FAIL  Piso de los campos: la regla declara ${mCampos[1]}px y el mínimo para no disparar el auto-zoom de iOS es ${PISO_CAMPO_PX}px.`,
   );
 } else {
   console.log(
-    `  PASS  Cuerpo compacto: text-base = ${pxBaseChica.toFixed(1)}px, no dispara el auto-zoom de iOS.`,
+    `  PASS  Piso de los campos: input/select/textarea compactos a max(${mCampos[1]}px, …), no disparan el auto-zoom de iOS.`,
   );
+}
+
+// 4. Pisos de LEGIBILIDAD del modo compacto (ROADMAP Sprint 14): el cuerpo no
+//    baja de 14px y el texto secundario no baja de 12px. Son los dos números
+//    que separan "densidad nativa" de "letra chica de contrato", y coinciden
+//    con `body-medium` y `body-small` de Material 3.
+const PISOS_LEGIBILIDAD = [
+  ["base", 14, "cuerpo"],
+  ["xs", 12, "texto secundario"],
+];
+for (const [escalon, piso, rol] of PISOS_LEGIBILIDAD) {
+  const px = PX_CHICA.get(escalon);
+  if (px === undefined || px < piso - 0.01) {
+    fallas++;
+    console.log(
+      `  FAIL  Legibilidad compacta: text-${escalon} (${rol}) mide ${px?.toFixed(1)}px y el piso del ROADMAP es ${piso}px.`,
+    );
+  } else {
+    console.log(
+      `  PASS  Legibilidad compacta: text-${escalon} (${rol}) = ${px.toFixed(1)}px, >= ${piso}px del ROADMAP.`,
+    );
+  }
 }
 
 console.log(`  Raíz leída de app/globals.css: 1rem = ${raizPx}px.`);

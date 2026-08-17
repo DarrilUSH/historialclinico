@@ -34,8 +34,18 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * `chica:[--card-spacing:--spacing(3.5)]` (Sprint 14): mismo ajuste, y por el
+ * mismo motivo, que el de `components/ui/card.tsx` -el padding y el gap
+ * internos de la tarjeta cuelgan los dos de este token-. Con la unidad de
+ * espaciado compacta (3,5px), 5 escalones dan 17,5px y 3,5 dan 12,25px, que es
+ * el padding de tarjeta densa de Material (12dp). Acá el `chica:` va a secas
+ * porque esta clase no tiene variantes de tamaño con las que empatar en
+ * especificidad: le gana al `[--card-spacing:--spacing(5)]` de la misma cadena
+ * por el atributo del <html> (0-2-0 contra 0-1-0).
+ */
 export const CLASE_TARJETA_BASE =
-  "flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card py-(--card-spacing) text-base text-card-foreground shadow-suave ring-1 ring-border [--card-spacing:--spacing(5)]"
+  "flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card py-(--card-spacing) text-base text-card-foreground shadow-suave ring-1 ring-border [--card-spacing:--spacing(5)] chica:[--card-spacing:--spacing(3.5)]"
 
 const BASE = CLASE_TARJETA_BASE
 

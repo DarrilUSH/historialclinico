@@ -37,7 +37,11 @@ import "server-only"
  *   2. Sin cookie (o con un valor que no es un modo) → se lee la fila de la
  *      cuenta. Sin sesión, `getUser()` corta sin salir a la red y esto termina
  *      en el default.
- *   3. Nada de lo anterior → `TAMANO_POR_DEFECTO` (grande).
+ *   3. Nada de lo anterior → `TAMANO_POR_DEFECTO`, que desde el Sprint 14 es
+ *      `chica` (ver el porqué en `lib/densidad/tamano.ts`). Es lo que hace que
+ *      `/login`, `/registro`, `/recuperar` y `/offline` —donde no hay fila que
+ *      leer— salgan ya en la densidad nativa, sin que nadie tenga que elegir
+ *      nada primero.
  */
 
 import { cache } from "react"
@@ -67,7 +71,13 @@ const MAX_AGE_COOKIE_SEGUNDOS = 400 * 24 * 60 * 60
  *
  * **Nunca lanza.** Este valor gobierna el atributo del `<html>`: un fallo
  * leyendo una preferencia de interfaz no puede tumbar el render de una app de
- * salud. Cualquier problema termina en el modo grande, que es el seguro.
+ * salud. Cualquier problema termina en `TAMANO_POR_DEFECTO`, que es el modo que
+ * ve todo el mundo mientras no elija otra cosa: la app se pinta igual que en el
+ * camino feliz y la persona no se entera de que hubo un problema. (Hasta el
+ * Sprint 14 ese fallback era además "el modo más accesible"; ahora el más
+ * accesible es el otro, y sigue estando a un toque del botón A/a. Un fallback
+ * que difiriera del default haría que un error de base se viera como un cambio
+ * de tamaño espontáneo, que es peor.)
  */
 export const obtenerTamano = cache(async (): Promise<Tamano> => {
   const cookieStore = await cookies()

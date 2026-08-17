@@ -323,39 +323,51 @@ La escala se comprime abajo a propósito: entre `text-xs` y `text-base` hay solo
 2px de diferencia porque el sistema se niega a tener texto chico. Lo que en
 otros proyectos sería "letra chica" acá sigue siendo legible.
 
-### 4.1 Modo compacto ("letra chica", Sprint 13)
+### 4.1 Modo compacto ("letra chica", Sprint 13; retokenizado en el Sprint 14)
 
 La cuenta puede activar un segundo modo, gobernado por el atributo
-`data-tamano="chica"` en `<html>` (contrato completo en la sección 10). No es
-un zoom sobre la escala de arriba: la reducción es progresiva y no uniforme,
-más floja abajo -donde el límite es la legibilidad- y más fuerte arriba -donde
-el límite es solo el aire de la pantalla-, así que ningún escalón pierde más
-de lo que puede permitirse perder.
+`data-tamano="chica"` en `<html>` (contrato completo en la sección 10, y el
+benchmark que justifica cada número en `docs/densidad.md` §5-bis). **Desde el
+Sprint 14 es el modo por defecto.**
 
-| Utilidad | Tamaño | px | Interlineado | Δ vs. grande |
-|---|---|---|---|---|
-| `text-xs` | 0.7778rem | 14px | 1.45 | -12% |
-| `text-sm` | 0.8333rem | 15px | 1.45 | -12% |
-| `text-base` | 0.8889rem | **16px** | **1.5** | -11% |
-| `text-lg` | 1rem | 18px | 1.45 | -14% |
-| `text-xl` | 1.1111rem | 20px | 1.35 | -17% |
-| `text-2xl` | 1.2778rem | 23px | 1.25 | -18% |
-| `text-3xl` | 1.4444rem | 26px | 1.2 | -19% |
-| `text-4xl` | 1.7222rem | 31px | 1.12 | -21% |
-| `text-5xl` | 2.0556rem | 37px | 1.08 | -23% |
-| `text-6xl` | 2.4444rem | 44px | 1.05 | -24% |
+No es un zoom sobre la escala de arriba, y desde el Sprint 14 tampoco es una
+reducción de ella: es la escala de **Material 3 / iOS HIG** escrita en los
+escalones que ya usa la app. La v1 del Sprint 13 se derivaba de la escala grande
+(-12% abajo, -24% arriba) y terminaba con 16px de cuerpo, que es el cuerpo de
+una app de escritorio; la v2 parte de `body-medium` (14sp) y `body-small`
+(12sp).
 
-`text-base` tiene un piso duro que no se cruza en ningún modo: 16px. Por
-debajo de eso, iOS Safari hace zoom automático al enfocar un campo de
-formulario, y los primitivos de `components/ui/` usan `text-base` en todos sus
-campos. Si algún día hace falta apretar más el modo compacto, se aprieta
-espaciado, no este escalón.
+| Utilidad | Tamaño | px | Interlineado | Δ vs. grande | Referencia nativa |
+|---|---|---|---|---|---|
+| `text-xs` | 0.6667rem | **12px** | 1.35 | -25% | M3 `body-small` 12sp |
+| `text-sm` | 0.7222rem | 13px | 1.38 | -24% | iOS `footnote` 13pt |
+| `text-base` | 0.7778rem | **14px** | **1.4** | -22% | M3 `body-medium` 14sp/20sp |
+| `text-lg` | 0.8333rem | 15px | 1.35 | -29% | iOS `subhead` 15pt |
+| `text-xl` | 0.8889rem | 16px | 1.3 | -33% | M3 `title-medium` 16sp |
+| `text-2xl` | 1rem | 18px | 1.25 | -36% | título de sección |
+| `text-3xl` | 1.1111rem | 20px | 1.2 | -38% | iOS `title3` 20pt |
+| `text-4xl` | 1.3333rem | 24px | 1.15 | -38% | M3 `headline-small` 24sp |
+| `text-5xl` | 1.6667rem | 30px | 1.1 | -38% | cifra destacada |
+| `text-6xl` | 2rem | 36px | 1.05 | -38% | reservado (SOS) |
 
-Vale la pena notar el patrón, porque no es casualidad: cada escalón chico cae,
-aproximadamente, sobre el escalón anterior de la escala grande (`text-lg`
-chica son 18px, lo mismo que `text-base` grande). Es lo que hace que la app se
-lea como la misma app en los dos modos, y no como una versión distinta con
-menos jerarquía.
+**Los pisos** (los tres, y ya no son el mismo número):
+
+- **14px el cuerpo** y **12px el secundario**: los fija el ROADMAP del Sprint
+  14. Con Atkinson Hyperlegible —una tipografía diseñada para baja visión— esos
+  tamaños se leen holgados; por debajo empieza a ser letra chica de contrato.
+- **16px los CAMPOS de formulario**, que hasta el Sprint 13 coincidía con
+  `text-base` y ahora no. iOS Safari hace zoom automático al enfocar un `input`,
+  `select` o `textarea` con menos de 16px, y eso es un problema de los campos,
+  no del texto de la app. Lo garantiza una regla **sin capa** al final de la
+  sección 5 de `globals.css` (`@layer base` perdería contra las utilidades:
+  el orden de capas gana sobre la especificidad). Atar el cuerpo entero a esa
+  restricción es lo que hacía que la v1 se sintiera de escritorio.
+
+El patrón de la v1 —cada escalón compacto sobre el escalón anterior del
+grande— se corrió: ahora cada escalón cae **dos** por debajo (`text-xl` chica
+son 16px, entre `text-xs` y `text-sm` del grande). La jerarquía interna se
+conserva porque la escala sigue siendo monótona y aplanada, no porque los
+números coincidan con los del otro modo.
 
 **Tracking.** Los valores por defecto de Tailwind aprietan demasiado para
 lectura senior. `tracking-tight` pasa de -0.025em a **-0.006em**, y el `body`
@@ -399,30 +411,38 @@ Ninguno de los valores del modo grande de arriba cambia ni un píxel cuando la
 cuenta activa el modo compacto (`data-tamano="chica"`, sección 10): lo que
 sigue son los tokens que solo existen, redefinidos, dentro de ese modo.
 
-`--spacing` baja de 0.25rem (4,5px) a `0.2222rem` (4px), -11%: la misma
-proporción que la tipografía, para que la relación entre texto y aire no se
-distorsione, y cae justo sobre la grilla de 4px. Como es la unidad de la que
-cuelga toda la escala de Tailwind, este único cambio comprime paddings, gaps,
-márgenes y tamaños de ícono de la app entera de una sola vez.
+`--spacing` baja de 0.25rem (4,5px) a `0.1944rem` (**3,5px** desde el Sprint
+14; era 4px en la v1). Como es la unidad de la que cuelga toda la escala de
+Tailwind, este único cambio comprime paddings, gaps, márgenes y tamaños de
+ícono de la app entera de una sola vez. Los escalones que la app usa de verdad
+caen en 7 / 10,5 / 14 / 17,5px —la grilla de 8/12/16 de Material corrida un 12%
+hacia adentro— y `size-7` queda en 24,5px, que es el ícono de navegación de
+24dp de Material.
 
-Los tres tokens táctiles y la bottom nav bajan con el mismo criterio, sin
+> ⚠️ **Consecuencia que hay que conocer al escribir pantallas nuevas.** Con la
+> unidad en 3,5px, las alturas LITERALES de la escala dejan de cumplir el piso
+> táctil: `h-10` medía 40px justos con la unidad en 4px y mide 35px con 3,5px.
+> Los dos lugares donde eso pasaba (`size="sm"` / `size="icon-sm"` de
+> `components/ui/button.tsx` y `data-[size=sm]` de `components/ui/select.tsx`)
+> llevan ahora su `chica:` que los devuelve al token. **Alturas de controles por
+> token** (`min-h-tactil`, `size-tactil`, `objetivo-tactil`), nunca literales.
+
+Los tokens táctiles, la bottom nav y el radio bajan con el mismo criterio, sin
 perforar nunca el piso de 40px que fija el ROADMAP para el modo compacto:
 
-| Token | Grande | Chica | Uso |
-|---|---|---|---|
-| `--spacing-tactil` | `max(48px, 2.75rem)` → 49,5px | `max(40px, 2.25rem)` → 40,5px | Piso de cualquier control interactivo |
-| `--spacing-tactil-amplio` | `max(56px, 3.25rem)` → 58,5px | `max(48px, 2.75rem)` → 49,5px | Controles de mayor jerarquía |
-| `--spacing-sos-boton` | `max(64px, 3.75rem)` → 67,5px | `max(56px, 3.25rem)` → 58,5px | Botón de emergencia (Sprint 8). Reservado a ese único uso |
-| `--spacing-bottom-nav` | `4.75rem` → 85,5px | `4rem` → 72px | Alto de la bottom nav fija; el shell la reserva también como padding inferior del contenido |
+| Token | Grande | Chica v1 | Chica v2 | Uso |
+|---|---|---|---|---|
+| `--spacing-tactil` | `max(48px, 2.75rem)` → 49,5px | `max(40px, 2.25rem)` → 40,5px | igual | Piso de cualquier control interactivo |
+| `--spacing-tactil-amplio` | `max(56px, 3.25rem)` → 58,5px | `max(48px, 2.75rem)` → 49,5px | `max(44px, 2.5rem)` → 45px | Controles de mayor jerarquía (44pt es el mínimo táctil de iOS) |
+| `--spacing-sos-boton` | `max(64px, 3.75rem)` → 67,5px | `max(56px, 3.25rem)` → 58,5px | igual | Botón de emergencia (Sprint 8). Reservado a ese único uso |
+| `--spacing-bottom-nav` | `4.75rem` → 85,5px | `4rem` → 72px | `3.5556rem` → 64px | Alto de la bottom nav fija; el shell la reserva también como padding inferior del contenido |
+| `--radius` | `0.75rem` → 13,5px | `0.625rem` → 11,25px | `0.5556rem` → 10px | Radio base; `rounded-lg` = 10px, `rounded-xl` (tarjetas) = 14px |
+| `--card-spacing` | 5 unidades → 22,5px | 5 unidades → 20px | 3,5 unidades → 12,25px | Padding y gap internos de la tarjeta (12dp de Material denso). Sale de un `chica:` en el primitivo, no del bloque de tokens |
 
-La escalera queda desplazada un escalón, y es lo elegante del caso: el
-objetivo "amplio" del modo compacto (49,5px) es, en la práctica, el objetivo
-normal del modo grande. Nadie termina con un control más chico que el piso
-compacto ni con uno que la mano no encuentre. El botón SOS, además, sigue
-siendo por lejos el control más grande de la app en los dos modos: la
-distancia relativa contra el objetivo táctil normal incluso crece en
-compacta (1,44× contra 1,36× en grande), así que nunca se confunde con un
-botón común.
+El botón SOS **no se toca en la v2, y es deliberado**: con todo lo demás 20-38%
+más chico, mantenerlo en 58,5px lo vuelve todavía más dominante frente al
+objetivo táctil compacto (1,44×, contra 1,36× en grande). Un botón de emergencia
+que se confunda con un botón común no sirve.
 
 **Radios.** `--radius: 0.75rem` (13.5px) en el modo grande, sin cambios. La
 escala del preset deriva de ahí: `rounded-sm` 8.1px, `rounded-md` 10.8px,
@@ -576,12 +596,18 @@ Medido en el navegador sobre el dev server (Chromium, `getComputedStyle`):
 ## 10. Densidad (modo de letra chica)
 
 Sprint 13 agregó un segundo eje además del tema claro/oscuro: el modo de
-densidad, con dos valores, grande (default) y chica (compacto). No es una
-preferencia cosmética menor -es una segunda escala completa, con su propia
-tipografía (sección 4.1), su propio espaciado y sus propios objetivos
-táctiles y radios (sección 5.1)-, pensada para cuentas que prefieren ver más
-contenido por pantalla a costa de algo de aire, sin resignar ninguna garantía
-de accesibilidad que tiene el modo grande.
+densidad, con dos valores, chica (compacto) y grande. No es una preferencia
+cosmética menor -es una segunda escala completa, con su propia tipografía
+(sección 4.1), su propio espaciado y sus propios objetivos táctiles y radios
+(sección 5.1)-, calibrada contra las métricas de Material 3 e iOS HIG y sin
+resignar ninguna garantía de accesibilidad del modo grande.
+
+**El Sprint 14 invirtió el default: hoy el default es `chica`.** La v1 del modo
+compacto era una reducción del grande y en producción se sintió "enorme"; con la
+retokenización nativa de la v2, la densidad compacta es la que cualquiera
+reconoce como la de una app de celular, y es la que corresponde ver a quien
+todavía no eligió nada. El modo grande sigue intacto hasta el píxel, a un toque
+del botón A/a del encabezado, y elegirlo queda guardado en la fila de la cuenta.
 
 **Dónde vive.** El atributo `data-tamano` en `<html>` gobierna el modo, en el
 mismo elemento donde next-themes pone la clase `.dark`: son dos ejes
@@ -601,10 +627,11 @@ recortar- existe el custom variant `chica:`, definido como
 tipografía y espaciado no lo necesita: sale solo, porque las utilidades de
 Tailwind leen esos tokens en tiempo de uso.
 
-**Por qué no existe `grande:`.** Es deliberado. El modo grande es el que no
-se toca -es el default de la app y el que ve la enorme mayoría de las
-cuentas-, así que una utilidad `grande:algo` sería, por definición, un cambio
-en el modo grande, que es exactamente lo que este sistema existe para evitar.
+**Por qué no existe `grande:`.** Es deliberado, y el cambio de default del
+Sprint 14 no lo altera: el modo grande sigue siendo el que no se toca —es el
+diseño Senior UX de los Sprints 0 a 12, congelado—, así que una utilidad
+`grande:algo` sería, por definición, un cambio en el modo grande, que es
+exactamente lo que este sistema existe para evitar.
 Lo que haría falta expresar con ella siempre se puede escribir al revés: una
 clase base pensada para el modo grande, corregida con `chica:` cuando el modo
 compacto la necesita distinta.
@@ -614,5 +641,13 @@ el modo compacto, y el piso táctil del modo compacto nunca baja de 40px. Todo
 lo demás -qué vista se rediseña primero, cómo se prueba cada una, qué
 invariantes estructurales verifica `node scripts/verificar-contraste.mjs`
 además de los 196 pares de color en las cuatro combinaciones de tema y
-densidad- está en `docs/densidad.md`, el contrato completo para el rediseño
-vista por vista.
+densidad, y el benchmark nativo del que salen los números de la v2- está en
+`docs/densidad.md`, el contrato completo para el rediseño vista por vista.
+
+**Un par de contraste sí cambia de umbral entre densidades**, desde el Sprint
+14: la etiqueta del botón SOS (`text-xl font-bold`) mide 24px en grande —por
+encima del corte de "texto grande" en negrita, 14pt = 18,66px, así que le
+alcanza 3:1— y 16px en compacta, donde pasa a exigir 4,5:1. Cumple los dos
+(5,77:1 en claro, 4,94:1 en oscuro) sin cambiar un color, y el verificador lo
+lista por nombre en cada corrida. Es la razón por la que los pares de texto
+declaran el escalón de la escala en el que se usan y no un umbral fijo.

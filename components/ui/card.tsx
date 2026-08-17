@@ -14,7 +14,16 @@ function Card({
       className={cn(
         // Superficie con límite visible (ring-border cumple 3:1) y sombra
         // teñida al verde del fondo. Más aire interno que el preset original.
-        "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card py-(--card-spacing) text-base text-card-foreground shadow-suave ring-1 ring-border [--card-spacing:--spacing(5)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:[--card-spacing:--spacing(4)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
+        // `chica:data-[size=*]` (Sprint 14): el padding y el gap internos de la
+        // tarjeta salen los dos de `--card-spacing`, que es un múltiplo de la
+        // unidad de espaciado. Con la unidad compacta (3,5px) los 5 escalones
+        // dan 17,5px, todavía lejos de los 12dp que Material fija para una
+        // tarjeta densa; 3,5 escalones dan 12,25px, que es ese número. Los dos
+        // overrides llevan `data-[size=...]` explícito -y no un `chica:` a
+        // secas- para que ninguno empate en especificidad con el otro: son
+        // mutuamente excluyentes por atributo, así que el orden de las reglas
+        // generadas no puede decidir cuál gana.
+        "group/card flex flex-col gap-(--card-spacing) overflow-hidden rounded-xl bg-card py-(--card-spacing) text-base text-card-foreground shadow-suave ring-1 ring-border [--card-spacing:--spacing(5)] has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 chica:data-[size=default]:[--card-spacing:--spacing(3.5)] data-[size=sm]:[--card-spacing:--spacing(4)] chica:data-[size=sm]:[--card-spacing:--spacing(3)] data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-xl *:[img:last-child]:rounded-b-xl",
         className
       )}
       {...props}

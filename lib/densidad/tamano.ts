@@ -16,18 +16,36 @@ import type { Tamano } from "@/types/dominio"
 export type { Tamano }
 
 /**
- * El modo por defecto es el GRANDE, y no es una casualidad de implementación.
- * Toda la app se diseñó para adultos mayores (ROADMAP, "Senior UX"); el modo
- * compacto es una opción para quien ve bien y la pide explícitamente. Quien
- * nunca eligió nada —o entró en un dispositivo nuevo, o todavía no inició
- * sesión— ve el modo pensado para el caso más exigente.
+ * El modo por defecto es el CHICO desde el Sprint 14, y el cambio merece una
+ * explicación porque invierte la decisión del Sprint 13.
+ *
+ * Hasta la v1 del modo compacto, el default era `grande`: la app se diseñó
+ * entera para adultos mayores (ROADMAP, "Senior UX") y lo compacto era una
+ * reducción de ese diseño —cuerpo de 16px, espaciado de 4px—, o sea "la misma
+ * app apretada". Con esa v1 en producción, el veredicto del usuario fue que
+ * "seguía siendo enorme", y tenía razón: una escala derivada de 18px de cuerpo
+ * aterriza en el cuerpo de una app de escritorio, no en el de una de celular.
+ *
+ * El Sprint 14 retokenizó el modo compacto contra métricas nativas —Material 3
+ * y iOS HIG: cuerpo de 14px, secundario de 12-13px, títulos de pantalla de
+ * 20px, bottom nav de 64px (`app/globals.css` §5, `docs/densidad.md` §5-bis)—.
+ * Con esa v2, lo compacto dejó de ser "lo grande apretado" y pasó a ser la
+ * densidad que cualquiera reconoce como la de una app de celular: el default
+ * razonable para quien abre la aplicación por primera vez.
+ *
+ * Lo que NO cambió: el modo grande sigue intacto hasta el píxel y a un toque de
+ * distancia (el botón A/a del encabezado, siempre visible, y la pregunta del
+ * selector de perfiles). Quien lo elija queda recordado —la elección viaja a
+ * `profiles.display_density` y de ahí a todos sus dispositivos—. Sigue sin
+ * haber heurística por edad, `role` ni user-agent: lo único que este valor
+ * decide es qué se ve MIENTRAS nadie eligió nada.
  *
  * El mismo valor está como `DEFAULT` de `profiles.display_density`
- * (supabase/migrations/20260814120000_preferencia_tamano.sql §2). Los dos
- * lados dicen lo mismo y `tests/unit/densidad.test.ts` lo verifica contra el
- * enum generado.
+ * (supabase/migrations/20260817150000_default_chica.sql §2). Los dos lados
+ * dicen lo mismo y `tests/unit/densidad.test.ts` lo verifica contra el enum
+ * generado.
  */
-export const TAMANO_POR_DEFECTO: Tamano = "grande"
+export const TAMANO_POR_DEFECTO: Tamano = "chica"
 
 /**
  * Cookie espejo httpOnly de la preferencia.
@@ -81,7 +99,15 @@ export const MODOS: Record<Tamano, { glifo: string; etiqueta: string; descripcio
   },
 }
 
-/** Los dos modos, en el orden en que se ofrecen (el default primero). */
+/**
+ * Los dos modos, en el orden en que se ofrecen: primero "Letra grande", después
+ * "Letra chica". Ese orden ya NO es "el default primero" —desde el Sprint 14 el
+ * default es `chica`— y se conserva a propósito: invertirlo movería de lugar
+ * las dos opciones de `components/perfiles/pregunta-tamano.tsx` **también en el
+ * modo grande**, y la regla 1 de docs/densidad.md §4 dice que el modo grande no
+ * cambia ni un píxel. El orden que queda tampoco es arbitrario: va de más
+ * accesible a más denso, que es la lectura correcta para una app de salud.
+ */
 export const TAMANOS = Object.keys(MODOS) as Tamano[]
 
 /**
