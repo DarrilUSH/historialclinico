@@ -45,9 +45,16 @@ export interface SelectorDestinoProps {
   /** Id de la fila de `shared_uploads_temp` que se está por mover. */
   archivoId: string
   perfiles: PerfilDestino[]
+  /**
+   * Perfil que ya mostró el aviso de duplicado (hotfix de huella digital,
+   * Sprint 17 en vivo): SU tarjeta agrega un campo oculto `forzar=1`, así que
+   * tocarla de nuevo carga el archivo igual en vez de repetir el aviso.
+   * `null` en el caso normal (sin duplicado detectado todavía).
+   */
+  forzarPerfilId?: string | null
 }
 
-export function SelectorDestino({ archivoId, perfiles }: SelectorDestinoProps) {
+export function SelectorDestino({ archivoId, perfiles, forzarPerfilId = null }: SelectorDestinoProps) {
   if (perfiles.length === 0) {
     return (
       <p className="max-w-md text-base text-muted-foreground">
@@ -62,6 +69,7 @@ export function SelectorDestino({ archivoId, perfiles }: SelectorDestinoProps) {
     <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-2 chica:gap-3">
       {perfiles.map(({ perfil, esPropio, canManage }) => (
         <form key={perfil.id} action={elegirPerfilParaCompartido.bind(null, archivoId, perfil.id)}>
+          {perfil.id === forzarPerfilId && <input type="hidden" name="forzar" value="1" />}
           <TarjetaDestino perfil={perfil} esPropio={esPropio} canManage={canManage} />
         </form>
       ))}

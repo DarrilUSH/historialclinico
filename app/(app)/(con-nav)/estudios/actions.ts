@@ -51,13 +51,19 @@
  * El `{ documentoId }` del tipo de retorno existe igual porque es el dato que
  * el Share Target y los tests necesitan cuando llamen al núcleo sin navegar, y
  * porque deja el tipo honesto: en error se devuelve `{ error }`.
+ *
+ * Hay una TERCERA salida que tampoco redirige: `duplicado` (hotfix de huella
+ * digital, Sprint 17 en vivo). `ingestarDocumento` encontró un archivo
+ * idéntico ya cargado en el perfil y no creó nada; `PantallaNuevoEstudio`
+ * muestra la franja de aviso en vez de navegar, y "Cargar igual" vuelve a
+ * llamar a esta misma acción con `forzar=1`.
  */
 
 import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 
 import { esErrorDeGuarda, requerirPermiso, requerirSesion } from "@/lib/auth/guardas"
-import { ErrorIngesta, ingestarDocumento } from "@/lib/documentos/ingesta"
+import { ErrorIngesta, formatearFechaDuplicado, ingestarDocumento } from "@/lib/documentos/ingesta"
 import { schemaExtraccionDocumento } from "@/lib/validacion/documento.schema"
 import { prepararMetricas } from "@/lib/laboratorio/normalizacion"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
@@ -71,6 +77,13 @@ import {
 export interface EstadoSubida {
   error: string | null
   documentoId: string | null
+  /**
+   * Presente si `ingestarDocumento` encontró un documento idéntico y NO creó
+   * nada (hotfix de huella digital, Sprint 17 en vivo — ver
+   * `lib/documentos/ingesta.ts`). La pantalla ofrece "Ver ese estudio" o
+   * "Cargar igual" (reintenta con `forzar=1`).
+   */
+  duplicado: { documentoId: string; titulo: string; fechaTexto: string } | null
 }
 
 export interface EstadoConfirmacion {
@@ -89,9 +102,19 @@ const ERROR_INESPERADO =
  * Sube un documento al bucket privado `documentos-medicos` y lo registra en
  * `documents`.
  *
- * El `FormData` lleva un solo campo, `archivo`, con el `Blob` que entregó
- * `CargadorDocumento` (ya validado y comprimido en el dispositivo). Todo lo
- * demás -perfil, path, fecha, MIME- lo decide el servidor.
+ * El `FormData` lleva el archivo (`archivo`, el `Blob` que entregó
+ * `CargadorDocumento`, ya validado y comprimido en el dispositivo) y,
+ * opcionalmente, `forzar` -campo oculto que `PantallaNuevoEstudio` agrega
+ * recién en el reintento de "Cargar igual", después de que la persona ya vio
+ * el aviso de duplicado-. Todo lo demás -perfil, path, fecha, MIME- lo decide
+ * el servidor.
+ *
+ * Si `ingestarDocumento` encuentra un archivo idéntico ya cargado en el
+ * perfil (huella digital, hotfix Sprint 17 en vivo) y `forzar` no vino, NO
+ * sube nada: devuelve `duplicado` con el título y la fecha de ESE documento,
+ * y la pantalla ofrece "Ver ese estudio" o "Cargar igual" -que vuelve a
+ * llamar acá con el MISMO archivo (sigue en memoria en el cliente) y
+ * `forzar=1-.
  */
 export async function subirDocumento(formData: FormData): Promise<EstadoSubida> {
   let documentoId: string
@@ -100,7 +123,7 @@ export async function subirDocumento(formData: FormData): Promise<EstadoSubida> 
     const activo = await obtenerPerfilActivo()
 
     if (!activo) {
-      return { error: SIN_PERFIL_ACTIVO, documentoId: null }
+      return { error: SIN_PERFIL_ACTIVO, documentoId: null, duplicado: null }
     }
 
     const { supabase } = await requerirPermiso(activo.perfil.id, "upload", {
@@ -112,17 +135,32 @@ export async function subirDocumento(formData: FormData): Promise<EstadoSubida> 
     // `instanceof File` y no un chequeo de forma: un campo de texto también
     // llega como string y hay que rechazarlo, no intentar leerle bytes.
     if (!(archivo instanceof File)) {
-      return { error: SIN_ARCHIVO, documentoId: null }
+      return { error: SIN_ARCHIVO, documentoId: null, duplicado: null }
     }
 
-    const ingestado = await ingestarDocumento(supabase, activo.perfil.id, archivo)
-    documentoId = ingestado.documentoId
+    const forzar = formData.get("forzar") === "1"
+
+    const resultado = await ingestarDocumento(supabase, activo.perfil.id, archivo, { forzar })
+
+    if (resultado.duplicado) {
+      return {
+        error: null,
+        documentoId: null,
+        duplicado: {
+          documentoId: resultado.existente.documentoId,
+          titulo: resultado.existente.titulo,
+          fechaTexto: formatearFechaDuplicado(resultado.existente.fecha),
+        },
+      }
+    }
+
+    documentoId = resultado.documento.documentoId
   } catch (error) {
     if (esErrorDeGuarda(error) || error instanceof ErrorIngesta) {
-      return { error: error.message, documentoId: null }
+      return { error: error.message, documentoId: null, duplicado: null }
     }
     console.error("[estudios] Fallo inesperado al subir un documento:", error)
-    return { error: ERROR_INESPERADO, documentoId: null }
+    return { error: ERROR_INESPERADO, documentoId: null, duplicado: null }
   }
 
   // El listado de `/estudios` es dinámico (usa cookies), pero revalidar acá

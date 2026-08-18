@@ -33,15 +33,37 @@ export const ESTADO_BUSQUEDA_INICIAL: EstadoBusquedaGmail = {
 
 /**
  * Estado compartido por las acciones que operan sobre UN correo o UN filtro
- * (descartar, reabrir, aprender remitente, sacar filtro).
+ * (descartar, reabrir, aprender remitente, sacar filtro, ingerir un adjunto).
  *
- * Es uno solo para las cuatro a propósito: todas tienen la misma forma de
+ * Es uno solo para las cinco a propósito: todas tienen la misma forma de
  * respuesta -salió o no salió, y una frase para mostrar- y un tipo por acción
- * sería cuatro veces lo mismo con cuatro nombres distintos.
+ * sería cinco veces lo mismo con cinco nombres distintos.
  */
 export interface EstadoCorreoGmail {
   error: string | null
   mensaje: string | null
+  /**
+   * Solo lo llena `ingerirAdjuntoDeCorreo` (hotfix de huella digital, Sprint
+   * 17 en vivo): `ingerirAdjuntoDeGmail` encontró un documento idéntico ya
+   * cargado en el perfil y NO creó nada. La bandeja muestra la franja "Este
+   * archivo es idéntico a…" con "Ver ese estudio" y "Cargar igual" -esta
+   * última reenvía `correoId`/`adjuntoId` con `forzar=1`-. Opcional -y no
+   * `duplicado: null` obligatorio en cada return- porque las otras cuatro
+   * acciones (descartar, reabrir, aprender remitente, sacar filtro) no tienen
+   * nada que decir acá: para ellas, `undefined` y `null` significan lo mismo
+   * ("no hay duplicado que mostrar").
+   */
+  duplicado?: {
+    correoId: string
+    adjuntoId: string
+    documentoId: string
+    titulo: string
+    fechaTexto: string
+  } | null
 }
 
-export const ESTADO_CORREO_INICIAL: EstadoCorreoGmail = { error: null, mensaje: null }
+export const ESTADO_CORREO_INICIAL: EstadoCorreoGmail = {
+  error: null,
+  mensaje: null,
+  duplicado: null,
+}

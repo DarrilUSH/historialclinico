@@ -99,7 +99,50 @@ bandeja igual, con su asunto y su remitente, sin propuesta. Nada se pierde en
 silencio, así que el umbral se elige generoso hacia el positivo pero no tanto
 como para mandar cualquier cosa afuera.
 
-### 2.4 Los filtros se aprenden del uso, porque no hay catálogo que los tenga
+### 2.4 La huella digital: dedup por CONTENIDO, no solo por mensaje (hotfix, Sprint 17 en vivo)
+
+El dedup por `gmail_message_id` (§2.1) evita procesar el MISMO CORREO dos
+veces. No evita que dos correos DISTINTOS traigan el MISMO ARCHIVO: el caso
+real que motivó este hotfix fue un reenvío "RV:" sobre el original, con
+segundos de diferencia, con idéntico PDF adjunto. Los dos mensajes son
+legítimamente distintos -el dedup funcionó como tenía que funcionar-, pero
+nada avisaba que el estudio ya estaba en el historial.
+
+`ingestarDocumento` (`lib/documentos/ingesta.ts`) calcula el SHA-256 de los
+bytes de CADA archivo que entra al producto -por Gmail, por subida manual o
+por Web Share Target, las tres puertas- y lo guarda en
+`documents.content_sha256`. Antes de crear un documento nuevo, coteja esa
+huella contra los documentos que el perfil YA tiene. Si hay una coincidencia,
+NO crea nada: la persona ve "Este archivo es idéntico a «título» cargado el
+fecha" con dos acciones, **Ver ese estudio** y **Cargar igual** -esta última
+fuerza la carga igual, porque puede ser una decisión legítima-.
+
+**Qué detecta y qué no:** archivos BYTE A BYTE idénticos. Un PDF que la
+clínica REGENERA -mismo contenido, pero el motor que lo arma le puso otra
+fecha de generación en los metadatos, o lo comprimió distinto- tiene bytes
+distintos y no matchea. No es un bug: es el límite de comparar por hash en vez
+de por contenido semántico, y se declara acá para no prometer más de lo que
+hace.
+
+**Los documentos de ANTES de esta migración** nacen sin huella
+(`content_sha256 = NULL`): no hubo backfill en SQL porque los bytes viven en
+Storage, no en la base. Se completan PEREZOSAMENTE
+(`lib/documentos/huella-admin.ts#backfillHuellasFaltantes`): la primera vez
+que alguien sube algo nuevo a un perfil con documentos viejos sin huella, el
+cotejo backfillea unos pocos (`LIMITE_BACKFILL_POR_COTEJO = 5`) antes de
+comparar. Es best-effort -si Storage falla para alguno, ese sigue sin huella
+y el cotejo de esta carga simplemente no lo ve- y acotado -nunca convierte una
+subida en una corrida de minutos-, así que un perfil con historial viejo
+termina de backfillearse solo, a lo largo de varias cargas.
+
+**Una marca discreta y previa, en la bandeja de Gmail:** entre los correos
+PENDIENTES, si dos traen un adjunto con el mismo (nombre, tamaño) -la
+metadata que el barrido YA registra, sin bajar ningún byte-,
+`lib/gmail/deteccion-duplicados.ts` marca a cada uno con "Posible duplicado
+del correo de las {hora}". No bloquea nada y no reemplaza al cotejo real: es
+un aviso ANTES de gastar la llamada a Gmail que baja el adjunto.
+
+### 2.5 Los filtros se aprenden del uso, porque no hay catálogo que los tenga
 
 El catálogo REFES (16.3) tiene los centros de salud con dirección y teléfono,
 pero **no tiene las direcciones de correo desde las que mandan los turnos**. No
@@ -199,12 +242,16 @@ select id, status_code, content from net._http_response order by created desc li
 | `lib/gmail/mensajes-admin.ts` | `service_role`: el único camino de escritura del registro. Toda escritura va acotada por `user_id`. |
 | `lib/gmail/mensajes.ts` | Lectura para las pantallas, con el cliente del usuario (RLS). |
 | `lib/gmail/adjunto.ts` | El puente al pipeline: baja el adjunto y llama a `ingestarDocumento`. |
+| `lib/gmail/deteccion-duplicados.ts` | **Puro.** Marca "posible duplicado" entre pendientes por (nombre, tamaño) de adjuntos — hotfix de huella digital. |
+| `lib/documentos/huella.ts` | **Puro + lectura RLS.** SHA-256 de bytes, cotejo por perfil — hotfix de huella digital. |
+| `lib/documentos/huella-admin.ts` | `service_role`: backfill perezoso de huellas de documentos viejos — hotfix de huella digital. |
 | `lib/gmail/filtros.ts` | Aprender y olvidar un remitente. |
 | `lib/gmail/google-api.ts` | Las llamadas HTTP (17.1 + las cinco de la 17.2). Bases inyectables para los tests. |
 | `app/api/gmail/procesar-barrido/route.ts` | El endpoint del cron (`x-cron-secret`). |
 | `app/api/gmail/analizar-correo/route.ts` | Trae el cuerpo del correo y devuelve la propuesta de turno de la 16.4. |
 | `app/(app)/(con-nav)/perfil/gmail/actions.ts` | Las seis Server Actions de la bandeja. |
 | `components/gmail/bandeja-gmail.tsx` | "Llegaron por Gmail": pendientes, ya procesados y filtros. |
+| `components/gmail/detalle-correo.tsx` | Diálogo de detalle (asunto/remitente/fecha completos + acciones) — ampliación en vivo, pedido del usuario en producción, 2026-08-18. |
 | `components/turnos/precarga-gmail.tsx` | El hermano automático del analizador de la 16.4. |
 
 ## 7. Cómo se verifica
@@ -226,6 +273,27 @@ docker exec -i supabase_db_historialclinico psql -U postgres -d postgres \
 - `scripts/test-rls.sql` BLOQUE 24 (21 casos) — RLS por fila, cero escritura
   para el navegador, el dedup como invariante de la base, `ON DELETE SET NULL`
   de los punteros, la baja de cuenta y el job.
+- `tests/unit/huella-documentos.test.ts` — huella estable, huella distinta
+  para contenido distinto, cotejo con/sin coincidencia acotado por perfil, el
+  error de la consulta se propaga, formateo de fecha sin corrimiento de zona.
+- `tests/unit/huella-admin.test.ts` — backfill perezoso con Storage y el
+  cliente `service_role` MOCKEADOS: tope de `LIMITE_BACKFILL_POR_COTEJO`,
+  best-effort si falla el SELECT/la descarga/el UPDATE, escritura acotada por
+  `profile_id`.
+- `tests/unit/gmail-deteccion-duplicados.test.ts` — el emparejamiento por
+  (nombre, tamaño), sin falsos positivos por nombre O tamaño solos, adjuntos
+  no aptos excluidos, la rueda de emparejamiento con 3+ coincidencias.
+- `tests/unit/gmail-detalle-correo.test.tsx` — el diálogo de detalle
+  (ampliación en vivo): el disparador trunca pero el diálogo muestra el
+  asunto ENTERO, el nombre accesible completo, los links a estudio/turno
+  según corresponda, y las acciones según el estado del correo.
+
+**Migración `20260818150000_huella_documentos.sql` (huella digital):** no
+tocó ninguna política RLS -una columna nueva de una tabla ya cubierta hereda
+la misma autorización, ver el encabezado de la migración y el precedente de
+`20260817231000` (tarea 16.1)-, así que el arnés no sumó casos nuevos; se
+corrió igual **441/441 ×2** (antes y después de esta migración) para
+confirmar que no rompió nada de lo existente.
 
 En local, `supabase db reset` deja una conexión de Gmail de mentira y cuatro
 correos ya barridos (`supabase/seed.sql` §12) para poder ver la pantalla sin
@@ -246,3 +314,16 @@ en local hace que Google conteste `invalid_grant` y la conexión quede vencida.
 4. **No hay push cuando llega algo nuevo.** El contador aparece en `/inicio` la
    próxima vez que la persona abre la app. Sumar el aviso empujado es una tanda
    propia (reusaría `lib/push/servidor.ts`).
+5. **La huella digital (§2.4) detecta archivos IDÉNTICOS, no estudios
+   equivalentes.** Un PDF regenerado por la clínica -mismo contenido, otros
+   bytes- no matchea. No se intentó comparación semántica (OCR + similitud de
+   texto): es una técnica bastante más cara y con falsos positivos propios
+   (dos análisis de rutina del mismo laboratorio, mismo formato, se parecerían
+   mucho sin ser el mismo estudio), y el caso real reportado por el usuario
+   -el mismo PDF, dos veces- ya queda cubierto por la comparación de bytes.
+6. **El aviso de duplicado en `/compartir` (Web Share Target) es más austero**
+   que en `/estudios/nuevo` y en la bandeja de Gmail: mismo título+fecha en el
+   mensaje y el mismo "Ver ese estudio", pero "Cargar igual" es "tocá la
+   tarjeta del perfil de nuevo" en vez de un botón dedicado -no se armó un
+   tercer patrón de UI para un camino de entrada que no estaba en el pedido
+   original del hotfix-.

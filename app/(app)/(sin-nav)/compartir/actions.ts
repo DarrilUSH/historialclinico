@@ -13,6 +13,17 @@
  * en `/estudios/nuevo/procesando`, la pantalla de extracción + revisión que
  * ya existe desde el Sprint 4. Ningún archivo queda "guardado" hasta que esa
  * pantalla se confirma: la IA nunca guarda sola, la regla vale igual acá.
+ *
+ * ## Duplicado (hotfix de huella digital, Sprint 17 en vivo)
+ *
+ * Si `ingestarDocumento` encuentra un archivo idéntico ya cargado en el
+ * perfil elegido, NO se limpia el temporal -sigue disponible para "Cargar
+ * igual" o para elegir OTRO perfil- y se redirige con `?error=duplicado` más
+ * `doc`/`perfil` (dos uuids opacos, no texto libre: mismo criterio que
+ * `archivo`). `/compartir` los usa para ofrecer "Ver ese estudio" y "Cargar
+ * igual" -este último reenvía la MISMA acción con `forzar: true`, vía un
+ * campo oculto que agrega `SelectorDestino` cuando el duplicado es de ESE
+ * perfil-.
  */
 
 import { redirect } from "next/navigation"
@@ -85,9 +96,11 @@ async function limpiarTemporal(
 export async function elegirPerfilParaCompartido(
   archivoId: string,
   perfilId: string,
-  _formData: FormData,
+  formData: FormData,
 ): Promise<void> {
-  void _formData
+  // Solo lo trae el reintento de "Cargar igual" -campo oculto que agrega
+  // `SelectorDestino` cuando ESTE perfil ya mostró el aviso de duplicado.
+  const forzar = formData.get("forzar") === "1"
 
   let destino = `${RUTA_COMPARTIR}?archivo=${archivoId}&error=inesperado`
 
@@ -106,12 +119,20 @@ export async function elegirPerfilParaCompartido(
       const { datos } = await descargarObjeto(BUCKETS.compartidosTemp, fila.storage_path)
       const archivo = new File([datos], fila.original_filename, { type: fila.mime_type })
 
-      const ingestado = await ingestarDocumento(supabase, perfilId, archivo)
+      const resultado = await ingestarDocumento(supabase, perfilId, archivo, { forzar })
 
-      await limpiarTemporal(supabase, archivoId, fila.storage_path)
+      if (resultado.duplicado) {
+        // El temporal NO se limpia: sigue disponible para "Cargar igual" o
+        // para elegir otro perfil (ver el encabezado del archivo).
+        destino =
+          `${RUTA_COMPARTIR}?archivo=${archivoId}&error=duplicado` +
+          `&doc=${resultado.existente.documentoId}&perfil=${perfilId}`
+      } else {
+        await limpiarTemporal(supabase, archivoId, fila.storage_path)
 
-      revalidatePath("/estudios")
-      destino = `/estudios/nuevo/procesando?doc=${ingestado.documentoId}`
+        revalidatePath("/estudios")
+        destino = `/estudios/nuevo/procesando?doc=${resultado.documento.documentoId}`
+      }
     }
   } catch (error) {
     if (error instanceof ErrorPermisoDenegado) {

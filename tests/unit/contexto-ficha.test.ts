@@ -120,6 +120,7 @@ function documentoDe(parcial: Partial<Documento>): Documento {
     ai_summary: "Glucemia elevada (145 mg/dL). Hemoglobina normal.",
     ai_confidence: 0.92,
     confirmed_at: "2026-08-02T10:00:00.000Z",
+    content_sha256: null,
     created_at: "2026-08-01T10:00:00.000Z",
     updated_at: "2026-08-01T10:00:00.000Z",
     created_by_profile_id: "660e8400-e29b-41d4-a716-446655440001",

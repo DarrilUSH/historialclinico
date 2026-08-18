@@ -85,6 +85,41 @@ import "server-only"
  * modelo. Mientras tanto la carga NO queda sin rastro: la propia fila de
  * `documents` guarda `created_by_profile_id` (sellado por trigger) y
  * `created_at`, que responden "quién subió esto y cuándo".
+ *
+ * ## EL COTEJO, PASO A PASO (hotfix de producto, Sprint 17 en vivo)
+ *
+ * Motivado por un caso real: dos correos DISTINTOS con el mismo PDF adjunto
+ * (un reenvío "RV:" sobre el original) llegaron a la bandeja de Gmail, y nada
+ * avisó que el estudio ya estaba. El dedup por `gmail_message_id` funcionaba
+ * bien -eran mensajes distintos de verdad-, pero nada comparaba el ARCHIVO.
+ *
+ * Este es el único lugar del código que hace falta tocar para tapar el hueco
+ * en las TRES puertas de entrada (subida manual, Web Share Target, adjunto de
+ * Gmail): las tres llaman a esta función con el archivo YA EN MANOS DEL
+ * SERVIDOR y NINGÚN documento creado todavía, que es exactamente el momento en
+ * que el cotejo tiene que correr.
+ *
+ * 1. Se valida el archivo (como siempre) y se calculan sus bytes UNA vez
+ *    (`archivo.arrayBuffer()`; un `File`/`Blob` se puede leer más de una vez,
+ *    así que subir después con el `File` original no vuelve a copiar nada).
+ * 2. Se calcula la huella SHA-256 (`lib/documentos/huella.ts`).
+ * 3. Si NO se pidió `forzar`: se backfillea perezosamente el perfil
+ *    (`lib/documentos/huella-admin.ts`, best-effort, acotado) y se cotejan
+ *    los documentos del perfil por huella. Si hay uno con la misma huella,
+ *    la función devuelve `{ duplicado: true, existente }` **sin subir nada a
+ *    Storage y sin tocar `documents`**: quien llama le muestra a la persona
+ *    "Este archivo es idéntico a «título» cargado el fecha" con dos acciones,
+ *    "Ver ese estudio" y "Cargar igual" -esta última vuelve a llamar acá con
+ *    `forzar: true`-.
+ * 4. Si se pidió `forzar`, o no hubo coincidencia: se sigue el camino de
+ *    siempre (subida + INSERT), y la fila nueva se guarda CON su huella —así
+ *    la próxima carga que coincida con ESTA la va a encontrar, se haya forzado
+ *    o no-.
+ *
+ * El cotejo es una ayuda, nunca un candado: `content_sha256` no es UNIQUE
+ * (`20260818150000_huella_documentos.sql`), y detecta archivos byte a byte
+ * IDÉNTICOS -un PDF que la clínica regenera con el mismo contenido pero bytes
+ * distintos no matchea; límite declarado en `docs/gmail-ingesta.md`-.
  */
 
 import {
@@ -95,7 +130,13 @@ import {
 } from "@/lib/archivos/validacion"
 import type { MimeValidado } from "@/lib/archivos/validacion"
 import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
+import { backfillHuellasFaltantes } from "@/lib/documentos/huella-admin"
+import { buscarDuplicadoPorHuella, calcularHuellaSha256 } from "@/lib/documentos/huella"
+import type { DuplicadoDetectado } from "@/lib/documentos/huella"
 import { BUCKETS, borrarObjeto } from "@/lib/storage-admin"
+
+export type { DuplicadoDetectado } from "@/lib/documentos/huella"
+export { formatearFechaDuplicado } from "@/lib/documentos/huella"
 
 /** Tope del título provisional. `documents.title` es `text` sin límite, pero un nombre de archivo absurdo no tiene por qué llegar entero a la interfaz. */
 const MAX_TITULO = 120
@@ -140,6 +181,24 @@ export interface DocumentoIngestado {
   bytes: number
   /** Fecha (`YYYY-MM-DD`) con la que quedó el documento. Provisional: la extracción con IA la corrige. */
   fecha: string
+}
+
+/**
+ * Lo que devuelve `ingestarDocumento`: o se creó el documento, o se encontró
+ * uno idéntico y NO se creó nada (ver "EL COTEJO, PASO A PASO" arriba).
+ */
+export type ResultadoIngesta =
+  | { duplicado: false; documento: DocumentoIngestado }
+  | { duplicado: true; existente: DuplicadoDetectado }
+
+export interface OpcionesIngesta {
+  /**
+   * `true` para saltear el cotejo de huella y crear el documento igual -es lo
+   * que dispara "Cargar igual" después de que la persona ya vio el aviso de
+   * duplicado-. `false`/ausente: se cotejan documentos del mismo perfil por
+   * huella antes de crear nada.
+   */
+  forzar?: boolean
 }
 
 /** Fecha de hoy en `YYYY-MM-DD`, hora de pared de Ushuaia. */
@@ -217,7 +276,9 @@ async function validarEnServidor(archivo: File): Promise<MimeValidado> {
 }
 
 /**
- * Sube el archivo al bucket privado y registra el documento.
+ * Sube el archivo al bucket privado y registra el documento — o, si ya hay
+ * uno idéntico en el perfil y no se pidió `forzar`, no crea nada y avisa
+ * (ver "EL COTEJO, PASO A PASO" en el encabezado del archivo).
  *
  * @param supabase Cliente del USUARIO (el de `lib/supabase/server.ts`). No
  *   acepta el cliente admin a propósito: las dos escrituras tienen que pasar
@@ -225,13 +286,34 @@ async function validarEnServidor(archivo: File): Promise<MimeValidado> {
  * @param perfilId Perfil titular de los datos. Quien llama ya verificó
  *   `requerirPermiso(perfilId, "upload")`.
  * @param archivo Archivo tal como llegó en el `FormData`.
+ * @param opciones `{ forzar }` — ver `OpcionesIngesta`.
  */
 export async function ingestarDocumento(
   supabase: ClienteSupabaseServidor,
   perfilId: string,
   archivo: File,
-): Promise<DocumentoIngestado> {
+  opciones: OpcionesIngesta = {},
+): Promise<ResultadoIngesta> {
   const mimeType = await validarEnServidor(archivo)
+
+  // Una sola lectura de los bytes: `File`/`Blob` son inmutables y releíbles,
+  // así que `.upload(archivo, …)` más abajo no vuelve a copiar nada -sigue
+  // pasándole el `File` original, que Storage puede transmitir en streaming-.
+  const bytes = new Uint8Array(await archivo.arrayBuffer())
+  const huella = calcularHuellaSha256(bytes)
+
+  if (!opciones.forzar) {
+    // Mejor-esfuerzo: si el backfill falla, el cotejo de abajo simplemente no
+    // ve los documentos viejos de este perfil. Nunca bloquea la carga.
+    await backfillHuellasFaltantes(perfilId).catch((error) => {
+      console.error(`[ingesta] Backfill de huellas de ${perfilId} no se pudo completar:`, error)
+    })
+
+    const existente = await buscarDuplicadoPorHuella(supabase, perfilId, huella)
+    if (existente) {
+      return { duplicado: true, existente }
+    }
+  }
 
   const fecha = fechaDeHoy()
   const storagePath = construirStoragePath(perfilId, mimeType, fecha)
@@ -265,6 +347,9 @@ export async function ingestarDocumento(
       storage_path: storagePath,
       mime_type: mimeType,
       file_size_bytes: archivo.size,
+      // Se guarda SIEMPRE, se haya cotejado o forzado: es lo que permite que
+      // una carga futura -de este archivo o de un tercero- encuentre a ESTA.
+      content_sha256: huella,
       // `created_by_profile_id` va sellado por el trigger, no se manda.
     })
     .select("id")
@@ -289,10 +374,13 @@ export async function ingestarDocumento(
   }
 
   return {
-    documentoId: documento.id,
-    storagePath,
-    mimeType,
-    bytes: archivo.size,
-    fecha,
+    duplicado: false,
+    documento: {
+      documentoId: documento.id,
+      storagePath,
+      mimeType,
+      bytes: archivo.size,
+      fecha,
+    },
   }
 }

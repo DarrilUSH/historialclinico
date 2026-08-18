@@ -53,6 +53,7 @@ import {
   yaVencio,
 } from "@/lib/documentos/compartir-temporal"
 import { purgarCompartidosVencidos } from "@/lib/documentos/compartir-temporal-admin"
+import { formatearFechaDuplicado } from "@/lib/documentos/huella"
 import { BUCKETS, TTL_MAXIMO_SEGUNDOS, crearSignedUrl } from "@/lib/storage-admin"
 
 export const metadata: Metadata = {
@@ -70,14 +71,15 @@ interface FilaCompartida {
 export default async function PaginaCompartir({
   searchParams,
 }: {
-  searchParams: Promise<{ archivo?: string; error?: string }>
+  searchParams: Promise<{ archivo?: string; error?: string; doc?: string; perfil?: string }>
 }) {
   const { supabase, usuario } = await requerirSesion({ desde: "/compartir" })
 
   // Best-effort, nunca bloquea la pantalla: ver el encabezado del archivo.
   await purgarCompartidosVencidos(supabase, usuario.id)
 
-  const { archivo: archivoParam, error: errorParam } = await searchParams
+  const { archivo: archivoParam, error: errorParam, doc: docParam, perfil: perfilParam } =
+    await searchParams
 
   let fila: FilaCompartida | null = null
   if (esTokenCompartidoValido(archivoParam)) {
@@ -100,6 +102,33 @@ export default async function PaginaCompartir({
         }
       />
     )
+  }
+
+  // Duplicado (hotfix de huella digital, Sprint 17 en vivo): `doc`/`perfil`
+  // son dos uuids opacos -no texto libre, mismo criterio que `archivo`-. Se
+  // resuelve título y fecha ACÁ, con el cliente del usuario (RLS ya lo deja
+  // pasar: si puede ver el duplicado es porque puede ver ese documento).
+  let duplicado: { documentoId: string; perfilId: string; titulo: string; fechaTexto: string } | null =
+    null
+  if (
+    errorParam === "duplicado" &&
+    esTokenCompartidoValido(docParam) &&
+    esTokenCompartidoValido(perfilParam)
+  ) {
+    const { data: documentoExistente } = await supabase
+      .from("documents")
+      .select("title, document_date")
+      .eq("id", docParam)
+      .maybeSingle()
+
+    if (documentoExistente) {
+      duplicado = {
+        documentoId: docParam,
+        perfilId: perfilParam,
+        titulo: documentoExistente.title,
+        fechaTexto: formatearFechaDuplicado(documentoExistente.document_date),
+      }
+    }
   }
 
   // Perfiles donde la sesión puede cargar: mismo patrón de dos consultas que
@@ -155,8 +184,26 @@ export default async function PaginaCompartir({
         </p>
       </div>
 
-      {errorParam && esCodigoErrorCompartido(errorParam) && (
-        <Alerta variante="error">{mensajeErrorCompartido(errorParam)}</Alerta>
+      {duplicado ? (
+        <div className="flex flex-col gap-3">
+          <Alerta variante="advertencia">
+            Este archivo es idéntico a «{duplicado.titulo}» cargado el {duplicado.fechaTexto}.
+          </Alerta>
+          <Boton
+            render={<Link href={`/estudios/${duplicado.documentoId}`} />}
+            nativeButton={false}
+            variant="outline"
+            size="sm"
+            className="w-fit"
+          >
+            Ver ese estudio
+          </Boton>
+        </div>
+      ) : (
+        errorParam &&
+        esCodigoErrorCompartido(errorParam) && (
+          <Alerta variante="error">{mensajeErrorCompartido(errorParam)}</Alerta>
+        )
       )}
 
       <Tarjeta className="flex-row items-center gap-4 chica:gap-3">
@@ -190,7 +237,17 @@ export default async function PaginaCompartir({
 
       <div className="flex flex-col gap-3 chica:gap-2">
         <h2 className="text-lg font-semibold text-foreground">¿A quién le corresponde?</h2>
-        <SelectorDestino archivoId={fila.id} perfiles={perfilesDestino} />
+        {duplicado && (
+          <p className="text-sm text-muted-foreground">
+            Si igual querés cargarlo para ese perfil, tocá su tarjeta de nuevo: esta vez lo va a
+            guardar aunque sea idéntico.
+          </p>
+        )}
+        <SelectorDestino
+          archivoId={fila.id}
+          perfiles={perfilesDestino}
+          forzarPerfilId={duplicado?.perfilId ?? null}
+        />
       </div>
 
       <div className="flex justify-end">

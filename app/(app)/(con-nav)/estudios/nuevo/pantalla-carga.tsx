@@ -5,7 +5,16 @@
  * confirmar el archivo, lo sube con la Server Action `subirDocumento`
  * (`app/(app)/(con-nav)/estudios/actions.ts`). En éxito la acción hace
  * `redirect()` a `/estudios/nuevo/procesando`, así que este componente no
- * maneja el camino feliz: solo el estado "Subiendo…" y el error.
+ * maneja el camino feliz: solo "Subiendo…", el error y el aviso de duplicado.
+ *
+ * ## El aviso de duplicado (hotfix de huella digital, Sprint 17 en vivo)
+ *
+ * Si `subirDocumento` devuelve `duplicado`, el archivo YA ESTÁ EN MEMORIA acá
+ * -`archivo` en el estado, el mismo `ArchivoListo` que entregó
+ * `CargadorDocumento`- así que "Cargar igual" no le pide nada de nuevo a la
+ * persona: vuelve a llamar a `subir()` con el MISMO blob y `forzar: true`, que
+ * arma un `FormData` con el campo oculto `forzar=1`. No hace falta reabrir el
+ * selector de archivos ni volver a comprimir la foto.
  *
  * Vive en un archivo aparte de `page.tsx` porque `page.tsx` es un Server
  * Component (necesita `cookies()` para el guard de `obtenerPerfilActivo`) y
@@ -58,14 +67,21 @@ import { formatearBytes } from "@/lib/archivos/validacion"
 
 import { subirDocumento } from "../actions"
 
-type Estado = "eligiendo" | "subiendo" | "error"
+type Estado = "eligiendo" | "subiendo" | "error" | "duplicado"
+
+interface DuplicadoDetectado {
+  documentoId: string
+  titulo: string
+  fechaTexto: string
+}
 
 export function PantallaNuevoEstudio() {
   const [estado, setEstado] = React.useState<Estado>("eligiendo")
   const [archivo, setArchivo] = React.useState<ArchivoListo | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const [duplicado, setDuplicado] = React.useState<DuplicadoDetectado | null>(null)
 
-  async function subir(listo: ArchivoListo) {
+  async function subir(listo: ArchivoListo, forzar = false) {
     setArchivo(listo)
     setError(null)
     setEstado("subiendo")
@@ -74,13 +90,19 @@ export function PantallaNuevoEstudio() {
     // El tercer argumento es el nombre del archivo: sin él, `FormData` manda
     // "blob" y el título provisional del documento quedaría en "blob".
     formData.append("archivo", listo.blob, listo.nombre)
+    // Solo en el reintento de "Cargar igual": saltea el cotejo de huella en
+    // `ingestarDocumento` (ver el encabezado del archivo).
+    if (forzar) formData.append("forzar", "1")
 
     try {
       // En éxito esta llamada no vuelve: la acción redirige a
       // `/estudios/nuevo/procesando`.
       const resultado = await subirDocumento(formData)
 
-      if (resultado?.error) {
+      if (resultado?.duplicado) {
+        setDuplicado(resultado.duplicado)
+        setEstado("duplicado")
+      } else if (resultado?.error) {
         setError(resultado.error)
         setEstado("error")
       }
@@ -96,9 +118,16 @@ export function PantallaNuevoEstudio() {
     if (archivo) void subir(archivo)
   }
 
+  function cargarIgual() {
+    // El archivo sigue en memoria -es el mismo `ArchivoListo` de la primera
+    // vez-, así que no hace falta volver a elegirlo ni a comprimirlo.
+    if (archivo) void subir(archivo, true)
+  }
+
   function elegirOtro() {
     setArchivo(null)
     setError(null)
+    setDuplicado(null)
     setEstado("eligiendo")
   }
 
@@ -146,6 +175,30 @@ export function PantallaNuevoEstudio() {
               Elegir otro archivo
             </Boton>
           </div>
+        </div>
+      )}
+
+      {estado === "duplicado" && duplicado && (
+        <div className="flex flex-col gap-4">
+          <Alerta variante="advertencia">
+            Este archivo es idéntico a «{duplicado.titulo}» cargado el {duplicado.fechaTexto}.
+          </Alerta>
+          <div className="flex flex-col gap-3 sm:flex-row-reverse">
+            <Boton
+              render={<Link href={`/estudios/${duplicado.documentoId}`} />}
+              nativeButton={false}
+              size="lg"
+              className="sm:flex-1"
+            >
+              Ver ese estudio
+            </Boton>
+            <Boton onClick={cargarIgual} variant="outline" size="lg" className="sm:flex-1">
+              Cargar igual
+            </Boton>
+          </div>
+          <Boton onClick={elegirOtro} variant="ghost" size="lg">
+            Elegir otro archivo
+          </Boton>
         </div>
       )}
 

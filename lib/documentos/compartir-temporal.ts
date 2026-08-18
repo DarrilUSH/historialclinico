@@ -95,6 +95,7 @@ export const CODIGOS_ERROR_COMPARTIDO = [
   "archivo_invalido",
   "no_encontrado",
   "permiso_denegado",
+  "duplicado",
   "inesperado",
 ] as const
 
@@ -113,6 +114,14 @@ const MENSAJE_ERROR_COMPARTIDO: Record<CodigoErrorCompartido, string> = {
     "No encontramos ese archivo compartido. Puede que ya haya pasado más de una hora: probá compartir de nuevo.",
   permiso_denegado:
     "Ya no tenés permiso para cargar documentos en ese perfil. Elegí otro perfil o pedí que te lo den de nuevo.",
+  // Hotfix de huella digital (Sprint 17 en vivo): mensaje genérico -sin
+  // título ni fecha, a diferencia del aviso de `/estudios/nuevo` y de la
+  // bandeja de Gmail- porque este código viaja SOLO por `?error=`, y esta
+  // pantalla nunca mete texto libre en la URL (ver el comentario de arriba).
+  // Cuando el archivo temporal sigue existiendo, la pantalla complementa este
+  // mensaje con "Ver ese estudio" y "Cargar igual" a partir de `?doc=`/`?perfil=`
+  // -dos ids opacos, no texto-.
+  duplicado: "Ya tenés un archivo idéntico cargado en el historial de ese perfil.",
   inesperado:
     "Ocurrió un problema y no pudimos recibir el archivo compartido. Probá de nuevo en unos minutos.",
 }

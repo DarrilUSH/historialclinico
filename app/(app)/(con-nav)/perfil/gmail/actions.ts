@@ -66,7 +66,7 @@ import {
   marcarMensajeResuelto,
   obtenerMensajeRegistrado,
 } from "@/lib/gmail/mensajes-admin"
-import { ErrorIngesta } from "@/lib/documentos/ingesta"
+import { ErrorIngesta, formatearFechaDuplicado } from "@/lib/documentos/ingesta"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 // `EstadoGmailAccion` y `ESTADO_GMAIL_INICIAL` viven en `lib/gmail/conexion.ts`
@@ -237,6 +237,14 @@ export async function buscarCorreosAhora(): Promise<EstadoBusquedaGmail> {
  *
  * El `redirect` va FUERA del `try/catch`: funciona lanzando `NEXT_REDIRECT` y
  * un `catch` que se lo trague deja la navegación colgada.
+ *
+ * ## Duplicado (hotfix de huella digital, Sprint 17 en vivo)
+ *
+ * Si `ingerirAdjuntoDeGmail` encuentra un documento idéntico ya cargado en el
+ * perfil, esta acción NO redirige: devuelve `duplicado` con `correoId` y
+ * `adjuntoId` incluidos (la bandeja los necesita para armar el botón "Cargar
+ * igual", que reenvía este mismo formulario con `forzar=1`). El campo oculto
+ * `forzar` viaja SIEMPRE en `0`/ausente salvo en ese reintento.
  */
 export async function ingerirAdjuntoDeCorreo(
   _estadoPrevio: EstadoCorreoGmail,
@@ -244,9 +252,10 @@ export async function ingerirAdjuntoDeCorreo(
 ): Promise<EstadoCorreoGmail> {
   const correoId = idDelFormulario(formData, "correoId")
   const adjuntoId = formData.get("adjuntoId")
+  const forzar = formData.get("forzar") === "1"
 
   if (!correoId || typeof adjuntoId !== "string" || adjuntoId.length === 0) {
-    return { error: SIN_CORREO, mensaje: null }
+    return { error: SIN_CORREO, mensaje: null, duplicado: null }
   }
 
   let documentoId: string
@@ -254,22 +263,37 @@ export async function ingerirAdjuntoDeCorreo(
   try {
     const activo = await obtenerPerfilActivo()
     if (!activo) {
-      return { error: SIN_PERFIL_ACTIVO, mensaje: null }
+      return { error: SIN_PERFIL_ACTIVO, mensaje: null, duplicado: null }
     }
 
     const { supabase, usuario } = await requerirPermiso(activo.perfil.id, "upload", {
       siNoHaySesion: "lanzar",
     })
 
-    const { documento } = await ingerirAdjuntoDeGmail({
+    const resultado = await ingerirAdjuntoDeGmail({
       supabase,
       userId: usuario.id,
       perfilId: activo.perfil.id,
       correoId,
       adjuntoId,
+      forzar,
     })
 
-    documentoId = documento.documentoId
+    if (resultado.duplicado) {
+      return {
+        error: null,
+        mensaje: null,
+        duplicado: {
+          correoId,
+          adjuntoId,
+          documentoId: resultado.existente.documentoId,
+          titulo: resultado.existente.titulo,
+          fechaTexto: formatearFechaDuplicado(resultado.existente.fecha),
+        },
+      }
+    }
+
+    documentoId = resultado.documento.documentoId
   } catch (error) {
     console.error(
       `[gmail] no se pudo ingerir el adjunto del correo ${correoId}:`,
@@ -278,6 +302,7 @@ export async function ingerirAdjuntoDeCorreo(
     return {
       error: mensajeDeError(error, "No pudimos traer ese archivo. Probá de nuevo en un rato."),
       mensaje: null,
+      duplicado: null,
     }
   }
 

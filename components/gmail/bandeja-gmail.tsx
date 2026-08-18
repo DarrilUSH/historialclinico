@@ -53,6 +53,7 @@ import { Alerta } from "@/components/base/alerta"
 import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
 import { VeloEspera } from "@/components/base/velo-espera"
+import { DialogoDetallePendiente, DialogoDetalleProcesado } from "@/components/gmail/detalle-correo"
 import {
   aprenderRemitente,
   buscarCorreosAhora,
@@ -77,6 +78,15 @@ export interface AdjuntoParaBandeja {
   apto: boolean
   /** Por qué no se puede importar, en castellano. `null` si es apto. */
   motivoTexto: string | null
+  /**
+   * Heurística de bandeja (hotfix de huella digital, Sprint 17 en vivo): otro
+   * correo PENDIENTE trae un adjunto con el mismo nombre y tamaño -sin bajar
+   * ningún byte, solo con la metadata que el barrido ya registró-. Texto
+   * discreto, no bloquea nada; `null` si no hay coincidencia. El cotejo real
+   * por contenido pasa recién al tocar "Revisar este estudio"
+   * (`lib/documentos/huella.ts`).
+   */
+  posibleDuplicadoTexto: string | null
 }
 
 export interface CorreoParaBandeja {
@@ -96,12 +106,25 @@ export interface CorreoParaBandeja {
 export interface CorreoProcesadoParaBandeja {
   id: string
   asunto: string
+  /** Nombre visible del remitente si lo había; si no, la dirección. */
   remitente: string
+  /**
+   * La dirección, siempre. Ampliación en vivo (diálogo de detalle, 2026-08-18):
+   * cuando `remitente` es el nombre visible, el diálogo muestra las dos —el
+   * resumen de la tarjeta solo tenía lugar para una.
+   */
+  remitenteEmail: string
   fechaTexto: string
   /** Qué terminó pasando, en una frase corta. */
   destinoTexto: string
   /** El estudio que salió de acá, si sigue existiendo. */
   documentoId: string | null
+  /** El turno que salió de acá, si sigue existiendo (ampliación en vivo, diálogo de detalle). */
+  appointmentId: string | null
+  /** Los adjuntos que traía (ampliación en vivo, diálogo de detalle: "qué contenía"). */
+  adjuntos: AdjuntoParaBandeja[]
+  /** El cuerpo tenía pinta de aviso de turno (ampliación en vivo, diálogo de detalle). */
+  pareceTurno: boolean
   /** `true` si se puede volver a poner en la lista (quedó sin destino y tenía un adjunto). */
   puedeReabrir: boolean
 }
@@ -160,6 +183,9 @@ export function BandejaGmail({
   const avisos = [descarte, reapertura, aprendizaje, olvido, ingesta]
   const error = busqueda.error ?? avisos.find((estado) => estado.error)?.error ?? null
   const exito = busqueda.mensaje ?? avisos.find((estado) => estado.mensaje)?.mensaje ?? null
+  // Solo `ingesta` lo llena (ver `EstadoCorreoGmail.duplicado`). `?? null`
+  // porque el tipo lo declara opcional para las otras cuatro acciones.
+  const duplicado = ingesta.duplicado ?? null
 
   return (
     <section className="flex flex-col gap-4 chica:gap-3" aria-labelledby="titulo-bandeja-gmail">
@@ -189,6 +215,31 @@ export function BandejaGmail({
 
       {error && <Alerta variante="error">{error}</Alerta>}
       {!error && exito && <Alerta variante="exito">{exito}</Alerta>}
+
+      {!error && duplicado && (
+        <div className="flex flex-col gap-3">
+          <Alerta variante="advertencia">
+            Este archivo es idéntico a «{duplicado.titulo}» cargado el {duplicado.fechaTexto}.
+          </Alerta>
+          <div className="flex flex-wrap gap-2">
+            <Boton
+              render={<a href={`/estudios/${duplicado.documentoId}`} />}
+              nativeButton={false}
+              size="sm"
+            >
+              Ver ese estudio
+            </Boton>
+            <form action={ingerir}>
+              <input type="hidden" name="correoId" value={duplicado.correoId} />
+              <input type="hidden" name="adjuntoId" value={duplicado.adjuntoId} />
+              <input type="hidden" name="forzar" value="1" />
+              <Boton type="submit" variant="outline" size="sm" cargando={ingiriendo}>
+                Cargar igual
+              </Boton>
+            </form>
+          </div>
+        </div>
+      )}
 
       {pendientes.length === 0 ? (
         <Tarjeta className="flex flex-col gap-2 p-5 chica:gap-1.5 chica:p-4">
@@ -241,14 +292,7 @@ export function BandejaGmail({
                 key={correo.id}
                 className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2 last:border-b-0 last:pb-0"
               >
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-base font-medium chica:text-sm">
-                    {correo.asunto}
-                  </span>
-                  <span className="truncate text-sm text-muted-foreground chica:text-xs">
-                    {correo.remitente} · {correo.fechaTexto} · {correo.destinoTexto}
-                  </span>
-                </div>
+                <DialogoDetalleProcesado correo={correo} accionReabrir={reabrir} />
                 {correo.puedeReabrir && (
                   <form action={reabrir}>
                     <input type="hidden" name="correoId" value={correo.id} />
@@ -332,31 +376,39 @@ function CorreoPendiente({
 
   return (
     <Tarjeta className="flex flex-col gap-3 p-4 chica:gap-2 chica:p-3">
-      <div className="flex flex-col gap-0.5">
-        <p className="text-base font-semibold chica:text-sm">{correo.asunto}</p>
-        <p className="text-sm text-muted-foreground chica:text-xs">
-          <span className="break-all">{correo.remitente}</span> · {correo.fechaTexto}
-        </p>
-      </div>
+      <DialogoDetallePendiente
+        correo={correo}
+        puedeCargar={puedeCargar}
+        accionIngerir={accionIngerir}
+        accionDescartar={accionDescartar}
+        accionAprender={accionAprender}
+      />
 
       {aptos.length > 0 && (
         <ul className="flex flex-col gap-2 chica:gap-1.5">
           {aptos.map((adjunto) => (
-            <li key={adjunto.id} className="flex flex-wrap items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-2 text-base chica:text-sm">
-                <FileTextIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
-                <span className="truncate">{adjunto.nombre}</span>
-                <span className="shrink-0 text-muted-foreground">{adjunto.tamanoTexto}</span>
-              </span>
-              {puedeCargar && (
-                <form action={accionIngerir}>
-                  <input type="hidden" name="correoId" value={correo.id} />
-                  <input type="hidden" name="adjuntoId" value={adjunto.id} />
-                  <Boton type="submit" size="sm">
-                    <MailOpenIcon aria-hidden="true" />
-                    Revisar este estudio
-                  </Boton>
-                </form>
+            <li key={adjunto.id} className="flex flex-col gap-1">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-2 text-base chica:text-sm">
+                  <FileTextIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+                  <span className="truncate">{adjunto.nombre}</span>
+                  <span className="shrink-0 text-muted-foreground">{adjunto.tamanoTexto}</span>
+                </span>
+                {puedeCargar && (
+                  <form action={accionIngerir}>
+                    <input type="hidden" name="correoId" value={correo.id} />
+                    <input type="hidden" name="adjuntoId" value={adjunto.id} />
+                    <Boton type="submit" size="sm">
+                      <MailOpenIcon aria-hidden="true" />
+                      Revisar este estudio
+                    </Boton>
+                  </form>
+                )}
+              </div>
+              {adjunto.posibleDuplicadoTexto && (
+                <p className="text-sm text-muted-foreground chica:text-xs">
+                  {adjunto.posibleDuplicadoTexto}
+                </p>
               )}
             </li>
           ))}

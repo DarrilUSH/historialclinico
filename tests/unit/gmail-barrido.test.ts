@@ -688,7 +688,21 @@ describe("ingerirAdjuntoDeGmail — el puente al pipeline de siempre", () => {
           },
         }),
       },
+      // El `select(...).eq(...).eq(...).order(...).limit(...).maybeSingle()`
+      // es el cotejo de huella de `lib/documentos/huella.ts` (hotfix, Sprint
+      // 17 en vivo): este cliente falso siempre contesta "sin duplicado" -no
+      // es lo que prueba este test, que es el PUENTE al pipeline- para que
+      // `ingestarDocumento` siga de largo hasta el `insert` de siempre.
       from: () => ({
+        select: () => {
+          const encadenable = {
+            eq: () => encadenable,
+            order: () => encadenable,
+            limit: () => encadenable,
+            maybeSingle: async () => ({ data: null, error: null }),
+          }
+          return encadenable
+        },
         insert: (fila: Record<string, unknown>) => {
           filas.push(fila)
           return {
@@ -717,7 +731,7 @@ describe("ingerirAdjuntoDeGmail — el puente al pipeline de siempre", () => {
     const falso = supabaseFalso()
     const marcados: { correo: string; estado: string; documentId?: string }[] = []
 
-    const { documento } = await ingerirAdjuntoDeGmail({
+    const resultado = await ingerirAdjuntoDeGmail({
       // El cliente falso implementa lo que `ingestarDocumento` usa de verdad.
       supabase: falso.cliente as never,
       userId: "usuario-1",
@@ -734,6 +748,9 @@ describe("ingerirAdjuntoDeGmail — el puente al pipeline de siempre", () => {
       },
     })
 
+    if (resultado.duplicado) throw new Error("No se esperaba un duplicado en este test")
+    const { documento } = resultado
+
     // El documento quedó creado por el pipeline REAL, con su path
     // determinístico `{perfil}/{año}/{uuid}.pdf`.
     expect(documento.documentoId).toBe("22222222-2222-4222-8222-222222222222")
@@ -745,13 +762,15 @@ describe("ingerirAdjuntoDeGmail — el puente al pipeline de siempre", () => {
     expect(falso.subidas[0].bytes).toBe(PDF_REAL.length)
 
     // Y la fila de `documents` entró como PENDIENTE de confirmar: sin
-    // `confirmed_at`, con la categoría provisional, igual que una subida a mano.
+    // `confirmed_at`, con la categoría provisional, igual que una subida a mano,
+    // y con su huella SHA-256 (hotfix de huella digital, Sprint 17 en vivo).
     expect(falso.filas[0]).toMatchObject({
       profile_id: "660e8400-e29b-41d4-a716-446655440003",
       title: "resultado",
       category: "other",
       mime_type: "application/pdf",
     })
+    expect(falso.filas[0].content_sha256).toMatch(/^[0-9a-f]{64}$/)
     expect(falso.filas[0]).not.toHaveProperty("confirmed_at")
 
     expect(marcados).toEqual([

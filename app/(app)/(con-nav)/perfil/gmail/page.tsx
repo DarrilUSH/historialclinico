@@ -60,6 +60,7 @@ import { PanelConexionGmail } from "@/components/gmail/panel-conexion-gmail"
 import { formatearBytes } from "@/lib/archivos/validacion"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { esResultadoConexion, obtenerConexionGmail } from "@/lib/gmail/conexion"
+import { emparejarPorNombreYTamano } from "@/lib/gmail/deteccion-duplicados"
 import {
   listarCorreosPendientes,
   listarCorreosResueltos,
@@ -94,6 +95,20 @@ const FORMATO_SELLO = new Intl.DateTimeFormat("es-AR", {
   hour12: false,
 })
 
+/**
+ * "14:30", sin fecha — para el aviso "Posible duplicado del correo de las
+ * {hora}" (hotfix de huella digital, Sprint 17 en vivo): el caso real que lo
+ * motivó son dos correos del MISMO DÍA con segundos de diferencia (un
+ * reenvío "RV:"), así que la hora sola alcanza para que la persona reconozca
+ * cuál es el otro.
+ */
+const FORMATO_HORA = new Intl.DateTimeFormat("es-AR", {
+  timeZone: ZONA_HORARIA,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+})
+
 /** Espacios que ICU intercala y que hay que normalizar (mismo criterio que `lib/sos/frescura.ts`). */
 const ESPACIOS_INVISIBLES = /[  ]/g
 
@@ -115,21 +130,53 @@ function motivoDeAdjunto(motivo: string | null): string {
   return "no se puede importar."
 }
 
-/** Correo pendiente → lo que necesita la bandeja, con todo ya formateado en el servidor. */
-function aPendiente(correo: CorreoDeGmail, remitentesConFiltro: Set<string>): CorreoParaBandeja {
+/**
+ * Un adjunto → lo que necesita la bandeja, en el mismo formato para
+ * pendientes y ya revisados (`AdjuntoParaBandeja`). `posibleDuplicadoTexto`
+ * solo aplica a pendientes -pasado por quien llama-; en un correo ya
+ * revisado siempre es `null`.
+ */
+function aAdjunto(adjunto: CorreoDeGmail["adjuntos"][number], posibleDuplicadoTexto: string | null) {
+  return {
+    id: adjunto.attachmentId,
+    nombre: adjunto.filename,
+    tamanoTexto: formatearBytes(adjunto.size),
+    apto: adjunto.apto,
+    motivoTexto: adjunto.apto ? null : motivoDeAdjunto(adjunto.motivo),
+    posibleDuplicadoTexto,
+  }
+}
+
+/**
+ * Correo pendiente → lo que necesita la bandeja, con todo ya formateado en el
+ * servidor.
+ *
+ * `emparejados`/`horaPorCorreoId` vienen de `emparejarPorNombreYTamano`
+ * (hotfix de huella digital, Sprint 17 en vivo): arman el texto discreto
+ * "Posible duplicado del correo de las {hora}" en cada adjunto que comparte
+ * nombre y tamaño con el de OTRO correo pendiente, sin bajar ningún byte.
+ */
+function aPendiente(
+  correo: CorreoDeGmail,
+  remitentesConFiltro: Set<string>,
+  emparejados: Map<string, string>,
+  horaPorCorreoId: Map<string, string>,
+): CorreoParaBandeja {
   return {
     id: correo.id,
     asunto: correo.asunto ?? "(sin asunto)",
     remitente: correo.remitenteNombre ?? correo.remitenteEmail,
     remitenteEmail: correo.remitenteEmail,
     fechaTexto: formatear(correo.fechaIso, FORMATO_SELLO) ?? "sin fecha",
-    adjuntos: correo.adjuntos.map((adjunto) => ({
-      id: adjunto.attachmentId,
-      nombre: adjunto.filename,
-      tamanoTexto: formatearBytes(adjunto.size),
-      apto: adjunto.apto,
-      motivoTexto: adjunto.apto ? null : motivoDeAdjunto(adjunto.motivo),
-    })),
+    adjuntos: correo.adjuntos.map((adjunto) => {
+      const otroCorreoId = emparejados.get(`${correo.id}:${adjunto.attachmentId}`)
+      const horaDelOtro = otroCorreoId ? horaPorCorreoId.get(otroCorreoId) : null
+
+      return aAdjunto(
+        adjunto,
+        horaDelOtro ? `Posible duplicado del correo de las ${horaDelOtro}.` : null,
+      )
+    }),
     pareceTurno: correo.pareceTurno,
     tieneFiltro: remitentesConFiltro.has(correo.remitenteEmail),
   }
@@ -157,9 +204,13 @@ function aProcesado(correo: CorreoDeGmail): CorreoProcesadoParaBandeja {
     id: correo.id,
     asunto: correo.asunto ?? "(sin asunto)",
     remitente: correo.remitenteNombre ?? correo.remitenteEmail,
+    remitenteEmail: correo.remitenteEmail,
     fechaTexto: formatear(correo.fechaIso, FORMATO_SELLO) ?? "sin fecha",
     destinoTexto,
     documentoId: correo.documentId,
+    appointmentId: correo.appointmentId,
+    adjuntos: correo.adjuntos.map((adjunto) => aAdjunto(adjunto, null)),
+    pareceTurno: correo.pareceTurno,
     puedeReabrir:
       correo.estado === "ingresado" &&
       correo.documentId === null &&
@@ -186,6 +237,16 @@ export default async function PaginaGmail({
 
   const resultado = esResultadoConexion(parametros.resultado) ? parametros.resultado : null
   const remitentesConFiltro = new Set(filtros.map((filtro) => filtro.remitente))
+
+  // "Posible duplicado" (hotfix de huella digital, Sprint 17 en vivo): puro,
+  // sin red, solo con la metadata (nombre, tamaño) que el barrido ya
+  // registró en cada correo pendiente.
+  const emparejados = emparejarPorNombreYTamano(
+    pendientes.map((correo) => ({ id: correo.id, adjuntos: correo.adjuntos })),
+  )
+  const horaPorCorreoId = new Map(
+    pendientes.map((correo) => [correo.id, formatear(correo.fechaIso, FORMATO_HORA) ?? ""]),
+  )
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-3 chica:py-3">
@@ -238,7 +299,9 @@ export default async function PaginaGmail({
       */}
       {conexion !== null && (
         <BandejaGmail
-          pendientes={pendientes.map((correo) => aPendiente(correo, remitentesConFiltro))}
+          pendientes={pendientes.map((correo) =>
+            aPendiente(correo, remitentesConFiltro, emparejados, horaPorCorreoId),
+          )}
           procesados={procesados.map(aProcesado)}
           filtros={filtros.map((filtro) => ({
             id: filtro.id,

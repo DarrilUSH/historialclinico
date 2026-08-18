@@ -370,6 +370,7 @@ export type Database = {
           ai_summary: string | null
           category: Database["public"]["Enums"]["doc_category"]
           confirmed_at: string | null
+          content_sha256: string | null
           created_at: string
           created_by_profile_id: string | null
           doctor_id: string | null
@@ -391,6 +392,7 @@ export type Database = {
           ai_summary?: string | null
           category?: Database["public"]["Enums"]["doc_category"]
           confirmed_at?: string | null
+          content_sha256?: string | null
           created_at?: string
           created_by_profile_id?: string | null
           doctor_id?: string | null
@@ -412,6 +414,7 @@ export type Database = {
           ai_summary?: string | null
           category?: Database["public"]["Enums"]["doc_category"]
           confirmed_at?: string | null
+          content_sha256?: string | null
           created_at?: string
           created_by_profile_id?: string | null
           doctor_id?: string | null
@@ -1585,6 +1588,7 @@ export type Database = {
           ai_summary: string | null
           category: Database["public"]["Enums"]["doc_category"]
           confirmed_at: string | null
+          content_sha256: string | null
           created_at: string
           created_by_profile_id: string | null
           doctor_id: string | null
@@ -1652,6 +1656,7 @@ export type Database = {
           ai_summary: string | null
           category: Database["public"]["Enums"]["doc_category"]
           confirmed_at: string | null
+          content_sha256: string | null
           created_at: string
           created_by_profile_id: string | null
           doctor_id: string | null

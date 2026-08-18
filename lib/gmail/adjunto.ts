@@ -30,9 +30,26 @@ import "server-only"
  * El resultado para quien usa la app: toca "Revisar" en la bandeja de Gmail y
  * aterriza en `/estudios/nuevo/procesando?doc=…`, exactamente la misma
  * pantalla que ve después de sacarle una foto a un estudio.
+ *
+ * ## El cotejo de huella (hotfix de producto, Sprint 17 en vivo)
+ *
+ * `ingestarDocumento` coteja si el adjunto ya descargado coincide, por
+ * contenido, con un documento que el perfil ya tiene (`lib/documentos/
+ * huella.ts`). Acá es donde ese cotejo entra en juego para el camino de
+ * Gmail: los bytes YA están en manos del servidor (recién bajados de Google)
+ * y todavía no se creó ningún documento ni se marcó el correo como resuelto,
+ * que es exactamente el momento en el que hace falta cotejar. Si hay un
+ * duplicado y no se pidió `forzar`, esta función devuelve `{ duplicado: true,
+ * existente, correo }` **sin ingerir nada y sin tocar el estado del
+ * correo** -sigue `pendiente_revision`, tal como estaba-, para que la persona
+ * pueda decidir "Ver ese estudio" o "Cargar igual" (que vuelve a llamar acá
+ * con `forzar: true`, bajando el mismo adjunto de nuevo: es una llamada HTTP
+ * más a Gmail, no un costo que valga la pena evitar guardando el archivo en
+ * memoria entre requests).
  */
 
 import { ingestarDocumento, type DocumentoIngestado } from "@/lib/documentos/ingesta"
+import type { DuplicadoDetectado } from "@/lib/documentos/huella"
 import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
 import { obtenerAccessTokenGmail } from "@/lib/gmail/conexiones-admin"
 import { descargarAdjunto, type OpcionesBases } from "@/lib/gmail/google-api"
@@ -84,9 +101,20 @@ export interface ParametrosIngestaAdjunto {
   correoId: string
   /** `attachmentId` del adjunto elegido dentro de ese correo. */
   adjuntoId: string
+  /**
+   * `true` para saltear el cotejo de huella y crear el documento igual -lo
+   * pide "Cargar igual" después de que la persona ya vio el aviso de
+   * duplicado-. Default `false`.
+   */
+  forzar?: boolean
   bases?: OpcionesBases
   dependencias?: Partial<DependenciasAdjunto>
 }
+
+/** Lo que devuelve `ingerirAdjuntoDeGmail`: se ingirió, o se encontró un duplicado y no se tocó nada. */
+export type ResultadoIngestaAdjunto =
+  | { duplicado: false; documento: DocumentoIngestado; correo: MensajeRegistrado }
+  | { duplicado: true; existente: DuplicadoDetectado; correo: MensajeRegistrado }
 
 /**
  * Baja el adjunto y lo mete en el historial como documento PENDIENTE DE
@@ -97,10 +125,15 @@ export interface ParametrosIngestaAdjunto {
  * documento ya existe y se devuelve igual: es preferible un correo que sigue
  * figurando como pendiente (la persona lo descarta de un toque) que un
  * documento subido que nadie sabe que existe.
+ *
+ * Si `ingestarDocumento` encuentra un duplicado y no se pidió `forzar`,
+ * devuelve `{ duplicado: true, existente, correo }` SIN marcar el correo como
+ * resuelto: sigue pendiente hasta que la persona elija "Ver ese estudio" o
+ * "Cargar igual" (ver el encabezado del archivo).
  */
 export async function ingerirAdjuntoDeGmail(
   parametros: ParametrosIngestaAdjunto,
-): Promise<{ documento: DocumentoIngestado; correo: MensajeRegistrado }> {
+): Promise<ResultadoIngestaAdjunto> {
   const deps: DependenciasAdjunto = { ...DEPENDENCIAS_REALES, ...parametros.dependencias }
 
   const correo = await deps.obtenerCorreo(parametros.userId, parametros.correoId)
@@ -143,7 +176,17 @@ export async function ingerirAdjuntoDeGmail(
     { type: adjunto.mimeType },
   )
 
-  const documento = await ingestarDocumento(parametros.supabase, parametros.perfilId, archivo)
+  const resultado = await ingestarDocumento(parametros.supabase, parametros.perfilId, archivo, {
+    forzar: parametros.forzar,
+  })
+
+  if (resultado.duplicado) {
+    // Sin tocar el correo: sigue `pendiente_revision`, tal como estaba antes
+    // de esta llamada. La persona decide desde la bandeja.
+    return { duplicado: true, existente: resultado.existente, correo }
+  }
+
+  const documento = resultado.documento
 
   try {
     await deps.marcarResuelto(parametros.userId, correo.id, {
@@ -157,5 +200,5 @@ export async function ingerirAdjuntoDeGmail(
     )
   }
 
-  return { documento, correo }
+  return { duplicado: false, documento, correo }
 }
