@@ -1,6 +1,6 @@
 # Estado del proyecto — Historial Médico
 
-> **Última actualización:** 2026-08-18 — **EL SITIO ESTÁ EN PRODUCCIÓN: https://www.historialmedico.com.ar** (tarea #14, tutorial de bienvenida, completa en local — pendiente de `db push` + deploy del usuario)
+> **Última actualización:** 2026-08-18 — **EL SITIO ESTÁ EN PRODUCCIÓN: https://www.historialmedico.com.ar** — **SPRINT 17 COMPLETO + CHECKPOINT APROBADO**: conexión Gmail (17.1), barrido+ingesta+filtros (17.2), huella anti-duplicados, auto-ingesta sin dudas opt-in, y tutorial de bienvenida (tarea #14, migración `20260818170000`, arnés 516/516 ×2, vitest 1240/1240). Tras el deploy del tutorial: RESET DE ESTRENO en prod ejecutado a pedido del usuario (cuentas/consents/catálogo conservados, datos vaciados) — ver sección del maratón.
 > Este documento existe para retomar el trabajo exactamente donde quedó. Léelo completo antes de tocar nada.
 
 ## CORTE 2026-08-17 — Sprints 13 y 14 completos en producción; Google OAuth listo para el 17
