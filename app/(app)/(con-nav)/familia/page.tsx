@@ -113,7 +113,12 @@ export default async function PaginaFamilia() {
         siempre visible, sin relación con `autorizado` de abajo -ver el
         comentario de cabecera del archivo-.
       */}
-      <section className="flex flex-col gap-4 chica:gap-3">
+      {/* `id="crear-perfil-gestionado"`: destino del consejo "¿Un hijo o un
+          padre sin celular?" del tutorial de bienvenida (tarea #14,
+          `lib/consejos/contenido.ts`). Esta sección ya es independiente del
+          perfil activo (ver el comentario de cabecera del archivo), así que
+          el CTA es un `<Link>` directo, sin pasar por `/familia/enlace`. */}
+      <section id="crear-perfil-gestionado" className="flex flex-col gap-4 chica:gap-3">
         <div className="flex items-center gap-3 chica:gap-2">
           <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
             <UserPlusIcon className="size-5" aria-hidden="true" />
@@ -316,7 +321,10 @@ async function SeccionAccesosDelPerfilActivo({
         )}
       </section>
 
-      <section className="flex flex-col gap-4 chica:gap-3">
+      {/* `id="invitar"`: destino de `/familia/enlace` -el CTA del consejo
+          "Compartí con tu familia" del tutorial de bienvenida, tarea #14-.
+          Ver el encabezado de ese Route Handler. */}
+      <section id="invitar" className="flex flex-col gap-4 chica:gap-3">
         <h2 className="text-lg font-semibold text-foreground">Invitar a alguien</h2>
         <FormularioInvitar perfilId={perfilId} perfilNombre={perfilNombre} />
       </section>

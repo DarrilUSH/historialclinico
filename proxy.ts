@@ -32,6 +32,7 @@ import {
   esRutaPublica,
   esRutaSoloAnonima,
 } from "@/lib/auth/rutas";
+import { asegurarSesionConsejos } from "@/lib/consejos/sesion";
 import { actualizarSesion } from "@/lib/supabase/proxy";
 
 /**
@@ -63,7 +64,16 @@ function redirigirConservandoCookies(
 }
 
 export async function proxy(request: NextRequest) {
-  const { respuesta, usuario } = await actualizarSesion(request);
+  const sesion = await actualizarSesion(request);
+  const usuario = sesion.usuario;
+  // Cookie de sesión del tutorial de bienvenida (tarea #14): solo con sesión
+  // -no tiene sentido sembrarla en /login o en las páginas legales-, y
+  // siempre acá, ANTES de cualquier redirect de abajo, para que llegue
+  // escrita incluso en la primera request que aterriza directo en `/inicio`.
+  // Ver el encabezado de `lib/consejos/sesion.ts` para el porqué completo.
+  const respuesta = usuario
+    ? asegurarSesionConsejos(request, sesion.respuesta)
+    : sesion.respuesta;
   const { pathname, search } = request.nextUrl;
 
   // Sin sesión en ruta privada.

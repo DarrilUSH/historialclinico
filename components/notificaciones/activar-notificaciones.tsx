@@ -36,28 +36,28 @@
  * Los avisos de resultado van por `sonner` -el mismo `<Toaster>` del layout
  * con nav- para no mover la página bajo el dedo de quien acaba de tocar el
  * botón.
+ *
+ * La secuencia de "activar" (pedir permiso, suscribirse, guardar en la base,
+ * deshacer si el guardado falla) vive en `lib/push/activar.ts` desde la
+ * tarea #14 (tutorial de bienvenida): el consejo `notificaciones` de
+ * `/inicio` ofrece el mismo botón, y la extracción evita escribir la
+ * secuencia dos veces. Este componente conserva su propio estado y sus
+ * propios toasts -son los suyos, la extracción es solo de la orquestación-.
  */
 
 import { useCallback, useEffect, useState } from "react"
 import { BellIcon, BellOffIcon, BellRingIcon, SendIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { guardarSuscripcion, revocarSuscripcion } from "@/app/(app)/(con-nav)/inicio/actions"
+import { revocarSuscripcion } from "@/app/(app)/(con-nav)/inicio/actions"
 import { Alerta } from "@/components/base/alerta"
 import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
+import { activarNotificacionesPush, MENSAJE_NOTIFICACIONES_DENEGADAS } from "@/lib/push/activar"
 import { haySoportePush } from "@/lib/push/registrar-sw"
-import {
-  cancelarSuscripcion,
-  estadoPermiso,
-  obtenerSuscripcionActual,
-  pedirPermisoYSuscribir,
-} from "@/lib/push/suscripcion"
+import { cancelarSuscripcion, estadoPermiso, obtenerSuscripcionActual } from "@/lib/push/suscripcion"
 
 type EstadoBanner = "comprobando" | "sin_soporte" | "inactivo" | "activo" | "denegado"
-
-const MENSAJE_DENEGADO =
-  "Bloqueaste las notificaciones para este sitio. Para reactivarlas, tocá el candado (o el ícono de ajustes) a la izquierda de la dirección web y permití las notificaciones."
 
 export function ActivarNotificaciones() {
   const [estado, setEstado] = useState<EstadoBanner>("comprobando")
@@ -92,9 +92,7 @@ export function ActivarNotificaciones() {
   const activar = useCallback(async () => {
     setTrabajando(true)
     try {
-      const resultado = await pedirPermisoYSuscribir(
-        process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "",
-      )
+      const resultado = await activarNotificacionesPush()
 
       if (resultado.estado === "denegado") {
         setEstado("denegado")
@@ -109,19 +107,6 @@ export function ActivarNotificaciones() {
         console.error("[push] No se pudo suscribir:", resultado.mensaje)
         toast.error("No pudimos activar las notificaciones", {
           description: "Probá de nuevo en unos minutos.",
-        })
-        return
-      }
-
-      const guardado = await guardarSuscripcion(resultado.datos)
-      if (!guardado.ok) {
-        // La suscripción quedó viva en el navegador pero no en nuestra base:
-        // se deshace para que el estado de las dos puntas coincida. Dejarla
-        // colgada haría que el banner mostrara "activadas" y no llegara nunca
-        // ninguna notificación.
-        await cancelarSuscripcion()
-        toast.error("No pudimos activar las notificaciones", {
-          description: guardado.error ?? undefined,
         })
         return
       }
@@ -164,7 +149,7 @@ export function ActivarNotificaciones() {
   if (estado === "denegado") {
     return (
       <Alerta variante="advertencia" titulo="Las notificaciones están bloqueadas" estatica>
-        {MENSAJE_DENEGADO}
+        {MENSAJE_NOTIFICACIONES_DENEGADAS}
       </Alerta>
     )
   }

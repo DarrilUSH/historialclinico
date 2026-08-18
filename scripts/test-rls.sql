@@ -8388,6 +8388,296 @@ end $$;
 
 
 -- =============================================================================
+-- BLOQUE 26 — Estado de los consejos del tutorial de bienvenida
+-- (consejos_estado, tarea #14, migración 20260818170000)
+-- -----------------------------------------------------------------------------
+-- A diferencia de casi todas las tablas nuevas de las últimas migraciones
+-- (append-only como consents, o de solo lectura para authenticated como
+-- gmail_messages), acá el CLIENTE SÍ escribe lo suyo directo: es una
+-- preferencia de interfaz sin ningún valor clínico ni probatorio, así que
+-- SELECT/INSERT/UPDATE quedan otorgados a `authenticated` con `auth.uid()`
+-- como única cerradura (ver el encabezado de la migración). Este bloque
+-- prueba las tres operaciones sobre la fila propia, que ninguna alcanza la
+-- fila ajena (ni para leer, ni para insertar a su nombre, ni para
+-- reasignársela con un UPDATE), los dos CHECK del dominio cerrado
+-- (consejo_id, estado), la restricción única (user_id, consejo_id) y que
+-- DELETE/TRUNCATE siguen sin privilegio -la segunda capa, sin política que
+-- haga falta rechazar-.
+--
+-- Dos cuentas nuevas, prefijo f2600 (para no chocar con f2400 del BLOQUE 25):
+--   f2600aaa "A" — pospone un consejo, lo pasa a descartado, prueba los
+--                  intentos de cruzarse con B.
+--   f2600bbb "B" — inserta el suyo por separado, para probar el aislamiento
+--                  en los dos sentidos.
+-- No hace falta perfil con id fijo (a diferencia del BLOQUE 25):
+-- `consejos_estado` solo referencia `auth.users`, nunca `profiles`.
+-- =============================================================================
+\echo ''
+\echo '### BLOQUE 26 — estado de los consejos del tutorial de bienvenida'
+
+delete from public.consejos_estado
+ where user_id in ('f2600aaa-1111-4111-8111-111111111111', 'f2600bbb-2222-4222-8222-222222222222');
+
+insert into auth.users (id, email, instance_id, aud, role, encrypted_password,
+                        email_confirmed_at, created_at, updated_at)
+values
+    ('f2600aaa-1111-4111-8111-111111111111', 'a.consejos@ejemplo.com.ar',
+     '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+     'x', now(), now(), now()),
+    ('f2600bbb-2222-4222-8222-222222222222', 'b.consejos@ejemplo.com.ar',
+     '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+     'x', now(), now(), now());
+
+-- ── A: inserta, lee, actualiza, y prueba todos los cruces con B.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2600aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v integer;
+begin
+    insert into public.consejos_estado (user_id, consejo_id, estado)
+    values ('f2600aaa-1111-4111-8111-111111111111', 'ficha_sos', 'pospuesto');
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'A pospone "ficha_sos" ("Ahora no")  [CRITERIO DE ACEPTACIÓN]',
+        '1 filas', v || ' filas');
+end $$;
+
+select pruebas_rls.registrar('26. Consejos (consejos_estado)',
+       'A lee su propia fila (SELECT propio)', '1',
+       (select count(*)::text from public.consejos_estado
+         where user_id = 'f2600aaa-1111-4111-8111-111111111111'));
+
+-- INSERT a nombre de OTRA cuenta: el WITH CHECK lo rechaza.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consejos_estado (user_id, consejo_id, estado)
+        values ('f2600bbb-2222-4222-8222-222222222222', 'gmail', 'pospuesto');
+        v := 'insertado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'A NO puede insertar un consejo a nombre de B (WITH CHECK)',
+        'rechazado (42501)', v);
+end $$;
+
+-- consejo_id fuera del dominio cerrado de seis ids.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consejos_estado (user_id, consejo_id, estado)
+        values ('f2600aaa-1111-4111-8111-111111111111', 'no_existe', 'pospuesto');
+        v := 'insertado';
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'Un consejo_id fuera de los seis conocidos es rechazado por el CHECK',
+        'rechazado (23514)', v);
+end $$;
+
+-- estado fuera de {'pospuesto', 'descartado'}.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consejos_estado (user_id, consejo_id, estado)
+        values ('f2600aaa-1111-4111-8111-111111111111', 'gmail', 'archivado');
+        v := 'insertado';
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'Un estado fuera de pospuesto/descartado es rechazado por el CHECK',
+        'rechazado (23514)', v);
+end $$;
+
+-- Restricción única (user_id, consejo_id): un segundo INSERT del mismo par
+-- choca. El upsert real de la app (`app/(app)/(con-nav)/inicio/actions.ts`)
+-- usa ON CONFLICT sobre esta misma restricción -acá se prueba el INSERT
+-- pelado, que es lo que la restricción en sí garantiza.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consejos_estado (user_id, consejo_id, estado)
+        values ('f2600aaa-1111-4111-8111-111111111111', 'ficha_sos', 'descartado');
+        v := 'insertado';
+    exception when unique_violation then v := 'rechazado (23505)';
+             when others            then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'Un segundo consejo_id repetido para la misma cuenta choca contra la restricción única',
+        'rechazado (23505)', v);
+end $$;
+
+-- UPDATE de la fila propia: "Ahora no" → "No mostrar más" sobre el mismo consejo.
+do $$
+declare v integer;
+begin
+    update public.consejos_estado set estado = 'descartado'
+     where user_id = 'f2600aaa-1111-4111-8111-111111111111' and consejo_id = 'ficha_sos';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'A pasa su propio consejo de pospuesto a descartado (UPDATE propio)  [CRITERIO DE ACEPTACIÓN]',
+        '1 filas', v || ' filas');
+end $$;
+
+-- UPDATE apuntando a la fila de B (que todavía no existe): 0 filas, sin error
+-- -mismo criterio de negación silenciosa que el resto del proyecto-.
+do $$
+declare v integer;
+begin
+    update public.consejos_estado set estado = 'descartado'
+     where user_id = 'f2600bbb-2222-4222-8222-222222222222' and consejo_id = 'gmail';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'A intenta actualizar una fila de B: 0 filas, sin error (USING la filtra)',
+        '0 filas', v || ' filas');
+end $$;
+
+-- Reasignar la fila propia a B vía UPDATE: el WITH CHECK lo rechaza.
+do $$
+declare v text;
+begin
+    begin
+        update public.consejos_estado set user_id = 'f2600bbb-2222-4222-8222-222222222222'
+         where user_id = 'f2600aaa-1111-4111-8111-111111111111' and consejo_id = 'ficha_sos';
+        v := 'reasignado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'A NO puede reasignar su fila a B con un UPDATE de user_id (WITH CHECK)',
+        'rechazado (42501)', v);
+end $$;
+
+-- DELETE: sin PRIVILEGIO, no solo sin política (ver el encabezado de la migración).
+do $$
+declare v text;
+begin
+    begin
+        delete from public.consejos_estado
+         where user_id = 'f2600aaa-1111-4111-8111-111111111111' and consejo_id = 'ficha_sos';
+        v := 'borrado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'authenticated NO tiene GRANT DELETE sobre consejos_estado',
+        'denegado (42501)', v);
+end $$;
+
+-- TRUNCATE: el revoke que no es decorativo. RLS no lo filtraría.
+do $$
+declare v text;
+begin
+    begin
+        truncate table public.consejos_estado;
+        v := 'vaciada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'authenticated NO puede TRUNCATE consejos_estado',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+-- ── B: inserta el suyo por separado, aislamiento en el otro sentido.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2600bbb-2222-4222-8222-222222222222","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v integer;
+begin
+    insert into public.consejos_estado (user_id, consejo_id, estado)
+    values ('f2600bbb-2222-4222-8222-222222222222', 'notificaciones', 'pospuesto');
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'B inserta su propio consejo por separado', '1 filas', v || ' filas');
+end $$;
+
+select pruebas_rls.registrar('26. Consejos (consejos_estado)',
+       'B NO ve la fila de A  [CRITERIO DE ACEPTACIÓN]', '0 filas',
+       (select count(*)::text || ' filas' from public.consejos_estado
+         where user_id = 'f2600aaa-1111-4111-8111-111111111111'));
+
+commit;
+
+-- ── anon: nada de nada.
+begin;
+select set_config('request.jwt.claims', '', true);
+set local role anon;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.consejos_estado;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'anon NO puede leer consejos_estado (sin GRANT SELECT)', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consejos_estado (user_id, consejo_id, estado)
+        values ('f2600aaa-1111-4111-8111-111111111111', 'gmail', 'pospuesto');
+        v := 'insertado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('26. Consejos (consejos_estado)',
+        'anon NO tiene GRANT INSERT sobre consejos_estado (REVOKE no concede nada)',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+-- Invariantes estructurales.
+select pruebas_rls.registrar('26. Consejos (consejos_estado)',
+       'consejos_estado tiene RLS habilitada', 'true',
+       (select rowsecurity::text from pg_tables
+         where schemaname = 'public' and tablename = 'consejos_estado'));
+
+select pruebas_rls.registrar('26. Consejos (consejos_estado)',
+       'Privilegios de anon sobre consejos_estado', '0',
+       (select count(*)::text from information_schema.role_table_grants
+         where table_schema = 'public' and table_name = 'consejos_estado' and grantee = 'anon'));
+
+select pruebas_rls.registrar('26. Consejos (consejos_estado)',
+       'authenticated SÍ tiene SELECT/INSERT/UPDATE (acá el cliente escribe lo suyo)', '3',
+       (select count(*)::text from information_schema.role_table_grants
+         where table_schema = 'public' and table_name = 'consejos_estado'
+           and grantee = 'authenticated' and privilege_type in ('SELECT', 'INSERT', 'UPDATE')));
+
+select pruebas_rls.registrar('26. Consejos (consejos_estado)',
+       'authenticated NO tiene DELETE (sin política que ofrecer "olvidate de esto")', '0',
+       (select count(*)::text from information_schema.role_table_grants
+         where table_schema = 'public' and table_name = 'consejos_estado'
+           and grantee = 'authenticated' and privilege_type = 'DELETE'));
+
+select pruebas_rls.registrar('26. Consejos (consejos_estado)',
+       'El trigger de refresco de updated_at existe', '1',
+       (select count(*)::text from pg_trigger
+         where tgrelid = 'public.consejos_estado'::regclass
+           and tgname = 'consejos_estado_set_updated_at'));
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
@@ -8518,6 +8808,14 @@ delete from vault.secrets where name in (
     'gmail_refresh_token_f2400a00-1111-4111-8111-111111111111',
     'gmail_refresh_token_f2400b00-1111-4111-8111-111111111111');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
+-- Cuentas del BLOQUE 26 (tarea #14, tutorial de bienvenida). Alcanza con
+-- borrar las dos cuentas: sus filas de consejos_estado cuelgan con
+-- ON DELETE CASCADE y ninguna de las dos tiene perfil con id fijo que
+-- limpiar aparte (el trigger de alta les crea uno con id aleatorio, que se
+-- va con el mismo CASCADE).
+delete from auth.users where id in (
+    'f2600aaa-1111-4111-8111-111111111111',
+    'f2600bbb-2222-4222-8222-222222222222');
 
 drop schema pruebas_rls cascade;
 

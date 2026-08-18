@@ -20,6 +20,11 @@
  * `/terminos` sean "accesibles desde el pie sin sesión": `<PiePaginasLegales
  * />` va debajo de la tarjeta, dentro del mismo `<main>` -no es un segundo
  * landmark-, verificable sin sesión con `curl http://localhost:3000/login`.
+ *
+ * `mostrarAyuda={false}` (tarea #14): `/ayuda` vive bajo sesión
+ * (`app/(app)/(con-nav)/ayuda/`), así que un tercer link a una pantalla a la
+ * que nadie sin sesión puede entrar no aporta nada acá — mismo criterio con
+ * el que este pie NO ofrece "Cerrar sesión" en estas cuatro pantallas.
  */
 
 import type { ReactNode } from "react"
@@ -37,7 +42,7 @@ export default function LayoutAuth({ children }: { children: ReactNode }) {
     // nunca hay dos <main> en la misma página.
     <main className="flex min-h-dvh w-full flex-1 flex-col items-center justify-center gap-2 bg-muted/30 px-4 py-10 chica:gap-1 chica:px-3 chica:py-6">
       {children}
-      <PiePaginasLegales />
+      <PiePaginasLegales mostrarAyuda={false} />
     </main>
   )
 }

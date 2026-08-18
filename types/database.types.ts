@@ -223,6 +223,33 @@ export type Database = {
           },
         ]
       }
+      consejos_estado: {
+        Row: {
+          consejo_id: string
+          created_at: string
+          estado: string
+          id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          consejo_id: string
+          created_at?: string
+          estado: string
+          id?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          consejo_id?: string
+          created_at?: string
+          estado?: string
+          id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       consents: {
         Row: {
           accepted_at: string

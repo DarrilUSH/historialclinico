@@ -52,6 +52,7 @@ import { redirect } from "next/navigation"
 
 import {
   ActivityIcon,
+  CircleHelpIcon,
   ClipboardListIcon,
   CreditCardIcon,
   HeartPulseIcon,
@@ -65,10 +66,12 @@ import {
 
 import { AccionesDiferidasInicio } from "@/components/inicio/acciones-diferidas"
 import { BotonSos } from "@/components/inicio/boton-sos"
+import { ConsejoInicio } from "@/components/inicio/consejo"
 import { ProximoTurno } from "@/components/inicio/proximo-turno"
 import { CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA } from "@/components/base/tarjeta"
 import { BannerAlertasSignos } from "@/components/signos/banner-alerta"
 import { requerirSesion } from "@/lib/auth/guardas"
+import { resolverConsejos } from "@/lib/consejos/servidor"
 import { contarAutoCargadosRecientes, contarCorreosPendientes } from "@/lib/gmail/mensajes"
 import { obtenerTomasDeHoy } from "@/lib/medicacion/tomas-de-hoy"
 import { cn } from "@/lib/utils"
@@ -95,9 +98,16 @@ export default async function PaginaInicio() {
   // de `obtenerPerfilActivo()` -esa está memoizada con `cache()`-, es solo
   // el cliente de Supabase que esta función necesita y que
   // `obtenerPerfilActivo()` no expone.
-  const { supabase } = await requerirSesion()
+  const { supabase, usuario } = await requerirSesion()
   const tomasDeHoy = await obtenerTomasDeHoy(supabase, perfil.id)
   const tomasPendientesHoy = tomasDeHoy.filter((toma) => toma.status === "pending").length
+
+  // Tutorial de bienvenida (tarea #14): el mejor consejo entre los cuatro
+  // "server-conocibles", más el descarte/postergación de los seis -el
+  // Client Component completa el cuadro con las dos condiciones que solo el
+  // navegador conoce. Es de la CUENTA, no del perfil activo -mismo criterio
+  // que la card de Gmail más abajo-, así que no depende de `perfil`/`permisos`.
+  const resumenConsejos = await resolverConsejos(supabase, usuario.id)
 
   // Banner de alertas de signos vitales (Sprint 9, tarea 9.3): mismo criterio
   // de permiso que `/signos` -solo `can_manage` recibe el push y solo
@@ -175,6 +185,25 @@ export default async function PaginaInicio() {
           derecha- desde adentro del propio componente (`components/turnos/tarjeta-turno.tsx`),
           así la mejora alcanza también a `/turnos` sin duplicar código acá. */}
       <ProximoTurno />
+
+      {/*
+        Tutorial de bienvenida (tarea #14, docs/tutorial-bienvenida.md): UN
+        consejo contextual, arriba de la grilla, el de mayor prioridad entre
+        los seis que sigue pendiente. Va DESPUÉS del SOS y del banner de
+        alertas de signos vitales a propósito -esos dos son, respectivamente,
+        una función de emergencia y un aviso clínico sin ver, y ninguno de
+        los dos debería competir por atención con un consejo de bienvenida-,
+        pero antes de la grilla: es la última cosa que la persona ve antes de
+        sus accesos directos, el lugar natural para un empujón hacia la
+        función que todavía le falta. `ConsejoInicio` devuelve `null` sin
+        ningún consejo pendiente, así que no hace falta un `if` acá -mismo
+        patrón que `BannerAlertasSignos`-.
+      */}
+      <ConsejoInicio
+        elegidoServidor={resumenConsejos.elegidoServidor}
+        descarte={resumenConsejos.descarte}
+        perfilPropioId={resumenConsejos.perfilPropioId}
+      />
 
       {/* Grilla de accesos directos (Sprint 7 a 10): en grande, columna
           apilada de siempre. En chica, grilla de tiles compactos -ver el
@@ -347,6 +376,28 @@ export default async function PaginaInicio() {
           insignia={correosGmailPendientes > 0 ? correosGmailPendientes : null}
         />
       </div>
+
+      {/*
+        Link a /ayuda (tarea #14): la lista completa de los seis pasos,
+        siempre consultable, aunque ya se hayan descartado todos los
+        consejos contextuales. Va FUERA de la grilla de arriba a propósito
+        -esa grilla está afinada para caer en filas exactas de 3 columnas en
+        chica (ver el comentario de su cabecera): agregarle un tile más la
+        rompe casi siempre (7, 8, 9 o 10 tiles según los permisos, y ninguno
+        de esos números es múltiplo de 3 salvo el 9 que ya usa todo el
+        espacio)-, así que es un link discreto propio, con el mismo trato
+        visual que el pie de "Política de privacidad" del layout
+        (`components/legal/pie-paginas-legales.tsx`, que también enlaza a
+        /ayuda) pero repetido ACÁ porque en esta pantalla puntual conviene
+        que se vea sin tener que bajar hasta el pie.
+      */}
+      <Link
+        href="/ayuda"
+        className="inline-flex min-h-tactil items-center gap-2 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline chica:min-h-0"
+      >
+        <CircleHelpIcon className="size-4 shrink-0" aria-hidden="true" />
+        ¿Cómo empiezo? Guía de primeros pasos
+      </Link>
 
       {/*
         El banner de recordatorios se renderiza SIEMPRE desde el servidor y

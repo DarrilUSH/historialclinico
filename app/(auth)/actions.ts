@@ -39,6 +39,7 @@ import type { AuthError } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 import { ACCION, registrarAcceso } from "@/lib/auditoria"
 import { esErrorDeGuarda, requerirSesion } from "@/lib/auth/guardas"
+import { limpiarSesionConsejos } from "@/lib/consejos/servidor"
 import {
   limpiarCookieTamano,
   sincronizarCookieTamano,
@@ -350,6 +351,12 @@ export async function cerrarSesion(): Promise<void> {
   // sería el único resto de su sesión que sobrevive al logout y lo primero que
   // vería Roberto al entrar en el mismo navegador.
   await limpiarCookieTamano()
+  // Un logout consciente también cuenta como frontera de sesión del
+  // tutorial de bienvenida (tarea #14): la próxima vez que esta cuenta -o
+  // la siguiente, en un navegador compartido- inicie sesión, cualquier
+  // "Ahora no" pospuesto antes vuelve a poder mostrarse. Ver el encabezado
+  // de `lib/consejos/sesion.ts`.
+  await limpiarSesionConsejos()
   redirect(RUTA_LOGIN)
 }
 

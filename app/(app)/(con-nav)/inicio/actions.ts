@@ -38,6 +38,9 @@
  * salud de nadie: son una preferencia de dispositivo de la propia cuenta.
  */
 
+import { revalidatePath } from "next/cache"
+
+import { esConsejoId } from "@/lib/consejos/tipos"
 import { createClient } from "@/lib/supabase/server"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import {
@@ -156,4 +159,78 @@ export async function revocarSuscripcion(datos: unknown): Promise<ResultadoAccio
     console.error("[push] Fallo inesperado al revocar la suscripción:", error)
     return { ok: false, error: ERROR_REVOCAR }
   }
+}
+
+/**
+ * "Ahora no" / "No mostrar más" del tutorial de bienvenida (tarea #14).
+ *
+ * Las dos son un `upsert` directo del cliente sobre `consejos_estado` -a
+ * diferencia del alta de una suscripción push, acá NO hace falta ningún RPC
+ * `security definer`: es una preferencia de interfaz sin valor clínico, la
+ * fila es siempre la propia, y las tres políticas de la migración
+ * (`20260818170000_consejos.sql`) ya expresan la regla completa
+ * (`user_id = auth.uid()` en SELECT/INSERT/UPDATE). `onConflict` apunta a la
+ * restricción única `(user_id, consejo_id)`: tocar el mismo consejo dos
+ * veces (por ejemplo, "Ahora no" y después "No mostrar más") pisa la fila en
+ * vez de acumular filas viejas.
+ *
+ * `esConsejoId` es la misma defensa que `esTamano` en `cambiarTamano`
+ * (`app/(app)/actions.ts`): una Server Action es un endpoint público, y un
+ * `consejo_id` que no sea uno de los seis conocidos se ignora en silencio
+ * -ni se persiste, ni se toca la base- en vez de dejar que el CHECK de la
+ * tabla lo rechace con un error feo que de todos modos no correspondía
+ * mostrarle a nadie.
+ */
+export interface ResultadoAccionConsejo {
+  ok: boolean
+  error: string | null
+}
+
+const SIN_SESION_CONSEJO = "Tu sesión venció. Volvé a entrar para guardar tu elección."
+const ERROR_CONSEJO = "No pudimos guardar tu elección. Probá de nuevo en unos minutos."
+
+async function guardarEstadoConsejo(
+  consejoIdCrudo: string,
+  estado: "pospuesto" | "descartado",
+): Promise<ResultadoAccionConsejo> {
+  if (!esConsejoId(consejoIdCrudo)) {
+    return OK
+  }
+
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { ok: false, error: SIN_SESION_CONSEJO }
+    }
+
+    const { error } = await supabase.from("consejos_estado").upsert(
+      { user_id: user.id, consejo_id: consejoIdCrudo, estado },
+      { onConflict: "user_id,consejo_id" },
+    )
+
+    if (error) {
+      console.error("[consejos] No se pudo guardar el estado del consejo:", error)
+      return { ok: false, error: ERROR_CONSEJO }
+    }
+
+    revalidatePath("/inicio")
+    return OK
+  } catch (error) {
+    console.error("[consejos] Fallo inesperado al guardar el estado del consejo:", error)
+    return { ok: false, error: ERROR_CONSEJO }
+  }
+}
+
+/** "Ahora no": posterga el consejo hasta la próxima sesión (ver `lib/consejos/sesion.ts`). */
+export async function posponerConsejo(consejoId: string): Promise<ResultadoAccionConsejo> {
+  return guardarEstadoConsejo(consejoId, "pospuesto")
+}
+
+/** "No mostrar más": descarte definitivo para esta cuenta. */
+export async function descartarConsejo(consejoId: string): Promise<ResultadoAccionConsejo> {
+  return guardarEstadoConsejo(consejoId, "descartado")
 }
