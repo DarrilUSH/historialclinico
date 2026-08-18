@@ -59,6 +59,7 @@ export default async function PaginaLogin({
         descripcion="Ingresá con tu correo y tu contraseña para ver tu historial médico."
         accion={iniciarSesion}
         textoBoton="Iniciar sesión"
+        mensajeEspera="Ingresando…"
         camposOcultos={destino ? { [PARAM_DESDE]: destino } : undefined}
         campos={[
           {

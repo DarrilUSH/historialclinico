@@ -25,13 +25,20 @@
  * diferencia de un simple `console.log` duplicado, acá una segunda ejecución
  * gasta cuota real de la API. Ver la explicación completa en el commit que
  * introdujo este patrón (tarea 4.3 del roadmap).
+ *
+ * ## Velo de espera (Sprint 14, "Feedback de espera global")
+ *
+ * "La inteligencia artificial está leyendo tu estudio…" es la segunda etapa
+ * REAL de la ingesta -ver el comentario equivalente en
+ * `../pantalla-carga.tsx` para las otras dos-. Reemplaza al mismo
+ * `<div role="status">` que tenía esta pantalla antes, por el mismo motivo:
+ * evitar dos regiones vivas anunciando lo mismo.
  */
 
 import * as React from "react"
 
-import { Loader2Icon } from "lucide-react"
-
 import { FormularioRevision } from "@/components/documentos/formulario-revision"
+import { VeloEspera } from "@/components/base/velo-espera"
 import type { DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
 import type { CategoriaDocumento } from "@/types/dominio"
 
@@ -119,17 +126,11 @@ export function PantallaProcesando({
 
   if (estado === "leyendo") {
     return (
-      <div
-        role="status"
-        className="flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card px-4 py-10 text-center"
-      >
-        <Loader2Icon className="size-8 animate-spin text-primary" aria-hidden="true" />
-        <p className="text-lg font-semibold text-foreground">Leyendo el documento…</p>
-        <p className="text-base text-muted-foreground">
-          Estamos buscando la fecha, la especialidad y los resultados. Puede tardar hasta medio
-          minuto: no cierres esta pantalla.
-        </p>
-      </div>
+      <VeloEspera
+        visible
+        mensaje="La inteligencia artificial está leyendo tu estudio…"
+        submensaje="Esto puede tardar hasta un minuto. No cierres la aplicación."
+      />
     )
   }
 

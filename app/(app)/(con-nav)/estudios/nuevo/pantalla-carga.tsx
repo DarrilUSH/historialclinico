@@ -28,15 +28,31 @@
  * Durante la subida el cargador se desmonta a propósito: no hay forma de
  * cancelar una Server Action en curso, así que dejar visible un botón "Elegir
  * otro" que no puede detener nada sería mentirle a la persona.
+ *
+ * ## Velo de espera (Sprint 14, "Feedback de espera global")
+ *
+ * "Subiendo el archivo…" es la primera de las tres etapas REALES de la
+ * ingesta -las otras dos, "La inteligencia artificial está leyendo tu
+ * estudio…" y "Guardando…", viven en `procesando/pantalla-procesando.tsx` y
+ * en `components/documentos/formulario-revision.tsx` respectivamente, porque
+ * son las tres llamadas de red separadas que existen de verdad en este
+ * flujo (Server Action de subida → `fetch` a `/api/documentos/extraer` →
+ * Server Action de confirmación), cada una en la pantalla donde ocurre-. El
+ * `<div role="status">` que mostraba esta misma información inline se
+ * reemplazó por `<VeloEspera>`: los dos cumplían el mismo propósito (bloquear
+ * la pantalla y avisar), así que mantener las dos habría duplicado la región
+ * viva para un lector de pantalla. El peso del archivo sigue mostrándose,
+ * ahora como submensaje.
  */
 
 import * as React from "react"
 import Link from "next/link"
 
-import { ArrowLeftIcon, Loader2Icon, UploadIcon } from "lucide-react"
+import { ArrowLeftIcon, UploadIcon } from "lucide-react"
 
 import { Alerta } from "@/components/base/alerta"
 import { Boton } from "@/components/base/boton"
+import { VeloEspera } from "@/components/base/velo-espera"
 import { CargadorDocumento, type ArchivoListo } from "@/components/documentos/cargador-documento"
 import { formatearBytes } from "@/lib/archivos/validacion"
 
@@ -108,21 +124,15 @@ export function PantallaNuevoEstudio() {
         confirmes lo guardamos en tu historial.
       </p>
 
-      {estado === "subiendo" && archivo && (
-        <div
-          role="status"
-          className="flex flex-col items-center justify-center gap-3 rounded-xl border border-border bg-card px-4 py-10 text-center"
-        >
-          <Loader2Icon className="size-8 animate-spin text-primary" aria-hidden="true" />
-          <p className="text-lg font-semibold text-foreground">
-            Subiendo… <span className="numeros-clinicos">{formatearBytes(archivo.blob.size)}</span>
-          </p>
-          <p className="text-base text-muted-foreground">
-            Estamos guardando {archivo.nombre} en tu historial. Puede tardar un poco si la señal
-            está lenta: no cierres esta pantalla.
-          </p>
-        </div>
-      )}
+      <VeloEspera
+        visible={estado === "subiendo"}
+        mensaje="Subiendo el archivo…"
+        submensaje={
+          archivo
+            ? `${archivo.nombre} — ${formatearBytes(archivo.blob.size)}. Esto puede tardar hasta un minuto. No cierres la aplicación.`
+            : "Esto puede tardar hasta un minuto. No cierres la aplicación."
+        }
+      />
 
       {estado === "error" && (
         <div className="flex flex-col gap-4">

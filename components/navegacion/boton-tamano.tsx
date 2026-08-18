@@ -74,11 +74,23 @@
  *    enhancement -Chrome Android la tiene, Safari iOS no expone la API y el
  *    botón sigue funcionando igual sin ella-, un toque de 10ms para
  *    confirmar por el otro sentido que el tap registró.
+ *
+ * ## Velo de espera (Sprint 14, "Feedback de espera global")
+ *
+ * El velo (`components/base/velo-espera.tsx`) se suma ADEMÁS de las tres
+ * señales de arriba, nunca en su reemplazo: el glifo se sigue invirtiendo en
+ * el mismo tick del tap (nada de esto cambió) y encima aparece
+ * "Ajustando el tamaño de letra…" si la Server Action tarda más de los
+ * ~450ms del retraso propio del velo. En la conexión normal del
+ * `useTransition` (unos milisegundos) el velo ni llega a montarse -por eso
+ * conviven sin pisarse: el glifo es instantáneo y sincrónico, el velo es la
+ * red de contención para cuando el servidor tarda de verdad-.
  */
 
 import { useState, useTransition } from "react"
 
 import { cambiarTamano } from "@/app/(app)/actions"
+import { VeloEspera } from "@/components/base/velo-espera"
 import { ATRIBUTO_TAMANO, MODOS, type Tamano, alternar } from "@/lib/densidad/tamano"
 import { cn } from "@/lib/utils"
 
@@ -127,49 +139,53 @@ export function BotonTamano({ tamano }: BotonTamanoProps) {
   const esChica = tamanoVisible === "chica"
 
   return (
-    <button
-      type="button"
-      onClick={alternarTamano}
-      // `aria-pressed` describe el estado de un botón de alternancia (WAI-ARIA
-      // "toggle button"): presionado = modo compacto activo. La etiqueta
-      // incluye además el estado en palabras, porque "presionado" por sí solo
-      // no dice presionado PARA QUÉ, y quien navega con lector de pantalla
-      // tiene que poder saber en qué modo está sin activarlo para averiguarlo.
-      aria-pressed={esChica}
-      aria-label={`Cambiar tamaño de letra. Ahora: ${MODOS[tamanoVisible].etiqueta.toLowerCase()}`}
-      title="Cambiar tamaño de letra"
-      // `aria-busy` es informativo únicamente -el botón sigue enfocable y
-      // clicable mientras está pendiente, ver el porqué en el comentario de
-      // arriba-, así que no hace falta anunciarlo con `aria-live`: quien usa
-      // lector de pantalla ya recibe el estado nuevo en el próximo
-      // `aria-label` cuando vuelve a consultar el botón.
-      aria-busy={pendiente}
-      className={cn(
-        "objetivo-tactil inline-flex shrink-0 items-baseline justify-center gap-0.5 rounded-lg px-2",
-        "font-semibold transition-[color,opacity] duration-150 ease-salida",
-        "hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-        "chica:px-1.5",
-        // Aviso sutil de "aplicando": solo opacidad, nunca tapa el glifo.
-        pendiente && "opacity-60",
-      )}
-    >
-      {/* Las dos letras son una imagen hecha de tipografía -la "A" grande y la
-          "a" chica son EL ícono de esta función-, así que van ocultas al árbol
-          de accesibilidad: lo que se anuncia es la `aria-label` de arriba. El
-          modo vigente se marca con color Y con peso, nunca solo con color
-          (regla 2 de docs/design-system.md §8). */}
-      <span
-        aria-hidden="true"
-        className={cn("text-lg leading-none", esChica ? "text-muted-foreground" : "text-primary")}
+    <>
+      <button
+        type="button"
+        onClick={alternarTamano}
+        // `aria-pressed` describe el estado de un botón de alternancia (WAI-ARIA
+        // "toggle button"): presionado = modo compacto activo. La etiqueta
+        // incluye además el estado en palabras, porque "presionado" por sí solo
+        // no dice presionado PARA QUÉ, y quien navega con lector de pantalla
+        // tiene que poder saber en qué modo está sin activarlo para averiguarlo.
+        aria-pressed={esChica}
+        aria-label={`Cambiar tamaño de letra. Ahora: ${MODOS[tamanoVisible].etiqueta.toLowerCase()}`}
+        title="Cambiar tamaño de letra"
+        // `aria-busy` es informativo únicamente -el botón sigue enfocable y
+        // clicable mientras está pendiente, ver el porqué en el comentario de
+        // arriba-, así que no hace falta anunciarlo con `aria-live`: quien usa
+        // lector de pantalla ya recibe el estado nuevo en el próximo
+        // `aria-label` cuando vuelve a consultar el botón.
+        aria-busy={pendiente}
+        className={cn(
+          "objetivo-tactil inline-flex shrink-0 items-baseline justify-center gap-0.5 rounded-lg px-2",
+          "font-semibold transition-[color,opacity] duration-150 ease-salida",
+          "hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
+          "chica:px-1.5",
+          // Aviso sutil de "aplicando": solo opacidad, nunca tapa el glifo.
+          pendiente && "opacity-60",
+        )}
       >
-        {MODOS.grande.glifo}
-      </span>
-      <span
-        aria-hidden="true"
-        className={cn("text-xs leading-none", esChica ? "text-primary" : "text-muted-foreground")}
-      >
-        {MODOS.chica.glifo}
-      </span>
-    </button>
+        {/* Las dos letras son una imagen hecha de tipografía -la "A" grande y la
+            "a" chica son EL ícono de esta función-, así que van ocultas al árbol
+            de accesibilidad: lo que se anuncia es la `aria-label` de arriba. El
+            modo vigente se marca con color Y con peso, nunca solo con color
+            (regla 2 de docs/design-system.md §8). */}
+        <span
+          aria-hidden="true"
+          className={cn("text-lg leading-none", esChica ? "text-muted-foreground" : "text-primary")}
+        >
+          {MODOS.grande.glifo}
+        </span>
+        <span
+          aria-hidden="true"
+          className={cn("text-xs leading-none", esChica ? "text-primary" : "text-muted-foreground")}
+        >
+          {MODOS.chica.glifo}
+        </span>
+      </button>
+
+      <VeloEspera visible={pendiente} mensaje="Ajustando el tamaño de letra…" />
+    </>
   )
 }

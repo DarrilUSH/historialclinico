@@ -15,6 +15,21 @@
  * `app/globals.css` §5 redefine en compacta-, así que acá solo hace falta
  * apretar los gaps EXPLÍCITOS entre campos y entre el botón y el pie, que
  * son estructura y no salen gratis de ningún token.
+ *
+ * ## Velo de espera (Sprint 14, "Feedback de espera global")
+ *
+ * `mensajeEspera` es OPCIONAL y a propósito: lo pasan `/login` y `/registro`
+ * ("Ingresando…" / "Creando tu cuenta…"), porque las dos disparan una
+ * verificación real contra Supabase Auth que puede notarse en una conexión
+ * lenta. `/recuperar` y `/recuperar/confirmar` no lo pasan -son un solo
+ * envío de correo o un `UPDATE` de contraseña, casos que ya cubre el spinner
+ * del propio botón (`Boton`, prop `cargando`, ver `BotonEnviar` más abajo)
+ * sin que haga falta tapar la pantalla entera-. `VeloEnvio` es un componente
+ * aparte, no inline en `BotonEnviar`, porque `useFormStatus()` exige un
+ * descendiente del `<form>`: separarlo dejó cada uno con una sola
+ * responsabilidad (el botón se deshabilita y muestra su propio spinner; el
+ * velo es la señal grande y accesible que pide el ROADMAP para el público
+ * mayor) sin duplicar la lectura de `pending`.
  */
 
 import * as React from "react"
@@ -24,6 +39,7 @@ import { useFormStatus } from "react-dom"
 import { Alerta } from "@/components/base/alerta"
 import { Boton } from "@/components/base/boton"
 import { CampoTexto } from "@/components/base/campo-texto"
+import { VeloEspera } from "@/components/base/velo-espera"
 import {
   Card,
   CardContent,
@@ -52,6 +68,13 @@ interface FormularioAuthProps {
   /** Campos ocultos (por ejemplo el `code` del link de recupero). */
   camposOcultos?: Record<string, string>
   textoBoton: string
+  /**
+   * Mensaje del velo de espera global mientras la Server Action está en
+   * vuelo ("Ingresando…", "Creando tu cuenta…"). Sin este prop no se monta
+   * ningún velo -ver el comentario del encabezado sobre por qué
+   * `/recuperar` y `/recuperar/confirmar` no lo pasan-.
+   */
+  mensajeEspera?: string
   /** Contenido debajo del botón: links a otras pantallas del flujo. */
   pie?: React.ReactNode
   /**
@@ -74,6 +97,7 @@ export function FormularioAuth({
   campos,
   camposOcultos,
   textoBoton,
+  mensajeEspera,
   pie,
   consentimiento,
 }: FormularioAuthProps) {
@@ -137,6 +161,8 @@ export function FormularioAuth({
             <BotonEnviar>{textoBoton}</BotonEnviar>
             {pie}
           </CardFooter>
+
+          {mensajeEspera && <VeloEnvio mensaje={mensajeEspera} />}
         </form>
       )}
 
@@ -155,4 +181,18 @@ function BotonEnviar({ children }: { children: React.ReactNode }) {
       {pending ? "Un momento…" : children}
     </Boton>
   )
+}
+
+/**
+ * Separado de `BotonEnviar` a propósito: los dos leen el mismo `pending` de
+ * `useFormStatus()`, pero son dos señales distintas (el botón se deshabilita
+ * y muestra su propio spinner chico; esto es el aviso grande a pantalla
+ * completa) y fundirlos en un solo componente mezclaría dos
+ * responsabilidades sin necesidad -ver el comentario del encabezado del
+ * archivo-.
+ */
+function VeloEnvio({ mensaje }: { mensaje: string }) {
+  const { pending } = useFormStatus()
+
+  return <VeloEspera visible={pending} mensaje={mensaje} />
 }

@@ -16,6 +16,7 @@ export default function PaginaRegistro() {
       descripcion="Registrate para empezar a guardar tu historial médico y el de tu familia."
       accion={registrarse}
       textoBoton="Crear cuenta"
+      mensajeEspera="Creando tu cuenta…"
       campos={[
         {
           id: "fullName",

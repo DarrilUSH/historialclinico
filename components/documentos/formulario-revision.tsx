@@ -39,6 +39,22 @@
  * `lib/laboratorio/normalizacion.ts` y las persiste en `lab_metrics` de forma
  * atómica con la confirmación del documento, vía el RPC
  * `confirmar_documento_recien_subido`.
+ *
+ * ## Velo de espera (Sprint 14, "Feedback de espera global")
+ *
+ * "Guardando…" es la tercera y última etapa REAL de la ingesta -ver el
+ * comentario equivalente en `../../app/(app)/(con-nav)/estudios/nuevo/pantalla-carga.tsx`
+ * para las otras dos-: `confirmarDocumento` hace el RPC que sella el
+ * documento y persiste las métricas en la misma transacción, un viaje al
+ * servidor con más trabajo que un INSERT simple. El botón "Confirmar y
+ * guardar" YA tenía su propio spinner (`cargando={pendienteConfirmar}`, ver
+ * `components/base/boton.tsx`) y se conserva sin cambios -es una señal de
+ * widget, no una región viva-; el velo se agrega ADEMÁS, porque acá sí hay
+ * margen real para que el RPC tarde y la persona necesita el mismo aviso
+ * grande que en las dos etapas anteriores. No se aplica en `descartarDocumento`
+ * -es un simple `DELETE`, del mismo orden de magnitud que los formularios
+ * rápidos que este componente NO cubre (ver el encabezado de
+ * `components/base/velo-espera.tsx`)-.
  */
 
 import * as React from "react"
@@ -57,6 +73,7 @@ import { CampoTexto } from "@/components/base/campo-texto"
 import { CampoTextarea } from "@/components/base/campo-textarea"
 import { DialogoConfirmacion } from "@/components/base/dialogo-confirmacion"
 import { Tarjeta } from "@/components/base/tarjeta"
+import { VeloEspera } from "@/components/base/velo-espera"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -328,6 +345,8 @@ export function FormularioRevision({
           Cancelar
         </DialogoConfirmacion>
       </div>
+
+      <VeloEspera visible={pendienteConfirmar} mensaje="Guardando…" />
     </div>
   )
 }
