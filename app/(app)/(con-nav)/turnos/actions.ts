@@ -9,6 +9,10 @@
  *
  * - `crearTurno` — alta. Exige `upload` (docs/modelo-permisos.md §6.1:
  *   "INSERT | dueño O (can_upload O can_manage)"). Fecha futura obligatoria.
+ *   Desde el Sprint 17 (tarea 17.2) acepta además un campo oculto
+ *   `mensajeGmailId`: si el turno salió de un correo de la bandeja de Gmail,
+ *   ese correo queda marcado como ingresado y apuntando al turno creado. Es
+ *   best-effort y nunca hace fallar el alta — ver el comentario en el cuerpo.
  * - `actualizarTurno` — edición de los datos del turno. Exige `manage`
  *   (§6.1: "UPDATE / DELETE | dueño O can_manage"). Fecha futura NO
  *   obligatoria: se puede corregir un turno con fecha pasada.
@@ -65,6 +69,7 @@ import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 
 import { type ClienteSupabaseServidor, esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
+import { marcarMensajeResuelto } from "@/lib/gmail/mensajes-admin"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { geocodificarDireccion } from "@/lib/ubicacion/geocodificacion"
 import { validarTurno, type DatosTurnoValidado } from "@/lib/validacion/turno.schema"
@@ -199,7 +204,7 @@ export async function crearTurno(
       return { error: SIN_PERFIL_ACTIVO }
     }
 
-    const { supabase } = await requerirPermiso(activo.perfil.id, "upload", {
+    const { supabase, usuario } = await requerirPermiso(activo.perfil.id, "upload", {
       siNoHaySesion: "lanzar",
     })
 
@@ -218,24 +223,50 @@ export async function crearTurno(
     const { datos } = validacion
     const { latitud, longitud } = await resolverCoordenadas(datos)
 
-    const { error } = await supabase.from("appointments").insert({
-      profile_id: activo.perfil.id,
-      specialty: datos.especialidad,
-      doctor_name: datos.medico ?? null,
-      doctor_id: resueltoDoctorId.doctorId,
-      appointment_date: datos.fechaHoraIso,
-      location_name: datos.lugarNombre ?? null,
-      location_address: datos.lugarDireccion ?? null,
-      location_city: datos.lugarCiudad ?? null,
-      location_province: datos.lugarProvincia ?? null,
-      latitude: latitud,
-      longitude: longitud,
-      preparation_notes: datos.notasPreparacion ?? null,
-    })
+    const { data: creado, error } = await supabase
+      .from("appointments")
+      .insert({
+        profile_id: activo.perfil.id,
+        specialty: datos.especialidad,
+        doctor_name: datos.medico ?? null,
+        doctor_id: resueltoDoctorId.doctorId,
+        appointment_date: datos.fechaHoraIso,
+        location_name: datos.lugarNombre ?? null,
+        location_address: datos.lugarDireccion ?? null,
+        location_city: datos.lugarCiudad ?? null,
+        location_province: datos.lugarProvincia ?? null,
+        latitude: latitud,
+        longitude: longitud,
+        preparation_notes: datos.notasPreparacion ?? null,
+      })
+      .select("id")
+      .single()
 
-    if (error) {
+    if (error || !creado) {
       console.error("[turnos] Fallo al crear un turno:", error)
       return { error: ERROR_INESPERADO_CREAR }
+    }
+
+    // Sprint 17, tarea 17.2: si este turno salió de un correo de la bandeja de
+    // Gmail, el correo queda marcado como ingresado y apuntando al turno. Es
+    // BEST-EFFORT y va al final a propósito: el turno ya está guardado, y que
+    // no se pueda actualizar el registro del correo -que como mucho deja un
+    // pendiente de más en una lista- no puede hacerle devolver un error a
+    // alguien que acaba de cargar bien su turno. El `userId` sale de la
+    // sesión, nunca del formulario: el campo oculto solo dice CUÁL correo.
+    const correoGmailId = campo(formData, "mensajeGmailId")
+    if (PATRON_UUID.test(correoGmailId)) {
+      try {
+        await marcarMensajeResuelto(usuario.id, correoGmailId, {
+          estado: "ingresado",
+          appointmentId: creado.id,
+        })
+      } catch (errorCorreo) {
+        console.error(
+          "[turnos] el turno se creó pero no se pudo marcar el correo de Gmail:",
+          errorCorreo instanceof Error ? errorCorreo.message : errorCorreo,
+        )
+      }
     }
   } catch (error) {
     if (esErrorDeGuarda(error)) {

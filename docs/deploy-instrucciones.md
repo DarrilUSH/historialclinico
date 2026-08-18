@@ -84,9 +84,14 @@ select public.configurar_cron_recordatorios(
 select public.configurar_cron_alertas_medicacion(
   'https://www.historialmedico.com.ar/api/push/procesar-alertas-medicacion'
 );
+select public.configurar_cron_gmail(
+  'https://www.historialmedico.com.ar/api/gmail/procesar-barrido'
+);
 ```
 
-(La segunda no lleva el secreto: reusa el que carga la primera. Es el diseño del Sprint 7.)
+(La segunda y la tercera no llevan el secreto: reusan el que carga la primera. Es el diseño del Sprint 7, que el Sprint 17 siguió tal cual — hay UN `CRON_SECRET` por entorno.)
+
+El tercer job es el barrido de Gmail (Sprint 17, tarea 17.2): corre cada 30 minutos y no hace nada mientras no haya ninguna casilla conectada. Detalle completo en `docs/gmail-ingesta.md` §5.
 
 ---
 

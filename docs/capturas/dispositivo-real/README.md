@@ -1143,3 +1143,23 @@ Los tres porcentajes son ruido de reloj de la barra de estado del sistema y del 
 8. **`/inicio`**: las dos cards nuevas en la grilla, sin truncar ningún título (`sprint16-inicio-grilla.png`).
 
 **Nota de método (para quien repita esta prueba).** Los toques sobre las sugerencias del desplegable **fallan si el scroll se hizo con `scrollIntoView()` desde `Runtime.evaluate`**: el scroll programático y el del compositor quedan desfasados unos cientos de píxeles, y CDP entrega el toque en otra coordenada (se comprobó instrumentando `document.addEventListener('pointerdown', …)`: se pedía `y=465` y el navegador recibía `y=662`). **No es un defecto del producto** — con `Input.synthesizeScrollGesture`, que pasa por el compositor como un dedo, el mismo toque elige la sugerencia y precarga los cinco campos. La ruta de teclado (flechas + Enter) funciona en los dos casos.
+
+
+## Sprint 17 · tarea 17.2 — Barrido de Gmail, bandeja e ingesta
+
+**2026-08-18.** Samsung Galaxy A71 real (`R58N85AW49F`), `adb reverse tcp:3000 tcp:3000`, Chrome de Android contra `next dev` en la máquina. Login real de María y perfil activo Roberto (gestionado, `can_manage`).
+
+**Lo que se probó con datos del seed de desarrollo** (`supabase/seed.sql` §12: una conexión de Gmail con token FALSO y cuatro correos ya "barridos", uno de cada forma que produce el barrido):
+
+| Captura | Qué muestra |
+|---|---|
+| `sprint17-barrido-inicio.png` | La card "Tu Gmail" de `/inicio` con la **insignia de 3 correos sin revisar** (los descartados no cuentan). |
+| `sprint17-barrido-lista.png` | La bandeja "Llegaron por Gmail": los tres pendientes con su asunto, remitente y fecha; el PDF y la foto con su tamaño y su botón "Revisar este estudio"; **el `.zip` listado con el motivo por el que no se puede importar**; el correo de turno con "Revisar este turno" y su explicación; "No me sirve" en cada uno; y "Traer solos los de …" **solo en los remitentes que todavía no tienen filtro** (el del laboratorio no lo ofrece porque ya lo tiene). |
+| `sprint17-barrido-filtros.png` | "Correos que ya revisaste (1)" y **"Remitentes que entran solos"** con su botón "Sacar" — el control de las reglas que la app creó en la casilla. |
+| `sprint17-barrido-velo.png` | El velo de "Buscar ahora" en pleno vuelo: *"Estamos mirando tu Gmail… Solo los correos de la etiqueta"*, con el botón en estado de carga. |
+| `sprint17-barrido-vencida.png` | **El circuito real contra Google.** Al tocar "Buscar ahora" con el token falso del seed, la app pidió un access token a `oauth2.googleapis.com`, Google contestó `invalid_grant`, y la pantalla pasó sola a "Se venció el permiso" con "Volver a conectar" — **conservando los tres correos pendientes**, que es exactamente lo que el diseño promete (lo que ya llegó se sigue pudiendo revisar aunque el permiso caduque). |
+| `sprint17-barrido-revision.png` | El destino de "Revisar este estudio": la pantalla de revisión EXISTENTE (`/estudios/nuevo/procesando`), con "Revisá y confirmá", el formulario completo y el aviso de que la lectura automática no pudo correr — la regla de oro de que la IA nunca bloquea la carga. |
+
+**Advertencia de método, para no leer de más estas capturas.** El adjunto de `sprint17-barrido-revision.png` **no viajó desde Gmail**: sin una casilla real conectada, la descarga del archivo no se puede ejercitar en el dispositivo. La captura documenta el DESTINO del botón (que es el punto: no hay pantalla de revisión nueva, es la de siempre), y el camino completo "adjunto → `ingestarDocumento` → fila en `documents` pendiente de confirmar" está probado en `tests/unit/gmail-barrido.test.ts` contra un Gmail de mentira, con un PDF real y sus magic bytes. Lo mismo vale para la precarga del turno.
+
+**Suites sobre el código final:** `npx tsc --noEmit` limpio · `npx eslint` limpio · `npx vitest run` **1090/1090** (65 archivos) · `node scripts/verificar-contraste.mjs` **196/196**, 0 fallas · `npx next build` exitoso (48 rutas, con `/api/gmail/procesar-barrido` y `/api/gmail/analizar-correo`) · `scripts/test-rls.sql` **441/441 PASS** en dos corridas seguidas.

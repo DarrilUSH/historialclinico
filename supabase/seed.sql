@@ -915,5 +915,75 @@ on conflict (refes_id) do nothing;
 
 
 -- =============================================================================
+-- 12. BANDEJA DE GMAIL (Sprint 17, tarea 17.2) — SOLO PARA DESARROLLO LOCAL
+-- -----------------------------------------------------------------------------
+-- Para poder ver, tocar y fotografiar la pantalla "Llegaron por Gmail" sin
+-- tener que conectar una casilla de verdad, el seed deja:
+--
+--   - una conexión de Gmail de María con un refresh token FALSO, y
+--   - cuatro correos ya "barridos", uno de cada forma que produce el barrido.
+--
+-- ⚠️  El token no sirve para nada: tocar "Buscar ahora" en local va a hacer que
+--     Google conteste `invalid_grant` y la conexión quede marcada VENCIDA
+--     -que es, además, una forma cómoda de ver ese estado-. Para volver al
+--     estado conectado, `supabase db reset`.
+--
+--     Nada de esto llega a producción: el seed solo lo corre `supabase db
+--     reset` en local.
+-- =============================================================================
+
+-- La conexión, por el ÚNICO camino que existe (la función SECURITY DEFINER de
+-- 20260818130000). Deja el token cifrado en el Vault, como en producción.
+select public.guardar_conexion_gmail(
+    '550e8400-e29b-41d4-a716-446655440001'::uuid,
+    'maria.gomez.demo@gmail.com',
+    'TOKEN-FALSO-DE-DESARROLLO-NO-SIRVE-CONTRA-GOOGLE',
+    'Label_DEMO',
+    'historialmedico',
+    'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.labels https://www.googleapis.com/auth/gmail.settings.basic'
+);
+
+-- Los cuatro correos: dos estudios, un turno y uno que no traía nada.
+-- `attachments` tiene la forma EXACTA que escribe `lib/gmail/mensajes-admin.ts`.
+insert into public.gmail_messages (
+    user_id, gmail_message_id, connection_email, from_email, from_name,
+    subject, message_date, kind, looks_like_appointment, attachments, status, resolved_at)
+values
+    ('550e8400-e29b-41d4-a716-446655440001', 'demo-lab-001', 'maria.gomez.demo@gmail.com',
+     'resultados@lab-austral.com.ar', 'Laboratorio Austral',
+     'Resultados de laboratorio - GOMEZ ROBERTO', now() - interval '3 hours',
+     'documento', false,
+     '[{"attachmentId":"ATT_DEMO_1","filename":"analisis-de-sangre.pdf","mimeType":"application/pdf","mimeDeclarado":"application/pdf","size":248000,"apto":true,"motivo":null}]'::jsonb,
+     'pendiente_revision', null),
+
+    ('550e8400-e29b-41d4-a716-446655440001', 'demo-img-002', 'maria.gomez.demo@gmail.com',
+     'imagenes@centrodiagnostico.com.ar', 'Centro de Diagnóstico por Imágenes',
+     'Su radiografía de tórax está disponible', now() - interval '1 day',
+     'documento', false,
+     '[{"attachmentId":"ATT_DEMO_2","filename":"radiografia-torax.jpg","mimeType":"image/jpeg","mimeDeclarado":"image/jpeg","size":1850000,"apto":true,"motivo":null},
+       {"attachmentId":"ATT_DEMO_3","filename":"estudio-completo.zip","mimeType":null,"mimeDeclarado":"application/zip","size":9200000,"apto":false,"motivo":"tipo_no_soportado"}]'::jsonb,
+     'pendiente_revision', null),
+
+    ('550e8400-e29b-41d4-a716-446655440001', 'demo-turno-003', 'maria.gomez.demo@gmail.com',
+     'turnos@clinicasanjorge.com.ar', 'Clínica San Jorge',
+     'Turno asignado: ECOGRAFIA VESICAL', now() - interval '2 days',
+     'turno', true, '[]'::jsonb, 'pendiente_revision', null),
+
+    ('550e8400-e29b-41d4-a716-446655440001', 'demo-nada-004', 'maria.gomez.demo@gmail.com',
+     'facturacion@obrasocial.com.ar', 'Obra Social',
+     'Su factura del mes ya está disponible', now() - interval '4 days',
+     'nada', false, '[]'::jsonb, 'descartado', now() - interval '4 days')
+on conflict (user_id, gmail_message_id) do nothing;
+
+-- Un filtro aprendido, para que se vea la sección "Remitentes que entran solos"
+-- (y su botón de sacarlo, que es lo que garantiza que nadie pierda el control
+-- de las reglas de su propia casilla).
+insert into public.gmail_filters (user_id, gmail_filter_id, from_email, label_id, label_name)
+values ('550e8400-e29b-41d4-a716-446655440001', 'FILTRO_DEMO_1',
+        'resultados@lab-austral.com.ar', 'Label_DEMO', 'historialmedico')
+on conflict (user_id, from_email) do nothing;
+
+
+-- =============================================================================
 -- Fin del seed
 -- =============================================================================

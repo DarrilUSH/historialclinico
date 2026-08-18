@@ -1,6 +1,20 @@
 /**
  * `/perfil/gmail`: conectar y desconectar la casilla de Gmail de la CUENTA
- * (Sprint 17, tarea 17.1).
+ * (Sprint 17, tarea 17.1) y la bandeja "Llegaron por Gmail" (tarea 17.2).
+ *
+ * ## Dos secciones, una pantalla
+ *
+ * Arriba, el estado de la conexión (`PanelConexionGmail`). Abajo, lo que el
+ * barrido encontró (`BandejaGmail`), que solo se renderiza si alguna vez hubo
+ * conexión. Se resolvió acá y no en una pantalla nueva por el mismo motivo por
+ * el que esta pantalla existe en vez de un menú de configuración: el público
+ * de esta app no busca en submenús, y "mi Gmail" es un solo lugar mental —el
+ * permiso y lo que llegó por él—.
+ *
+ * Las tres consultas de la bandeja van con el cliente del USUARIO, por RLS
+ * (`lib/gmail/mensajes.ts`), y en el mismo `Promise.all` que el estado de la
+ * conexión: son independientes entre sí y encadenarlas costaría cuatro viajes
+ * a la base en vez de uno.
  *
  * ## Por qué acá y no en una pantalla de perfil
  *
@@ -37,9 +51,22 @@ import Link from "next/link"
 
 import { ArrowLeftIcon, MailIcon } from "lucide-react"
 
+import {
+  BandejaGmail,
+  type CorreoParaBandeja,
+  type CorreoProcesadoParaBandeja,
+} from "@/components/gmail/bandeja-gmail"
 import { PanelConexionGmail } from "@/components/gmail/panel-conexion-gmail"
+import { formatearBytes } from "@/lib/archivos/validacion"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { esResultadoConexion, obtenerConexionGmail } from "@/lib/gmail/conexion"
+import {
+  listarCorreosPendientes,
+  listarCorreosResueltos,
+  listarFiltrosAprendidos,
+  type CorreoDeGmail,
+} from "@/lib/gmail/mensajes"
+import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 export const metadata: Metadata = {
   title: "Conectar Gmail — Historial Médico",
@@ -77,6 +104,70 @@ function formatear(iso: string | null, formato: Intl.DateTimeFormat): string | n
   return formato.format(fecha).replace(ESPACIOS_INVISIBLES, " ")
 }
 
+/** Motivo por el que un adjunto no se puede importar, dicho sin jerga. */
+function motivoDeAdjunto(motivo: string | null): string {
+  if (motivo === "demasiado_grande") {
+    return "es demasiado grande para importarlo (el límite es 25 MB). Podés abrirlo desde tu Gmail."
+  }
+  if (motivo === "tipo_no_soportado") {
+    return "no es un PDF ni una foto, así que no lo podemos leer."
+  }
+  return "no se puede importar."
+}
+
+/** Correo pendiente → lo que necesita la bandeja, con todo ya formateado en el servidor. */
+function aPendiente(correo: CorreoDeGmail, remitentesConFiltro: Set<string>): CorreoParaBandeja {
+  return {
+    id: correo.id,
+    asunto: correo.asunto ?? "(sin asunto)",
+    remitente: correo.remitenteNombre ?? correo.remitenteEmail,
+    remitenteEmail: correo.remitenteEmail,
+    fechaTexto: formatear(correo.fechaIso, FORMATO_SELLO) ?? "sin fecha",
+    adjuntos: correo.adjuntos.map((adjunto) => ({
+      id: adjunto.attachmentId,
+      nombre: adjunto.filename,
+      tamanoTexto: formatearBytes(adjunto.size),
+      apto: adjunto.apto,
+      motivoTexto: adjunto.apto ? null : motivoDeAdjunto(adjunto.motivo),
+    })),
+    pareceTurno: correo.pareceTurno,
+    tieneFiltro: remitentesConFiltro.has(correo.remitenteEmail),
+  }
+}
+
+/** Correo ya resuelto → una línea que diga en qué terminó. */
+function aProcesado(correo: CorreoDeGmail): CorreoProcesadoParaBandeja {
+  const teniaAdjuntoApto = correo.adjuntos.some((adjunto) => adjunto.apto)
+
+  let destinoTexto: string
+  if (correo.estado === "descartado") {
+    destinoTexto = correo.clase === "nada" ? "no traía nada para sumar" : "lo descartaste"
+  } else if (correo.documentId) {
+    destinoTexto = "se sumó como estudio"
+  } else if (correo.appointmentId) {
+    destinoTexto = "se cargó como turno"
+  } else {
+    // `ingresado` sin puntero: el documento o el turno se borraron después
+    // (ON DELETE SET NULL), típicamente porque se descartó en la pantalla de
+    // revisión.
+    destinoTexto = "lo trajiste, pero después se descartó"
+  }
+
+  return {
+    id: correo.id,
+    asunto: correo.asunto ?? "(sin asunto)",
+    remitente: correo.remitenteNombre ?? correo.remitenteEmail,
+    fechaTexto: formatear(correo.fechaIso, FORMATO_SELLO) ?? "sin fecha",
+    destinoTexto,
+    documentoId: correo.documentId,
+    puedeReabrir:
+      correo.estado === "ingresado" &&
+      correo.documentId === null &&
+      correo.appointmentId === null &&
+      teniaAdjuntoApto,
+  }
+}
+
 export default async function PaginaGmail({
   searchParams,
 }: {
@@ -84,12 +175,17 @@ export default async function PaginaGmail({
 }) {
   const { usuario, supabase } = await requerirSesion({ desde: "/perfil/gmail" })
 
-  const [conexion, parametros] = await Promise.all([
+  const [conexion, parametros, pendientes, procesados, filtros, activo] = await Promise.all([
     obtenerConexionGmail(supabase, usuario.id),
     searchParams,
+    listarCorreosPendientes(supabase),
+    listarCorreosResueltos(supabase),
+    listarFiltrosAprendidos(supabase),
+    obtenerPerfilActivo(),
   ])
 
   const resultado = esResultadoConexion(parametros.resultado) ? parametros.resultado : null
+  const remitentesConFiltro = new Set(filtros.map((filtro) => filtro.remitente))
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-3 chica:py-3">
@@ -132,6 +228,28 @@ export default async function PaginaGmail({
               }
         }
       />
+
+      {/*
+        La bandeja solo aparece si alguna vez hubo conexión. Sin ella no hay
+        nada que listar, y mostrar una sección vacía debajo del panel de
+        "conectá tu Gmail" sería ruido antes de tiempo. Si la conexión venció
+        SÍ se muestra: los correos que ya habían llegado siguen esperando y hay
+        que poder revisarlos aunque el permiso haya caducado.
+      */}
+      {conexion !== null && (
+        <BandejaGmail
+          pendientes={pendientes.map((correo) => aPendiente(correo, remitentesConFiltro))}
+          procesados={procesados.map(aProcesado)}
+          filtros={filtros.map((filtro) => ({
+            id: filtro.id,
+            remitente: filtro.remitente,
+            creadoTexto: formatear(filtro.creadoEl, FORMATO_FECHA) ?? "hace un rato",
+          }))}
+          perfilActivoNombre={activo?.perfil.full_name ?? null}
+          puedeCargar={activo?.permisos.canUpload ?? false}
+          conexionViva={conexion.estado === "conectada"}
+        />
+      )}
     </div>
   )
 }

@@ -120,6 +120,46 @@ export async function leerRefreshTokenGmail(userId: string): Promise<string | nu
   return typeof data === "string" && data.length > 0 ? data : null
 }
 
+export interface ConexionConectada {
+  userId: string
+  email: string
+  /** `null` si la etiqueta no se pudo resolver al conectar: esa conexión no se puede barrer. */
+  labelId: string | null
+}
+
+/**
+ * Las conexiones VIVAS, para el barrido periódico (Sprint 17, tarea 17.2).
+ *
+ * Va con `service_role` porque el cron no tiene sesión de nadie: lo llama
+ * `pg_cron` y este proceso resuelve todas las casillas conectadas de la
+ * instalación. Es la única lectura del proyecto que cruza cuentas, y por eso
+ * está acotada a las tres columnas que el barrido necesita —ni `granted_scopes`
+ * ni `token_secret_id`— y ordenada por `last_ok_at` con los nulos primero: si
+ * una corrida no llegara a todas, la próxima empieza por las que hace más que
+ * no se revisan.
+ *
+ * Las `vencidas` quedan afuera: sin refresh token válido, intentarlas sería
+ * gastar una llamada a Google para que conteste `invalid_grant` otra vez.
+ */
+export async function listarConexionesConectadas(limite = 100): Promise<ConexionConectada[]> {
+  const { data, error } = await clienteAdmin()
+    .from("gmail_connections")
+    .select("user_id, email, label_id")
+    .eq("status", "conectada")
+    .order("last_ok_at", { ascending: true, nullsFirst: true })
+    .limit(limite)
+
+  if (error) {
+    throw new Error(`No se pudieron listar las conexiones de Gmail: ${error.message}`)
+  }
+
+  return (data ?? []).map((fila) => ({
+    userId: fila.user_id,
+    email: fila.email,
+    labelId: fila.label_id,
+  }))
+}
+
 /** Marca la conexión como vencida (Google contestó `invalid_grant`). */
 export async function marcarConexionVencida(userId: string): Promise<void> {
   const { error } = await clienteAdmin().rpc("marcar_conexion_gmail_vencida", {

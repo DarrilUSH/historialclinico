@@ -1,13 +1,30 @@
 "use server"
 
 /**
- * Server Action de DESCONEXIÓN de la casilla de Gmail (Sprint 17, tarea 17.1).
+ * Server Actions de la pantalla de Gmail: desconectar (Sprint 17, tarea 17.1)
+ * y toda la bandeja "Llegaron por Gmail" (tarea 17.2).
  *
  * Conectar es un Route Handler porque termina en una navegación a otro
- * dominio; desconectar no sale de la aplicación, así que es una Server Action
+ * dominio; el resto no sale de la aplicación, así que son Server Actions
  * como el resto de las operaciones del proyecto: autenticación por cookie sin
  * escribir un handler, tipos de punta a punta y ninguna URL nueva que
  * proteger.
+ *
+ * ## Las seis acciones de la 17.2 y su guarda
+ *
+ * | Acción | Qué exige |
+ * |---|---|
+ * | `buscarCorreosAhora` | Sesión. La casilla es de la cuenta. |
+ * | `ingerirAdjuntoDeCorreo` | Sesión **+ `upload` sobre el perfil ACTIVO**: crea un documento en su historial. |
+ * | `descartarCorreo` / `reabrirCorreo` | Sesión. Solo tocan el registro propio. |
+ * | `aprenderRemitente` / `sacarFiltroAprendido` | Sesión. Tocan la configuración de la casilla propia. |
+ *
+ * Ninguna recibe un `userId` ni un `perfilId` del formulario: la cuenta sale
+ * de `requerirSesion()` y el perfil de `obtenerPerfilActivo()`. Lo único que
+ * viaja en el `FormData` es QUÉ correo o QUÉ filtro, y las funciones de
+ * `lib/gmail/mensajes-admin.ts` acotan cada escritura con
+ * `.eq("user_id", …)` además del id — un id de otra cuenta no afecta ninguna
+ * fila.
  *
  * ## Los dos pasos, y por qué el segundo se hace igual si falla el primero
  *
@@ -24,16 +41,33 @@
  * en ese caso, con el enlace para sacarlo desde ahí.
  */
 
+import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 
-import { esErrorDeGuarda, requerirSesion } from "@/lib/auth/guardas"
+import { esErrorDeGuarda, requerirPermiso, requerirSesion } from "@/lib/auth/guardas"
+import type { EstadoBusquedaGmail, EstadoCorreoGmail } from "@/lib/gmail/acciones"
+import { ingerirAdjuntoDeGmail, ErrorAdjuntoGmail } from "@/lib/gmail/adjunto"
+import { barrerConexion, fraseDeResultado } from "@/lib/gmail/barrido"
 import type { EstadoGmailAccion } from "@/lib/gmail/conexion"
+import { obtenerConexionGmail } from "@/lib/gmail/conexion"
 import {
   borrarConexionGmail,
+  ErrorConexionGmailVencida,
+  ErrorGmailSinConfigurar,
+  ErrorSinConexionGmail,
   leerRefreshTokenGmail,
   olvidarAccessTokenGmail,
 } from "@/lib/gmail/conexiones-admin"
-import { revocarToken } from "@/lib/gmail/google-api"
+import { aprenderRemitente as aprenderRemitenteEnGmail, olvidarFiltro } from "@/lib/gmail/filtros"
+import { ErrorGmail, revocarToken } from "@/lib/gmail/google-api"
+import { contarCorreosPendientes } from "@/lib/gmail/mensajes"
+import {
+  devolverMensajeAPendiente,
+  marcarMensajeResuelto,
+  obtenerMensajeRegistrado,
+} from "@/lib/gmail/mensajes-admin"
+import { ErrorIngesta } from "@/lib/documentos/ingesta"
+import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 // `EstadoGmailAccion` y `ESTADO_GMAIL_INICIAL` viven en `lib/gmail/conexion.ts`
 // y NO acá: un archivo `"use server"` solo puede exportar funciones asíncronas,
@@ -100,5 +134,305 @@ export async function desconectarGmail(): Promise<EstadoGmailAccion> {
     error: null,
     mensaje: "Desconectamos tu Gmail. La app ya no puede leer ningún correo tuyo.",
     revocacionPendiente: !revocado,
+  }
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  TAREA 17.2 — la bandeja "Llegaron por Gmail"
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+const SIN_CONEXION = "Todavía no conectaste tu Gmail."
+const SIN_ETIQUETA =
+  "No pudimos encontrar la etiqueta en tu Gmail. Tocá «Volver a conectar» y probamos de nuevo."
+const VENCIDA = "Se venció el permiso para leer tu Gmail. Volvé a conectarlo cuando quieras."
+const SIN_CONFIGURAR = "La conexión con Gmail todavía no está configurada en este servidor."
+const ERROR_BUSQUEDA = "No pudimos revisar tu Gmail ahora mismo. Probá de nuevo en un rato."
+const SIN_CORREO = "No encontramos ese correo."
+const SIN_PERFIL_ACTIVO =
+  "No hay un perfil activo. Elegí a quién le estás sumando el estudio y probá de nuevo."
+
+/** Un id de fila del registro que llegó por `FormData`. */
+const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function idDelFormulario(formData: FormData, campo: string): string | null {
+  const valor = formData.get(campo)
+  return typeof valor === "string" && PATRON_UUID.test(valor) ? valor : null
+}
+
+/**
+ * Traduce los errores del circuito de Gmail a una frase mostrable. Ninguna de
+ * las acciones de abajo le muestra a la persona un mensaje técnico, y ninguna
+ * loguea contenido de correo -a lo sumo, ids-.
+ */
+function mensajeDeError(error: unknown, porDefecto: string): string {
+  if (error instanceof ErrorSinConexionGmail) return SIN_CONEXION
+  if (error instanceof ErrorConexionGmailVencida) return VENCIDA
+  if (error instanceof ErrorGmailSinConfigurar) return SIN_CONFIGURAR
+  if (error instanceof ErrorGmail) return error.message
+  if (error instanceof ErrorAdjuntoGmail) return error.message
+  if (error instanceof ErrorIngesta) return error.message
+  if (esErrorDeGuarda(error)) return error.message
+  return porDefecto
+}
+
+/**
+ * "Buscar ahora": una pasada del barrido sobre la casilla de quien toca el
+ * botón.
+ *
+ * Es la MISMA `barrerConexion` que corre el cron —no una versión "manual"—,
+ * así que lo que la persona ve al tocar el botón es exactamente lo que va a
+ * pasar solo cada media hora. Devuelve la frase de `fraseDeResultado` y el
+ * total de pendientes, para que la pantalla no tenga que adivinar si vale la
+ * pena mirar la lista.
+ */
+export async function buscarCorreosAhora(): Promise<EstadoBusquedaGmail> {
+  try {
+    const { usuario, supabase } = await requerirSesion({ siNoHaySesion: "lanzar" })
+
+    const conexion = await obtenerConexionGmail(supabase, usuario.id)
+    if (!conexion) {
+      return { error: SIN_CONEXION, mensaje: null, pendientes: 0 }
+    }
+    if (conexion.estado === "vencida") {
+      return { error: VENCIDA, mensaje: null, pendientes: 0 }
+    }
+    if (!conexion.labelId) {
+      return { error: SIN_ETIQUETA, mensaje: null, pendientes: 0 }
+    }
+
+    const resultado = await barrerConexion({
+      userId: usuario.id,
+      email: conexion.email,
+      labelId: conexion.labelId,
+    })
+
+    const pendientes = await contarCorreosPendientes(supabase)
+
+    revalidatePath("/perfil/gmail")
+    revalidatePath("/inicio")
+
+    return {
+      error: resultado.vencida && resultado.nuevos === 0 ? VENCIDA : null,
+      mensaje: fraseDeResultado(resultado),
+      pendientes,
+    }
+  } catch (error) {
+    console.error(
+      "[gmail] falló la búsqueda manual:",
+      error instanceof Error ? error.message : error,
+    )
+    return { error: mensajeDeError(error, ERROR_BUSQUEDA), mensaje: null, pendientes: 0 }
+  }
+}
+
+/**
+ * "Revisar este estudio": baja el adjunto, lo mete por el pipeline de siempre
+ * y **redirige a la pantalla de revisión existente**.
+ *
+ * El documento se crea sobre el PERFIL ACTIVO y exige `upload` sobre él: es
+ * una carga en el historial de esa persona, con el mismo permiso que exige
+ * subir una foto a mano. El perfil sale de la cookie, nunca del formulario
+ * (mismo criterio que `subirDocumento`).
+ *
+ * El `redirect` va FUERA del `try/catch`: funciona lanzando `NEXT_REDIRECT` y
+ * un `catch` que se lo trague deja la navegación colgada.
+ */
+export async function ingerirAdjuntoDeCorreo(
+  _estadoPrevio: EstadoCorreoGmail,
+  formData: FormData,
+): Promise<EstadoCorreoGmail> {
+  const correoId = idDelFormulario(formData, "correoId")
+  const adjuntoId = formData.get("adjuntoId")
+
+  if (!correoId || typeof adjuntoId !== "string" || adjuntoId.length === 0) {
+    return { error: SIN_CORREO, mensaje: null }
+  }
+
+  let documentoId: string
+
+  try {
+    const activo = await obtenerPerfilActivo()
+    if (!activo) {
+      return { error: SIN_PERFIL_ACTIVO, mensaje: null }
+    }
+
+    const { supabase, usuario } = await requerirPermiso(activo.perfil.id, "upload", {
+      siNoHaySesion: "lanzar",
+    })
+
+    const { documento } = await ingerirAdjuntoDeGmail({
+      supabase,
+      userId: usuario.id,
+      perfilId: activo.perfil.id,
+      correoId,
+      adjuntoId,
+    })
+
+    documentoId = documento.documentoId
+  } catch (error) {
+    console.error(
+      `[gmail] no se pudo ingerir el adjunto del correo ${correoId}:`,
+      error instanceof Error ? error.message : error,
+    )
+    return {
+      error: mensajeDeError(error, "No pudimos traer ese archivo. Probá de nuevo en un rato."),
+      mensaje: null,
+    }
+  }
+
+  revalidatePath("/estudios")
+  revalidatePath("/perfil/gmail")
+  revalidatePath("/inicio")
+
+  // La misma pantalla de siempre: la que ve quien acaba de sacarle una foto a
+  // un estudio. Ahí corre la lectura con IA y ahí se confirma o se descarta.
+  redirect(`/estudios/nuevo/procesando?doc=${documentoId}`)
+}
+
+/** "Esto no me sirve": saca el correo de la bandeja sin tocar Gmail. */
+export async function descartarCorreo(
+  _estadoPrevio: EstadoCorreoGmail,
+  formData: FormData,
+): Promise<EstadoCorreoGmail> {
+  const correoId = idDelFormulario(formData, "correoId")
+  if (!correoId) return { error: SIN_CORREO, mensaje: null }
+
+  try {
+    const { usuario } = await requerirSesion({ siNoHaySesion: "lanzar" })
+    await marcarMensajeResuelto(usuario.id, correoId, { estado: "descartado" })
+  } catch (error) {
+    console.error(
+      `[gmail] no se pudo descartar el correo ${correoId}:`,
+      error instanceof Error ? error.message : error,
+    )
+    return { error: mensajeDeError(error, "No pudimos descartar ese correo."), mensaje: null }
+  }
+
+  revalidatePath("/perfil/gmail")
+  revalidatePath("/inicio")
+
+  return {
+    error: null,
+    // Se aclara que el correo sigue en Gmail: la app no borra correos, y quien
+    // toca "descartar" tiene que saber que descarta el AVISO, no el mensaje.
+    mensaje: "Listo, lo sacamos de la lista. El correo sigue en tu Gmail como siempre.",
+  }
+}
+
+/**
+ * "Volver a la lista": devuelve a pendientes un correo ya resuelto.
+ *
+ * El caso real: la persona tocó "Revisar", llegó a la pantalla de revisión del
+ * documento y ahí lo descartó. El documento se borró -y con él el puntero, por
+ * el `ON DELETE SET NULL`-, así que sin esto el adjunto quedaría fuera del
+ * alcance de la app para siempre aunque siga en su casilla.
+ */
+export async function reabrirCorreo(
+  _estadoPrevio: EstadoCorreoGmail,
+  formData: FormData,
+): Promise<EstadoCorreoGmail> {
+  const correoId = idDelFormulario(formData, "correoId")
+  if (!correoId) return { error: SIN_CORREO, mensaje: null }
+
+  try {
+    const { usuario } = await requerirSesion({ siNoHaySesion: "lanzar" })
+    await devolverMensajeAPendiente(usuario.id, correoId)
+  } catch (error) {
+    console.error(
+      `[gmail] no se pudo reabrir el correo ${correoId}:`,
+      error instanceof Error ? error.message : error,
+    )
+    return { error: mensajeDeError(error, "No pudimos volver a abrir ese correo."), mensaje: null }
+  }
+
+  revalidatePath("/perfil/gmail")
+  revalidatePath("/inicio")
+
+  return { error: null, mensaje: "Lo devolvimos a la lista de correos por revisar." }
+}
+
+/**
+ * "Que los próximos de este remitente vengan solos": crea el filtro en Gmail.
+ *
+ * El remitente NO viene del formulario: viene de la fila del correo que la
+ * persona está mirando (`obtenerMensajeRegistrado`, acotado a su cuenta). Así,
+ * lo único que el cliente puede elegir es CUÁL de sus propios correos usar
+ * como ejemplo — no puede pedir un filtro para una dirección arbitraria.
+ */
+export async function aprenderRemitente(
+  _estadoPrevio: EstadoCorreoGmail,
+  formData: FormData,
+): Promise<EstadoCorreoGmail> {
+  const correoId = idDelFormulario(formData, "correoId")
+  if (!correoId) return { error: SIN_CORREO, mensaje: null }
+
+  try {
+    const { usuario, supabase } = await requerirSesion({ siNoHaySesion: "lanzar" })
+
+    const conexion = await obtenerConexionGmail(supabase, usuario.id)
+    if (!conexion) return { error: SIN_CONEXION, mensaje: null }
+    if (conexion.estado === "vencida") return { error: VENCIDA, mensaje: null }
+    if (!conexion.labelId) return { error: SIN_ETIQUETA, mensaje: null }
+
+    const correo = await obtenerMensajeRegistrado(usuario.id, correoId)
+    if (!correo) return { error: SIN_CORREO, mensaje: null }
+
+    const { remitente, yaExistia } = await aprenderRemitenteEnGmail({
+      userId: usuario.id,
+      remitente: correo.remitenteEmail,
+      labelId: conexion.labelId,
+      labelName: conexion.labelName,
+    })
+
+    revalidatePath("/perfil/gmail")
+
+    return {
+      error: null,
+      mensaje: yaExistia
+        ? `Ya tenías puesto que los correos de ${remitente} vayan a la etiqueta.`
+        : `Listo: los próximos correos de ${remitente} van a entrar solos a la etiqueta.`,
+    }
+  } catch (error) {
+    console.error(
+      `[gmail] no se pudo crear el filtro del correo ${correoId}:`,
+      error instanceof Error ? error.message : error,
+    )
+    return {
+      error: mensajeDeError(error, "No pudimos crear la regla en tu Gmail. Probá de nuevo."),
+      mensaje: null,
+    }
+  }
+}
+
+/** "Sacar esta regla": borra el filtro de Gmail y su fila. */
+export async function sacarFiltroAprendido(
+  _estadoPrevio: EstadoCorreoGmail,
+  formData: FormData,
+): Promise<EstadoCorreoGmail> {
+  const filtroId = idDelFormulario(formData, "filtroId")
+  if (!filtroId) return { error: "No encontramos esa regla.", mensaje: null }
+
+  try {
+    const { usuario } = await requerirSesion({ siNoHaySesion: "lanzar" })
+    const sacado = await olvidarFiltro({ userId: usuario.id, filtroId })
+
+    revalidatePath("/perfil/gmail")
+
+    return sacado
+      ? {
+          error: null,
+          mensaje: `Sacamos la regla: los correos de ${sacado.remitente} ya no se etiquetan solos.`,
+        }
+      : { error: "No encontramos esa regla.", mensaje: null }
+  } catch (error) {
+    console.error(
+      `[gmail] no se pudo sacar el filtro ${filtroId}:`,
+      error instanceof Error ? error.message : error,
+    )
+    return {
+      error: mensajeDeError(error, "No pudimos sacar la regla de tu Gmail. Probá de nuevo."),
+      mensaje: null,
+    }
   }
 }

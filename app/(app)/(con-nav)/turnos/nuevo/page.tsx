@@ -25,7 +25,22 @@ export const metadata: Metadata = {
   title: "Nuevo turno — Historial Médico",
 }
 
-export default async function PaginaNuevoTurno() {
+/**
+ * Sprint 17, tarea 17.2: `?gmail=<uuid>` cuando se llega desde la bandeja
+ * "Llegaron por Gmail". Se valida la FORMA acá y la PERTENENCIA con una
+ * consulta que pasa por RLS: si el id no es de un correo de esta cuenta, la
+ * fila no aparece y el parámetro se ignora en silencio -la pantalla queda
+ * exactamente como el alta manual de siempre-. La ruta `/api/gmail/analizar-correo`
+ * vuelve a verificar lo mismo antes de leer nada de Gmail: esta comprobación
+ * es para no renderizar un bloque de precarga que iba a fallar.
+ */
+const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export default async function PaginaNuevoTurno({
+  searchParams,
+}: {
+  searchParams: Promise<{ gmail?: string }>
+}) {
   const activo = await obtenerPerfilActivo()
 
   if (!activo) {
@@ -37,6 +52,17 @@ export default async function PaginaNuevoTurno() {
   }
 
   const { supabase } = await requerirSesion({ desde: "/turnos/nuevo" })
+
+  const { gmail } = await searchParams
+  let correoGmailId: string | undefined
+  if (typeof gmail === "string" && PATRON_UUID.test(gmail)) {
+    const { data: correo } = await supabase
+      .from("gmail_messages")
+      .select("id")
+      .eq("id", gmail)
+      .maybeSingle()
+    correoGmailId = correo?.id
+  }
 
   const [{ data: medicos }, ultimaUbicacion, estadoCatalogo] = await Promise.all([
     supabase
@@ -76,6 +102,7 @@ export default async function PaginaNuevoTurno() {
         medicos={medicos ?? []}
         fechaMinimaIso={hoyIsoUshuaia()}
         catalogoDisponible={estadoCatalogo.centros > 0}
+        correoGmailId={correoGmailId}
         valoresIniciales={
           ultimaUbicacion
             ? { lugarCiudad: ultimaUbicacion.ciudad, lugarProvincia: ultimaUbicacion.provincia }

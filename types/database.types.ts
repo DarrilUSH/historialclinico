@@ -539,6 +539,108 @@ export type Database = {
         }
         Relationships: []
       }
+      gmail_filters: {
+        Row: {
+          created_at: string
+          from_email: string
+          gmail_filter_id: string
+          id: string
+          label_id: string
+          label_name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          from_email: string
+          gmail_filter_id: string
+          id?: string
+          label_id: string
+          label_name?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          from_email?: string
+          gmail_filter_id?: string
+          id?: string
+          label_id?: string
+          label_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      gmail_messages: {
+        Row: {
+          appointment_id: string | null
+          attachments: Json
+          connection_email: string
+          detected_at: string
+          document_id: string | null
+          from_email: string
+          from_name: string | null
+          gmail_message_id: string
+          id: string
+          kind: string
+          looks_like_appointment: boolean
+          message_date: string | null
+          resolved_at: string | null
+          status: string
+          subject: string | null
+          user_id: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          attachments?: Json
+          connection_email: string
+          detected_at?: string
+          document_id?: string | null
+          from_email: string
+          from_name?: string | null
+          gmail_message_id: string
+          id?: string
+          kind?: string
+          looks_like_appointment?: boolean
+          message_date?: string | null
+          resolved_at?: string | null
+          status?: string
+          subject?: string | null
+          user_id: string
+        }
+        Update: {
+          appointment_id?: string | null
+          attachments?: Json
+          connection_email?: string
+          detected_at?: string
+          document_id?: string | null
+          from_email?: string
+          from_name?: string | null
+          gmail_message_id?: string
+          id?: string
+          kind?: string
+          looks_like_appointment?: boolean
+          message_date?: string | null
+          resolved_at?: string | null
+          status?: string
+          subject?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gmail_messages_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "gmail_messages_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       health_centers: {
         Row: {
           address: string | null
@@ -1461,6 +1563,7 @@ export type Database = {
         Args: { p_url: string }
         Returns: undefined
       }
+      configurar_cron_gmail: { Args: { p_url: string }; Returns: undefined }
       configurar_cron_recordatorios: {
         Args: { p_secreto: string; p_url: string }
         Returns: undefined
@@ -1577,6 +1680,7 @@ export type Database = {
         Returns: string[]
       }
       disparar_alertas_medicacion: { Args: never; Returns: string }
+      disparar_barrido_gmail: { Args: never; Returns: string }
       disparar_recordatorios_turnos: { Args: never; Returns: string }
       es_perfil_gestionado: { Args: { perfil: string }; Returns: boolean }
       es_sesion_de_usuario: { Args: never; Returns: boolean }

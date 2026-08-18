@@ -866,6 +866,12 @@ Demo: crear niño → cargarle historial → graduarlo → entrar con su cuenta 
 
 Conectar la cuenta de Gmail del usuario vía OAuth (gratuito, scopes mínimos de lectura + etiquetas) para que la app lea la etiqueta "historialmedico" periódicamente e importe los adjuntos al flujo de ingesta (extracción + revisión + visto bueno — nunca guarda sola). **Al conectar, si la etiqueta no existe, la app la CREA automáticamente** (pedido del usuario, evita errores de tipeo). Diseño pendiente de spec: OAuth por cuenta (tabla de conexiones con tokens cifrados), barrido periódico (cron existente como patrón), y pantalla de "correos detectados" para elegir perfil + revisar. Nota: requiere crear credenciales OAuth en Google Cloud Console (gratuito) — paso del usuario con instructivo, como las claves del deploy.
 
+### Estado
+
+- **17.1 — Conexión OAuth (hecha).** `gmail_connections`, el refresh token cifrado en el Vault, la etiqueta `historialmedico` creada al conectar, la pantalla `/perfil/gmail` con sus tres estados y la desconexión que revoca contra Google. Ver `docs/minimizacion-datos.md` §10.
+- **17.2 — Barrido, ingesta y filtros aprendidos (hecha, local).** El barrido de la etiqueta (cron cada 30 min con el patrón `pg_cron` → `pg_net` → `x-cron-secret`, más el botón "Buscar ahora"), el registro de correos con dedup (`gmail_messages`), la bandeja "Llegaron por Gmail" en `/perfil/gmail`, la ingesta de adjuntos por el pipeline de documentos EXISTENTE (`ingestarDocumento` → la pantalla de revisión de siempre), la propuesta de turno con el analizador de la 16.4 y los filtros por remitente aprendidos del uso (`gmail_filters`, con su botón de sacarlos). Documentación completa en `docs/gmail-ingesta.md`; privacidad en `docs/minimizacion-datos.md` §10.6.
+  - **Falta la verificación con una casilla REAL**: todo el circuito está probado contra un Gmail de mentira (`tests/unit/gmail-barrido.test.ts`), porque el toque de consentimiento es del usuario. La lista de lo que solo se puede confirmar con la conexión real está en el Resumen de Entrega de la tarea.
+
 ## Backlog de mejoras (post-lanzamiento, pedidas por el usuario)
 
 > Anotadas el 2026-08-14 durante el estreno en producción. Se encaran como tandas nuevas cuando el usuario lo pida, con el protocolo de siempre.

@@ -553,3 +553,276 @@ export async function asegurarEtiqueta(
 
   return { id: creada.id, nombre: creada.name, creada: true }
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  TAREA 17.2 — leer la etiqueta, bajar un adjunto, aprender un remitente
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Todo lo de acá abajo respeta el compromiso declarado en
+ * `docs/minimizacion-datos.md` §10.3: **nunca se consulta la casilla entera**.
+ * `listarMensajesDeEtiqueta` manda SIEMPRE `labelIds`, y no existe ninguna
+ * función en este módulo que acepte una `q` de búsqueda libre — no es un
+ * olvido, es la forma de que el compromiso sea verificable leyendo el código.
+ */
+
+/**
+ * Traduce el error de una llamada a la API de Gmail.
+ *
+ * El `401` es el que importa: con un access token recién refrescado, un 401
+ * significa que el permiso murió ENTRE el refresco y esta llamada (la persona
+ * lo revocó justo ahí, o Google lo invalidó). Se mapea a `permiso_vencido`,
+ * que es el mismo código con el que `refrescarAccessToken` reporta el
+ * `invalid_grant`, y así el barrido tiene UN solo caso que atender: marcar la
+ * conexión vencida y seguir con las demás.
+ *
+ * El `403` NO se mapea igual, aunque tiente: casi siempre es "Insufficient
+ * Permission" (un scope que la persona destildó) o un límite de cuota por
+ * usuario, y ninguno de los dos se arregla reconectando. Queda como
+ * `respuesta_de_google`, con el detalle en el log.
+ */
+function errorDeGmailApi(estado: number, cuerpo: string, contexto: string): ErrorGmail {
+  if (estado === 401) {
+    return new ErrorGmail(
+      "permiso_vencido",
+      "Se venció el permiso para leer tu Gmail. Volvé a conectarlo cuando quieras.",
+      `${contexto} http 401: ${cuerpo.slice(0, 200)}`,
+    )
+  }
+  return new ErrorGmail(
+    "respuesta_de_google",
+    "Gmail no pudo responder ahora mismo. Probá de nuevo en un rato.",
+    `${contexto} http ${estado}: ${cuerpo.slice(0, 200)}`,
+  )
+}
+
+export interface PaginaDeMensajes {
+  /** Ids de los mensajes de la etiqueta, del más nuevo al más viejo (orden de Gmail). */
+  ids: string[]
+  /** Token de la página siguiente, o `null` si no hay más. */
+  siguientePagina: string | null
+}
+
+/**
+ * Lista los mensajes que están en la etiqueta. **Es la única lectura de la
+ * casilla que hace esta aplicación.**
+ *
+ * `maxResults` es un tope por PÁGINA, no por barrido: el barrido pagina hasta
+ * juntar los que necesita (`lib/gmail/barrido.ts`). No se manda `q`: filtrar
+ * por etiqueta es un `labelIds`, y una búsqueda libre sería exactamente lo que
+ * el §10.3 promete no hacer.
+ */
+export async function listarMensajesDeEtiqueta(
+  accessToken: string,
+  parametros: { labelId: string; maxResults?: number; pageToken?: string | null },
+  opciones?: OpcionesBases,
+): Promise<PaginaDeMensajes> {
+  const query = new URLSearchParams({
+    labelIds: parametros.labelId,
+    maxResults: String(parametros.maxResults ?? 50),
+  })
+  if (parametros.pageToken) query.set("pageToken", parametros.pageToken)
+
+  const { estado, datos, texto } = await pedirGmail(
+    `/gmail/v1/users/me/messages?${query.toString()}`,
+    accessToken,
+    opciones,
+  )
+
+  if (estado < 200 || estado >= 300) {
+    throw errorDeGmailApi(estado, texto, "messages.list")
+  }
+
+  const cuerpo = datos as { messages?: unknown; nextPageToken?: unknown } | null
+  const lista = Array.isArray(cuerpo?.messages) ? (cuerpo.messages as { id?: unknown }[]) : []
+
+  return {
+    ids: lista.map((m) => m?.id).filter((id): id is string => typeof id === "string" && id.length > 0),
+    siguientePagina: typeof cuerpo?.nextPageToken === "string" ? cuerpo.nextPageToken : null,
+  }
+}
+
+/**
+ * Un mensaje completo (`format=full`): headers, estructura MIME y el cuerpo
+ * embebido. Devuelve el JSON CRUDO; interpretarlo es trabajo de
+ * `lib/gmail/mensaje.ts`, que es puro y testeable sin red.
+ *
+ * No se usa `format=metadata` -que sería más respetuoso- porque no trae ni el
+ * cuerpo ni la estructura de adjuntos, que es justo lo que hay que mirar. Y no
+ * se usa `format=raw` porque obligaría a implementar un parser MIME completo
+ * acá adentro.
+ */
+export async function obtenerMensajeCompleto(
+  accessToken: string,
+  mensajeId: string,
+  opciones?: OpcionesBases,
+): Promise<unknown> {
+  const { estado, datos, texto } = await pedirGmail(
+    `/gmail/v1/users/me/messages/${encodeURIComponent(mensajeId)}?format=full`,
+    accessToken,
+    opciones,
+  )
+
+  if (estado < 200 || estado >= 300) {
+    throw errorDeGmailApi(estado, texto, "messages.get")
+  }
+  return datos
+}
+
+/**
+ * Baja los bytes de un adjunto. **Solo se llama cuando una persona tocó
+ * "revisar"**, nunca durante el barrido automático.
+ *
+ * Gmail devuelve `{ size, data }` con `data` en base64url. Se devuelve un
+ * `Buffer` porque lo que sigue es armar un `File` para
+ * `lib/documentos/ingesta.ts` — el mismo camino que un archivo elegido a mano.
+ */
+export async function descargarAdjunto(
+  accessToken: string,
+  parametros: { mensajeId: string; adjuntoId: string },
+  opciones?: OpcionesBases,
+): Promise<Buffer> {
+  const { estado, datos, texto } = await pedirGmail(
+    `/gmail/v1/users/me/messages/${encodeURIComponent(parametros.mensajeId)}` +
+      `/attachments/${encodeURIComponent(parametros.adjuntoId)}`,
+    accessToken,
+    opciones,
+  )
+
+  if (estado < 200 || estado >= 300) {
+    throw errorDeGmailApi(estado, texto, "attachments.get")
+  }
+
+  const contenido = (datos as { data?: unknown } | null)?.data
+  if (typeof contenido !== "string" || contenido.length === 0) {
+    throw new ErrorGmail(
+      "respuesta_de_google",
+      "No pudimos traer el archivo adjunto. Probá de nuevo en un rato.",
+      "attachments.get sin data",
+    )
+  }
+
+  return Buffer.from(contenido, "base64url")
+}
+
+export interface FiltroGmail {
+  /** Id del filtro en Gmail: lo único que hace falta para borrarlo. */
+  id: string
+  /** El remitente del criterio, en minúsculas, o `null` si el filtro no filtra por remitente. */
+  from: string | null
+  /** Etiquetas que el filtro agrega. */
+  etiquetas: string[]
+}
+
+function parsearFiltro(crudo: unknown): FiltroGmail | null {
+  if (!crudo || typeof crudo !== "object") return null
+  const filtro = crudo as { id?: unknown; criteria?: unknown; action?: unknown }
+  if (typeof filtro.id !== "string" || filtro.id.length === 0) return null
+
+  const desde = (filtro.criteria as { from?: unknown } | undefined)?.from
+  const etiquetas = (filtro.action as { addLabelIds?: unknown } | undefined)?.addLabelIds
+
+  return {
+    id: filtro.id,
+    from: typeof desde === "string" && desde.length > 0 ? desde.trim().toLowerCase() : null,
+    etiquetas: Array.isArray(etiquetas)
+      ? (etiquetas as unknown[]).filter((e): e is string => typeof e === "string")
+      : [],
+  }
+}
+
+/** Todos los filtros de la casilla (los de la app y los que la persona tenga por su cuenta). */
+export async function listarFiltros(
+  accessToken: string,
+  opciones?: OpcionesBases,
+): Promise<FiltroGmail[]> {
+  const { estado, datos, texto } = await pedirGmail(
+    "/gmail/v1/users/me/settings/filters",
+    accessToken,
+    opciones,
+  )
+
+  if (estado < 200 || estado >= 300) {
+    throw errorDeGmailApi(estado, texto, "settings.filters.list")
+  }
+
+  const lista = (datos as { filter?: unknown } | null)?.filter
+  if (!Array.isArray(lista)) return []
+  return lista.map(parsearFiltro).filter((f): f is FiltroGmail => f !== null)
+}
+
+/**
+ * Crea el filtro "todo lo de este remitente va a la etiqueta".
+ *
+ * **Solo etiqueta.** El `action` lleva únicamente `addLabelIds`: nada de
+ * `removeLabelIds: ["INBOX"]` (que archivaría), nada de marcar como leído,
+ * nada de `shouldTrash`. La app no le esconde correos a nadie de su propia
+ * casilla: el correo sigue llegando a la bandeja de entrada como siempre, y lo
+ * único que cambia es que además queda etiquetado y por lo tanto visible para
+ * el barrido.
+ *
+ * ## El duplicado no es un error
+ *
+ * Si la persona (o una corrida anterior) ya tenía un filtro igual, Gmail
+ * responde `4xx` con "Filter already exists". Eso NO es una falla: el estado
+ * deseado ya está. Se relistan los filtros, se busca el que corresponde a este
+ * remitente y esta etiqueta, y se devuelve con `yaExistia: true`. La aplicación
+ * lo trata como éxito y lo dice en pantalla con otras palabras ("ya lo teníamos
+ * puesto").
+ */
+export async function crearFiltroPorRemitente(
+  accessToken: string,
+  parametros: { remitente: string; labelId: string },
+  opciones?: OpcionesBases,
+): Promise<{ filtro: FiltroGmail; yaExistia: boolean }> {
+  const remitente = parametros.remitente.trim().toLowerCase()
+
+  const alta = await pedirGmail("/gmail/v1/users/me/settings/filters", accessToken, opciones, {
+    method: "POST",
+    cuerpo: {
+      criteria: { from: remitente },
+      action: { addLabelIds: [parametros.labelId] },
+    },
+  })
+
+  if (alta.estado >= 200 && alta.estado < 300) {
+    const creado = parsearFiltro(alta.datos)
+    if (creado) return { filtro: creado, yaExistia: false }
+    // Un 2xx sin id no debería pasar; se resuelve como el duplicado, buscando.
+  }
+
+  if (alta.estado === 401) {
+    throw errorDeGmailApi(alta.estado, alta.texto, "settings.filters.create")
+  }
+
+  // Duplicado (o 2xx raro): el estado deseado puede estar ya puesto.
+  const existentes = await listarFiltros(accessToken, opciones)
+  const gemelo = existentes.find(
+    (filtro) => filtro.from === remitente && filtro.etiquetas.includes(parametros.labelId),
+  )
+  if (gemelo) return { filtro: gemelo, yaExistia: true }
+
+  throw errorDeGmailApi(alta.estado, alta.texto, "settings.filters.create")
+}
+
+/**
+ * Borra un filtro. **No lanza ante un `404`**: que el filtro ya no esté es
+ * exactamente el resultado que se buscaba —la persona pudo haberlo sacado
+ * desde Gmail— y hacer fallar el botón por eso dejaría la fila de
+ * `gmail_filters` apuntando para siempre a una regla que no existe.
+ */
+export async function borrarFiltro(
+  accessToken: string,
+  filtroId: string,
+  opciones?: OpcionesBases,
+): Promise<void> {
+  const { estado, texto } = await pedirGmail(
+    `/gmail/v1/users/me/settings/filters/${encodeURIComponent(filtroId)}`,
+    accessToken,
+    opciones,
+    { method: "DELETE" },
+  )
+
+  if (estado === 404 || (estado >= 200 && estado < 300)) return
+  throw errorDeGmailApi(estado, texto, "settings.filters.delete")
+}

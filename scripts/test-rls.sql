@@ -64,6 +64,15 @@ drop schema if exists pruebas_rls cascade;
 -- exactamente lo que debe hacer.
 delete from public.profiles  where id    in (:p_g, :p_g2, :p_g3);
 delete from auth.users       where id    in (:u_a, :u_b);
+-- Cuentas del BLOQUE 24 (Sprint 17, tarea 17.2). La de Beto ya se borró dentro
+-- del bloque -es parte de lo que prueba: que la baja de cuenta se lleve la
+-- bandeja entera-, así que este delete alcanza a la de Ana. El CASCADE se
+-- lleva sus correos registrados, sus filtros y el perfil que le creó el
+-- trigger de alta de cuenta; el documento de prueba ya se borró dentro del
+-- bloque (era justamente el caso del ON DELETE SET NULL).
+delete from auth.users where id in (
+    'f2300aaa-1111-4111-8111-111111111111',
+    'f2300bbb-2222-4222-8222-222222222222');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 
 -- El BLOQUE 15 crea usuarios y perfiles propios.
@@ -6660,6 +6669,569 @@ begin
         'service_role sí puede ejecutar las cinco',
         'borrar_conexion_gmail,guardar_conexion_gmail,leer_refresh_token_gmail,marcar_conexion_gmail_activa,marcar_conexion_gmail_vencida',
         v);
+end $$;
+
+
+-- =============================================================================
+-- BLOQUE 24 — La bandeja de Gmail: registro de correos y filtros aprendidos
+-- (Sprint 17, tarea 17.2)
+-- -----------------------------------------------------------------------------
+-- `gmail_messages` guarda METADATOS de los correos que el barrido ya miró
+-- (remitente, asunto, fecha, descriptores de adjuntos) y `gmail_filters` las
+-- reglas que la app creó en el Gmail de la persona. Las dos son tablas de la
+-- CUENTA, como `gmail_connections` del BLOQUE 23, y este bloque prueba las
+-- mismas capas que aquel, más las invariantes propias de este registro:
+--
+--   1. **RLS por fila** — cada cuenta ve lo suyo y NADA de la otra.
+--   2. **Cero escritura para el navegador** — `authenticated` no puede
+--      insertar, actualizar ni borrar ni siquiera SUS PROPIAS filas: la fila
+--      lleva punteros (`document_id`, `appointment_id`) que un cliente no debe
+--      poder escribir, y el único camino de escritura es `service_role`
+--      (`lib/gmail/mensajes-admin.ts`), después de que la Server Action
+--      verificó la sesión.
+--   3. **El dedup es una invariante de la base**, no una promesa del código:
+--      `UNIQUE (user_id, gmail_message_id)`.
+--   4. **Los punteros son ON DELETE SET NULL**: borrar el documento que salió
+--      de un correo NO puede borrar la fila del registro — si la borrara, el
+--      correo se volvería a proponer en la próxima pasada, para siempre.
+--   5. **La baja de cuenta se lleva todo** (Ley 25.326, arts. 14-16).
+--   6. **El job de cron** existe, con la frecuencia declarada, y sus funciones
+--      no son alcanzables desde una sesión del navegador.
+-- =============================================================================
+\echo '### BLOQUE 24 — bandeja de Gmail: correos registrados y filtros aprendidos'
+
+-- Dos cuentas nuevas. El trigger `auth_users_crear_perfil_de_cuenta`
+-- (20260814140000) les crea el perfil propio solo, que es lo que hace falta
+-- para el caso del documento borrado.
+insert into auth.users (id, email, instance_id, aud, role, encrypted_password,
+                        email_confirmed_at, created_at, updated_at)
+values
+    ('f2300aaa-1111-4111-8111-111111111111', 'ana.bandeja@ejemplo.com.ar',
+     '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+     'x', now(), now(), now()),
+    ('f2300bbb-2222-4222-8222-222222222222', 'beto.bandeja@ejemplo.com.ar',
+     '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+     'x', now(), now(), now());
+
+begin;
+set local role service_role;
+
+-- El barrido corre como service_role: así entra cada correo al registro.
+do $$
+declare v text;
+begin
+    insert into public.gmail_messages (
+        user_id, gmail_message_id, connection_email, from_email, from_name,
+        subject, message_date, kind, looks_like_appointment, attachments, status)
+    values
+        ('f2300aaa-1111-4111-8111-111111111111', 'msg-doc-1', 'ana@gmail.com',
+         'resultados@lab-austral.com.ar', 'Laboratorio Austral',
+         'Resultado de laboratorio', now(), 'documento', false,
+         '[{"attachmentId":"ATT_1","filename":"resultado.pdf","mimeType":"application/pdf","size":24000,"apto":true,"motivo":null}]'::jsonb,
+         'pendiente_revision'),
+        ('f2300aaa-1111-4111-8111-111111111111', 'msg-turno-1', 'ana@gmail.com',
+         'turnos@sanjorge.com.ar', 'Clínica San Jorge',
+         'Turno asignado', now(), 'turno', true, '[]'::jsonb, 'pendiente_revision'),
+        ('f2300bbb-2222-4222-8222-222222222222', 'msg-de-beto', 'beto@gmail.com',
+         'turnos@otraclinica.com.ar', null,
+         'Turno de Beto', now(), 'turno', true, '[]'::jsonb, 'pendiente_revision');
+
+    -- Un correo sin nada aprovechable entra YA descartado: la fila existe para
+    -- que la próxima pasada no lo vuelva a bajar.
+    insert into public.gmail_messages (
+        user_id, gmail_message_id, connection_email, from_email, subject,
+        kind, status, resolved_at)
+    values ('f2300aaa-1111-4111-8111-111111111111', 'msg-nada-1', 'ana@gmail.com',
+            'facturacion@obrasocial.com.ar', 'Su factura de julio',
+            'nada', 'descartado', now());
+
+    select count(*)::text into v from public.gmail_messages
+     where user_id in ('f2300aaa-1111-4111-8111-111111111111',
+                       'f2300bbb-2222-4222-8222-222222222222');
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'service_role registra los cuatro correos', '4', v);
+end $$;
+
+-- El dedup: la misma casilla no puede registrar dos veces el mismo mensaje.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_messages (
+            user_id, gmail_message_id, connection_email, from_email, kind, status)
+        values ('f2300aaa-1111-4111-8111-111111111111', 'msg-doc-1', 'ana@gmail.com',
+                'resultados@lab-austral.com.ar', 'documento', 'pendiente_revision');
+        v := 'insertó un duplicado';
+    exception when unique_violation then v := 'rechazado (23505)';
+             when others            then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'El dedup es de la BASE: el mismo mensaje no entra dos veces',
+        'rechazado (23505)', v);
+end $$;
+
+-- Pero el MISMO id de Gmail en OTRA cuenta sí puede entrar (dos personas
+-- reenviándose el mismo correo es un caso real).
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_messages (
+            user_id, gmail_message_id, connection_email, from_email, kind, status)
+        values ('f2300bbb-2222-4222-8222-222222222222', 'msg-doc-1', 'beto@gmail.com',
+                'resultados@lab-austral.com.ar', 'documento', 'pendiente_revision');
+        v := 'aceptado';
+    exception when others then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'El mismo id de Gmail en OTRA cuenta sí entra', 'aceptado', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_messages (
+            user_id, gmail_message_id, connection_email, from_email, kind, status)
+        values ('f2300aaa-1111-4111-8111-111111111111', 'msg-x', 'ana@gmail.com',
+                'x@y.com', 'documento', 'inventado');
+        v := 'aceptó un estado inválido';
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Un estado que no existe lo rechaza el CHECK', 'rechazado (23514)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_messages (
+            user_id, gmail_message_id, connection_email, from_email, kind, status)
+        values ('f2300aaa-1111-4111-8111-111111111111', 'msg-y', 'ana@gmail.com',
+                'x@y.com', 'inventado', 'pendiente_revision');
+        v := 'aceptó una clase inválida';
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Una clase que no existe la rechaza el CHECK', 'rechazado (23514)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_messages (
+            user_id, gmail_message_id, connection_email, from_email, kind, status, resolved_at)
+        values ('f2300aaa-1111-4111-8111-111111111111', 'msg-z', 'ana@gmail.com',
+                'x@y.com', 'documento', 'pendiente_revision', now());
+        v := 'aceptó un pendiente ya resuelto';
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Un pendiente NO puede tener fecha de resolución', 'rechazado (23514)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_messages (
+            user_id, gmail_message_id, connection_email, from_email, kind, status, attachments)
+        values ('f2300aaa-1111-4111-8111-111111111111', 'msg-w', 'ana@gmail.com',
+                'x@y.com', 'documento', 'pendiente_revision', '{"no":"es una lista"}'::jsonb);
+        v := 'aceptó adjuntos que no son lista';
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Los adjuntos tienen que ser una lista JSON', 'rechazado (23514)', v);
+end $$;
+
+-- Los filtros aprendidos.
+do $$
+declare v text;
+begin
+    insert into public.gmail_filters (user_id, gmail_filter_id, from_email, label_id, label_name)
+    values
+        ('f2300aaa-1111-4111-8111-111111111111', 'ANe1', 'turnos@sanjorge.com.ar',
+         'Label_100', 'historialmedico'),
+        ('f2300bbb-2222-4222-8222-222222222222', 'BNe1', 'turnos@otraclinica.com.ar',
+         'Label_200', 'historialmedico');
+
+    select count(*)::text into v from public.gmail_filters
+     where user_id in ('f2300aaa-1111-4111-8111-111111111111',
+                       'f2300bbb-2222-4222-8222-222222222222');
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'service_role registra los filtros creados en Gmail', '2', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_filters (user_id, gmail_filter_id, from_email, label_id)
+        values ('f2300aaa-1111-4111-8111-111111111111', 'ANe2', 'turnos@sanjorge.com.ar',
+                'Label_100');
+        v := 'creó dos filtros para el mismo remitente';
+    exception when unique_violation then v := 'rechazado (23505)';
+             when others            then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Un remitente, UN filtro (el botón es idempotente)', 'rechazado (23505)', v);
+end $$;
+
+commit;
+
+
+-- ── La sesión de Ana: ve lo suyo, y no escribe nada
+begin;
+select set_config('request.jwt.claims',
+    '{"sub":"f2300aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.gmail_messages;
+        v := c::text || ' fila(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ana ve sus TRES correos (los de Beto no existen para ella)', '3 fila(s)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(gmail_message_id, ',' order by gmail_message_id), '(ninguno)')
+      into v from public.gmail_messages;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Y son exactamente los suyos', 'msg-doc-1,msg-nada-1,msg-turno-1', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    select count(*) into c from public.gmail_messages
+     where user_id = 'f2300bbb-2222-4222-8222-222222222222';
+    v := c::text || ' fila(s)';
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ana pide explícitamente los correos de Beto', '0 fila(s)', v);
+end $$;
+
+-- A diferencia de gmail_connections, acá NO hay grant por columna: no hay
+-- ninguna columna que la pantalla no muestre, así que un `select *` -lo que
+-- manda PostgREST- tiene que funcionar.
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from (select * from public.gmail_messages) t;
+        v := c::text || ' fila(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'El select * de PostgREST funciona: acá no hay columnas secretas',
+        '3 fila(s)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_messages (
+            user_id, gmail_message_id, connection_email, from_email, kind, status)
+        values ('f2300aaa-1111-4111-8111-111111111111', 'inventado-por-ana', 'ana@gmail.com',
+                'x@y.com', 'documento', 'pendiente_revision');
+        v := 'insertó';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ana NO puede inventarse un correo en su propia bandeja',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        update public.gmail_messages set status = 'ingresado'
+         where user_id = 'f2300aaa-1111-4111-8111-111111111111';
+        v := 'actualizó';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ana NO puede marcar sus correos a mano (los punteros no son suyos)',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        delete from public.gmail_messages
+         where user_id = 'f2300aaa-1111-4111-8111-111111111111';
+        v := 'borró';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ana NO puede borrar filas del registro (rompería el dedup)',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    select count(*) into c from public.gmail_filters;
+    v := c::text || ' fila(s)';
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ana ve UN filtro: el suyo', '1 fila(s)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_filters (user_id, gmail_filter_id, from_email, label_id)
+        values ('f2300aaa-1111-4111-8111-111111111111', 'FALSO', 'otro@x.com', 'Label_100');
+        v := 'insertó';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ana NO puede anotar un filtro por su cuenta', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        delete from public.gmail_filters where user_id = 'f2300aaa-1111-4111-8111-111111111111';
+        v := 'borró';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ana NO borra la fila del filtro sola: sacarlo pasa por Gmail primero',
+        'denegado (42501)', v);
+end $$;
+
+rollback;
+
+
+-- ── anon: nada de nada
+begin;
+set local role anon;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.gmail_messages;
+        v := c::text || ' fila(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'anon lee la bandeja de correos', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.gmail_filters;
+        v := c::text || ' fila(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'anon lee los filtros', 'denegado (42501)', v);
+end $$;
+
+rollback;
+
+
+-- ── El puntero al documento: borrar el estudio NO borra el registro
+begin;
+set local role service_role;
+
+do $$
+declare v text; v_perfil uuid; v_doc uuid;
+begin
+    select id into v_perfil from public.profiles
+     where user_id = 'f2300aaa-1111-4111-8111-111111111111';
+
+    insert into public.documents (profile_id, title, category, document_date, storage_path)
+    values (v_perfil, 'Estudio que vino por Gmail', 'other', current_date,
+            v_perfil::text || '/2026/f2300000-0000-4000-8000-000000000001.pdf')
+    returning id into v_doc;
+
+    update public.gmail_messages
+       set status = 'ingresado', resolved_at = now(), document_id = v_doc
+     where user_id = 'f2300aaa-1111-4111-8111-111111111111'
+       and gmail_message_id = 'msg-doc-1';
+
+    select case when document_id is not null then 'apunta al estudio' else 'sin puntero' end
+      into v
+      from public.gmail_messages
+     where user_id = 'f2300aaa-1111-4111-8111-111111111111'
+       and gmail_message_id = 'msg-doc-1';
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'El correo ingresado apunta al estudio que produjo', 'apunta al estudio', v);
+
+    -- Y ahora se borra el estudio (es lo que pasa si se descarta en la
+    -- pantalla de revisión).
+    delete from public.documents where id = v_doc;
+
+    select count(*)::text into v from public.gmail_messages
+     where user_id = 'f2300aaa-1111-4111-8111-111111111111'
+       and gmail_message_id = 'msg-doc-1';
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Borrar el estudio NO borra la fila del registro (si no, se reimportaría)',
+        '1', v);
+
+    select case when document_id is null then 'puntero en NULL' else 'sigue apuntando' end
+      into v
+      from public.gmail_messages
+     where user_id = 'f2300aaa-1111-4111-8111-111111111111'
+       and gmail_message_id = 'msg-doc-1';
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Y el puntero queda en NULL (ON DELETE SET NULL)', 'puntero en NULL', v);
+end $$;
+
+commit;
+
+
+-- ── La baja de cuenta se lleva la bandeja entera
+begin;
+set local role postgres;
+
+do $$
+declare v text; c1 integer; c2 integer;
+begin
+    delete from auth.users where id = 'f2300bbb-2222-4222-8222-222222222222';
+
+    select count(*) into c1 from public.gmail_messages
+     where user_id = 'f2300bbb-2222-4222-8222-222222222222';
+    select count(*) into c2 from public.gmail_filters
+     where user_id = 'f2300bbb-2222-4222-8222-222222222222';
+    v := c1::text || ' correo(s), ' || c2::text || ' filtro(s)';
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Borrar la CUENTA se lleva sus correos y sus filtros (Ley 25.326)',
+        '0 correo(s), 0 filtro(s)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select count(*)::text into v from public.gmail_messages
+     where user_id = 'f2300aaa-1111-4111-8111-111111111111';
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Y no toca los de la otra cuenta', '3', v);
+end $$;
+
+commit;
+
+
+-- ── Privilegios, políticas y el job
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(distinct privilege_type, ',' order by privilege_type), '(ninguno)')
+      into v
+      from information_schema.table_privileges
+     where table_schema = 'public' and table_name in ('gmail_messages', 'gmail_filters')
+       and grantee in ('anon', 'authenticated');
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'anon/authenticated solo tienen SELECT sobre las dos tablas', 'SELECT', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(distinct privilege_type, ',' order by privilege_type), '(ninguno)')
+      into v
+      from information_schema.table_privileges
+     where table_schema = 'public' and table_name in ('gmail_messages', 'gmail_filters')
+       and grantee = 'service_role'
+       -- Solo los cuatro de DML: service_role además trae REFERENCES, TRIGGER
+       -- y TRUNCATE de los defaults de Supabase, que no son lo que este caso
+       -- vigila.
+       and privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE');
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'service_role sí escribe (es quien corre el barrido)',
+        'DELETE,INSERT,SELECT,UPDATE', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(distinct cmd, ',' order by cmd), '(ninguna)') into v
+      from pg_policies
+     where schemaname = 'public' and tablename in ('gmail_messages', 'gmail_filters');
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Las dos tablas tienen política SOLO de SELECT', 'SELECT', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(c.relname, ',' order by c.relname), '(ninguna)') into v
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = 'public'
+       and c.relname in ('gmail_messages', 'gmail_filters')
+       and c.relrowsecurity;
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Las dos tienen RLS habilitada', 'gmail_filters,gmail_messages', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(p.proname, ',' order by p.proname), '(ninguna)') into v
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in ('configurar_cron_gmail', 'disparar_barrido_gmail')
+       and (has_function_privilege('authenticated', p.oid, 'EXECUTE')
+            or has_function_privilege('anon', p.oid, 'EXECUTE'));
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ni anon ni authenticated pueden disparar el barrido', '(ninguna)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(p.proname, ',' order by p.proname), '(ninguna)') into v
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname = 'configurar_cron_gmail'
+       and has_function_privilege('service_role', p.oid, 'EXECUTE');
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'Ni siquiera service_role configura el cron: eso es del owner',
+        '(ninguna)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(schedule, '(sin job)') into v from cron.job where jobname = 'barrido-gmail';
+    perform pruebas_rls.registrar('24. Bandeja Gmail',
+        'El job periódico está programado cada 30 minutos', '*/30 * * * *',
+        coalesce(v, '(sin job)'));
 end $$;
 
 

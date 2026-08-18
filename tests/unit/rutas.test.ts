@@ -14,6 +14,7 @@ import {
   RUTA_COMPARTIR,
   RUTA_CRON_ALERTAS_MEDICACION,
   RUTA_CRON_RECORDATORIOS,
+  RUTA_CRON_GMAIL,
   RUTA_GMAIL_CALLBACK,
   RUTA_GMAIL_CONECTAR,
   RUTA_MANIFEST,
@@ -151,15 +152,28 @@ describe("lib/auth/rutas.ts", () => {
     expect(esRutaDeApi(RUTA_GMAIL_CALLBACK)).toBe(true)
   })
 
-  it("la excepción de Gmail NO abre el resto de /api/gmail (los barridos de la 17.2 siguen privados)", () => {
+  it("la excepción de Gmail NO abre el resto de /api/gmail (lo que llama un fetch sigue privado)", () => {
     // Se declararon por nombre y no como prefijo `/api/gmail` justamente para
-    // esto: los endpoints de barrido que llegan en la 17.2 los llama un
-    // `fetch`, no una navegación, y tienen que seguir contestando 401 JSON.
+    // esto: los endpoints que llama un `fetch` -y no una navegación- tienen
+    // que seguir contestando 401 JSON. `/api/gmail/analizar-correo` (17.2) es
+    // exactamente ese caso: lo invoca `components/turnos/precarga-gmail.tsx`.
     expect(esRutaPrivada("/api/gmail", EN_PROD)).toBe(true)
-    expect(esRutaPrivada("/api/gmail/barrer", EN_PROD)).toBe(true)
+    expect(esRutaPrivada("/api/gmail/analizar-correo", EN_PROD)).toBe(true)
     expect(esRutaPrivada("/api/gmail/mensajes", EN_PROD)).toBe(true)
     expect(esRutaPrivada("/api/gmail/callback-falso", EN_PROD)).toBe(true)
     expect(esRutaPrivada("/api/gmail/conectar-falso", EN_PROD)).toBe(true)
+  })
+
+  it("el barrido periódico de Gmail es público para el proxy, como los otros dos crones", () => {
+    // Sprint 17, tarea 17.2. Lo llama `pg_cron` vía `pg_net`: no hay
+    // navegador, no hay cookie y no hay cuenta con la cual iniciar sesión. La
+    // autenticación es el header `x-cron-secret` dentro del propio handler,
+    // que además contesta 503 -no 200- si falta la variable de entorno.
+    expect(esRutaPublica(RUTA_CRON_GMAIL, EN_PROD)).toBe(true)
+    expect(esRutaPublica("/api/gmail/procesar-barrido", EN_PROD)).toBe(true)
+    expect(esRutaDeApi(RUTA_CRON_GMAIL)).toBe(true)
+    // Y la excepción es de ESA ruta, no de todo lo que empiece parecido.
+    expect(esRutaPrivada("/api/gmail/procesar-barrido-falso", EN_PROD)).toBe(true)
   })
 
   it("la pantalla /perfil/gmail sigue siendo privada: la excepción es solo la de /api", () => {

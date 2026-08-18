@@ -69,6 +69,7 @@ import { ProximoTurno } from "@/components/inicio/proximo-turno"
 import { CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA } from "@/components/base/tarjeta"
 import { BannerAlertasSignos } from "@/components/signos/banner-alerta"
 import { requerirSesion } from "@/lib/auth/guardas"
+import { contarCorreosPendientes } from "@/lib/gmail/mensajes"
 import { obtenerTomasDeHoy } from "@/lib/medicacion/tomas-de-hoy"
 import { cn } from "@/lib/utils"
 import { obtenerPerfilActivo, type PermisosPerfilActivo } from "@/lib/perfil-activo"
@@ -106,6 +107,14 @@ export default async function PaginaInicio() {
   const alertasSinVer = permisos.canManage
     ? await obtenerAlertasSinVer(supabase, perfil.id)
     : []
+
+  // Contador de la card de Gmail (Sprint 17, tarea 17.2): cuántos correos
+  // llegaron a la etiqueta y todavía nadie miró. Es de la CUENTA, no del
+  // perfil activo -como la card misma-, así que no lleva gate de permiso; y
+  // es un `count` con `head: true`, sin traer una sola fila. Si la cuenta
+  // nunca conectó Gmail, la consulta devuelve 0 y la card queda exactamente
+  // como estaba.
+  const correosGmailPendientes = await contarCorreosPendientes(supabase)
 
   return (
     <div className="flex w-full flex-1 flex-col items-center justify-center gap-8 px-4 py-12 text-center chica:gap-5 chica:py-6">
@@ -328,7 +337,14 @@ export default async function PaginaInicio() {
           href="/perfil/gmail"
           Icono={MailIcon}
           titulo="Tu Gmail"
-          descripcion="Traer turnos y estudios desde tu correo"
+          descripcion={
+            correosGmailPendientes > 0
+              ? correosGmailPendientes === 1
+                ? "1 correo esperando que lo revises"
+                : `${correosGmailPendientes} correos esperando que los revises`
+              : "Traer turnos y estudios desde tu correo"
+          }
+          insignia={correosGmailPendientes > 0 ? correosGmailPendientes : null}
         />
       </div>
 
@@ -426,17 +442,27 @@ function TarjetaAcceso({
   titulo,
   tituloChico,
   descripcion,
+  insignia = null,
 }: {
   href: string
   Icono: LucideIcon
   titulo: string
   tituloChico?: string
   descripcion: string
+  /**
+   * Contador opcional sobre el ícono (Sprint 17, tarea 17.2: correos de Gmail
+   * sin revisar). Va sobre el ícono y NO reemplaza texto: en modo chica la
+   * bajada no se muestra, así que sin la insignia el aviso desaparecería justo
+   * en el modo que usa el público principal de la app. El número se anuncia
+   * dentro del `title` del enlace por el `descripcion` que llega ya redactado,
+   * y la insignia queda `aria-hidden` para no leerlo dos veces.
+   */
+  insignia?: number | null
 }) {
   return (
     <Link
       href={href}
-      title={titulo}
+      title={insignia ? `${titulo} — ${descripcion}` : titulo}
       className={cn(
         CLASE_TARJETA_BASE,
         CLASE_TARJETA_INTERACTIVA,
@@ -445,10 +471,15 @@ function TarjetaAcceso({
       )}
     >
       <span
-        className="flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-9"
+        className="relative flex size-11 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-9"
         aria-hidden="true"
       >
         <Icono className="size-5 chica:size-4.5" />
+        {insignia !== null && (
+          <span className="absolute -top-1 -right-1 flex min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-xs font-semibold text-primary-foreground">
+            {insignia}
+          </span>
+        )}
       </span>
       <span className="flex flex-col text-left chica:items-center chica:text-center">
         {/*

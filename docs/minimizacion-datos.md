@@ -535,6 +535,60 @@ esquema `vault` inalcanzable para `anon` y `authenticated`, y las cinco
 funciones `SECURITY DEFINER` ejecutables solo por `service_role`. Más el ciclo
 de vida completo: guardar, vencer, reconectar, desconectar y la baja de cuenta.
 
+### 10.6 El barrido de la etiqueta (tarea 17.2)
+
+La 17.1 conectó la casilla sin leer un solo correo. La 17.2 los lee — y este
+apartado declara exactamente **qué queda guardado** de esa lectura.
+
+**Lo que se guarda** (una fila por correo ya mirado, en `public.gmail_messages`):
+
+| Dato | Por qué está |
+|---|---|
+| `gmail_message_id` | El dedup. Sin él, cada pasada volvería a proponer lo que la persona ya descartó. |
+| `from_email`, `from_name` | Para reconocer al laboratorio de siempre en la lista, y para poder ofrecer el filtro aprendido ("¿los próximos de este los traemos solos?"). Sin el remitente esa función no existe. |
+| `subject` | Es lo único que le permite a la persona reconocer un correo **sin abrirlo**. Una lista de fechas sin asunto obligaría a abrir todo. |
+| `message_date` | Ordena la lista. |
+| `kind`, `looks_like_appointment` | Qué se encontró: un adjunto, algo con pinta de turno, o nada. |
+| `attachments` | **Descriptores, nunca bytes**: nombre, tipo, tamaño y el `attachmentId` con el que Gmail entrega el archivo después. Los no aptos se guardan igual, con su motivo, para poder explicar en pantalla por qué un archivo que la persona VE en su correo no se ofrece para importar. |
+| `status`, `document_id`, `appointment_id` | En qué terminó. |
+
+**Lo que NO se guarda, nunca:**
+
+- **El cuerpo del correo.** Ni entero, ni recortado, ni el `snippet` de la API
+  —que es cuerpo—. Cuando hace falta el texto (para analizar un turno), se le
+  vuelve a pedir el mensaje a Gmail, se usa en memoria y se deja ir.
+- **Los bytes de ningún adjunto.** El barrido automático no descarga archivos.
+  Los bytes viajan recién cuando una persona toca "Revisar este estudio", y
+  entran por el MISMO `lib/documentos/ingesta.ts` que un archivo elegido a mano
+  —con su validación de MIME real, su límite de 25 MB, su path determinístico y
+  su RLS—.
+
+**El cuerpo va a Gemini solo si parece un turno.** La heurística
+(`lib/gmail/heuristica-turno.ts`, documentada en `docs/gmail-ingesta.md` §2.3)
+es una puerta de privacidad antes que un ahorro de cuota: un barrido que le
+mandara a un tercero el texto de todo lo que cae en la etiqueta estaría
+sacando de la casilla correos que quizás no tienen nada que ver con un turno.
+Y aun dando positivo, el texto **solo sale cuando la persona abre ese ítem**:
+el barrido automático nunca llama a Gemini.
+
+**Los filtros creados quedan a la vista y se pueden borrar.** `gmail_filters`
+existe para eso: la app crea reglas en la casilla de la persona a pedido suyo,
+y la pantalla las lista con su botón de sacar. La regla solo AGREGA la etiqueta
+—no archiva, no marca como leído, no borra—, así que el correo sigue llegando a
+la bandeja de entrada igual que siempre.
+
+**La baja de cuenta se lleva todo** (`ON DELETE CASCADE` del `user_id`): los
+correos registrados y los filtros. La **desconexión** de Gmail, en cambio, NO
+borra `gmail_messages`, y es deliberado: con la pantalla de consentimiento "En
+prueba", el permiso caduca cada 7 días y la reconexión es semanal; si la
+desconexión borrara el registro, cada reconexión volvería a proponer todo lo ya
+revisado. Lo que la desconexión sí intenta llevarse son los filtros, porque
+esos viven en la casilla.
+
+Verificación: `scripts/test-rls.sql` BLOQUE 24 (21 casos) y
+`tests/unit/gmail-barrido.test.ts` —que además comprueba, sobre el objeto que
+se persiste, que no aparezca ni una palabra del cuerpo del correo—.
+
 ---
 
 ## 11. Referencias
@@ -549,3 +603,7 @@ de vida completo: guardar, vencer, reconectar, desconectar y la baja de cuenta.
 - `supabase/migrations/20260818130000_gmail_conexiones.sql` — la tabla, el Vault y las cinco funciones del §10; su encabezado tiene el porqué de cada decisión de guardado.
 - `lib/gmail/google-api.ts` (scopes y etiqueta), `lib/gmail/conexiones-admin.ts` (el único lugar por el que pasa el refresh token), `app/api/gmail/callback/route.ts`, `app/(app)/(con-nav)/perfil/gmail/` — el circuito del §10.
 - `scripts/test-rls.sql` BLOQUE 23 — las cuatro capas que separan el token de una sesión del navegador (§10.5).
+- `docs/gmail-ingesta.md` — el circuito completo de la tarea 17.2 (barrido, bandeja, filtros aprendidos) descripto en el §10.6.
+- `supabase/migrations/20260818140000_gmail_mensajes.sql` — el registro de correos y los filtros: qué guarda cada columna y por qué.
+- `lib/gmail/heuristica-turno.ts` — la puerta que decide si el cuerpo de un correo puede salir hacia Gemini (§10.6).
+- `scripts/test-rls.sql` BLOQUE 24 — RLS, dedup y baja de cuenta de la bandeja de Gmail.

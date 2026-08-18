@@ -195,6 +195,22 @@ export const RUTA_GMAIL_CONECTAR = "/api/gmail/conectar"
 export const RUTA_GMAIL_CALLBACK = "/api/gmail/callback"
 
 /**
+ * Barrido periódico de la etiqueta `historialmedico` (Sprint 17, tarea 17.2).
+ * Misma excepción y mismo razonamiento que `RUTA_CRON_RECORDATORIOS` y
+ * `RUTA_CRON_ALERTAS_MEDICACION`, de los que es hermano: lo llama `pg_cron` a
+ * través de `pg_net` cada 30 minutos, sin navegador y sin ninguna cuenta con
+ * la cual iniciar sesión, y se autentica con el mismo header `x-cron-secret`
+ * contra la misma variable `CRON_SECRET`.
+ *
+ * Se declara por NOMBRE, como las otras dos puntas de Gmail: el resto de
+ * `/api/gmail/` -incluido cualquier endpoint que llame un `fetch` del
+ * navegador- sigue bajo la regla genérica de `/api`, que contesta 401 en JSON.
+ * `tests/unit/rutas.test.ts` lo cubre, y también cubre que la excepción no se
+ * derrame al resto de la rama.
+ */
+export const RUTA_CRON_GMAIL = "/api/gmail/procesar-barrido"
+
+/**
  * Rutas públicas: se sirven con o sin sesión. Cada entrada cubre la ruta
  * exacta y sus subrutas (`/recuperar` cubre `/recuperar/confirmar`), salvo
  * `/` que se compara exacta —si no, cubriría toda la aplicación—.
@@ -225,6 +241,7 @@ export const RUTAS_PUBLICAS = [
   RUTA_COMPARTIR,
   RUTA_GMAIL_CONECTAR,
   RUTA_GMAIL_CALLBACK,
+  RUTA_CRON_GMAIL,
 ] as const
 
 /**

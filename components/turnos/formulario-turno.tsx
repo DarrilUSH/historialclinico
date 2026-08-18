@@ -139,6 +139,7 @@ import { CampoTexto } from "@/components/base/campo-texto"
 import { CampoTextarea } from "@/components/base/campo-textarea"
 import { CampoLugar } from "@/components/lugares/campo-lugar"
 import { AnalizadorMensajeTurno } from "@/components/turnos/analizador-mensaje-turno"
+import { PrecargaGmail } from "@/components/turnos/precarga-gmail"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -204,6 +205,13 @@ export interface FormularioTurnoProps {
    * siempre: ver el comentario de cabecera.
    */
   catalogoDisponible?: boolean
+  /**
+   * `gmail_messages.id` cuando se llegó acá desde la bandeja "Llegaron por
+   * Gmail" (Sprint 17, tarea 17.2). Hace dos cosas: dispara la precarga
+   * automática con el texto del correo (`PrecargaGmail`) y viaja como campo
+   * oculto para que `crearTurno` deje ese correo marcado como ingresado.
+   */
+  correoGmailId?: string
 }
 
 const ESTADO_INICIAL: EstadoTurnoAccion = { error: null }
@@ -216,6 +224,7 @@ export function FormularioTurno({
   medicos,
   fechaMinimaIso,
   catalogoDisponible = false,
+  correoGmailId,
 }: FormularioTurnoProps) {
   const accion = modo === "crear" ? crearTurno : actualizarTurno
   const [estado, enviarAccion, pendiente] = useActionState(accion, ESTADO_INICIAL)
@@ -368,10 +377,22 @@ export function FormularioTurno({
 
   return (
     <div className="flex flex-col gap-5">
-      <AnalizadorMensajeTurno onAplicarPropuesta={aplicarPropuesta} />
+      {/*
+        Sprint 17, tarea 17.2: si se llegó desde la bandeja de Gmail, la
+        precarga se dispara SOLA con el texto de ese correo y el bloque de
+        "pegá el mensaje" no aparece —tenerlos juntos ofrecería dos caminos
+        para lo mismo, y la persona ya eligió uno al tocar "Revisar este
+        turno"—. Los dos terminan en el MISMO `aplicarPropuesta`.
+      */}
+      {correoGmailId ? (
+        <PrecargaGmail correoId={correoGmailId} onAplicarPropuesta={aplicarPropuesta} />
+      ) : (
+        <AnalizadorMensajeTurno onAplicarPropuesta={aplicarPropuesta} />
+      )}
 
       <form id={ID_FORMULARIO} action={enviarAccion} className="flex flex-col gap-5">
         {modo === "editar" && turnoId && <input type="hidden" name="turnoId" value={turnoId} />}
+        {correoGmailId && <input type="hidden" name="mensajeGmailId" value={correoGmailId} />}
         <input type="hidden" name="doctorId" value={doctorId} />
 
         {/*
