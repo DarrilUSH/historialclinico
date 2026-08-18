@@ -144,6 +144,10 @@ Un job con `service_role` no tiene `sub` en su JWT y corre con su propio rol: no
 
 La política deja de valer **para siempre** en cuanto existe el primer administrador. La suite lo verifica en los dos sentidos: Diego puede arrancar la administración del perfil que él creó, y **no** puede autoasignarse la del perfil gestionado que creó María (casos 39 y 40).
 
+### 2.7 `crear_perfil_gestionado()` (Sprint 15, tarea 15.1): empaqueta el arranque, no lo reemplaza
+
+`profiles_insert_propio_o_gestionado` + `family_permissions_insert_arranque_gestionado` siguen intactas y siguen siendo el camino que prueba el BLOQUE 5 (dos `INSERT` sueltos desde una sesión de usuario). `20260817220000_perfiles_gestionados.sql` agrega un TERCER camino, no un reemplazo: la función `SECURITY DEFINER` `crear_perfil_gestionado(full_name, date_of_birth, legales_version, ip)`, que hace los mismos dos `INSERT` -perfil y fila de arranque- más un tercero (`consents`, `document = 'acceso_familiar_representante'`, cierra la [deuda D6](./modelo-permisos.md#d6-registro-del-consentimiento-en-perfiles-gestionados-aplicada)) en una **única transacción PL/pgSQL**. La UI de `/familia` usa este RPC en vez del camino de dos `INSERT`: con dos llamadas sueltas desde un Server Action, un fallo de red entre la primera y la segunda deja un perfil con `user_id IS NULL` y **cero** filas de `can_manage` -huérfano e invisible incluso para quien lo creó, porque `puede_ver_perfil` exige titularidad o una fila de permiso y ninguna de las dos llegó a existir-. `SECURITY DEFINER` bypassea RLS para las tres escrituras (mismo criterio que `registrar_toma()`), así que la función no depende de -ni relaja- ninguna política de este archivo.
+
 ---
 
 ## 3. Matriz implementada: tabla × operación × política
@@ -260,6 +264,7 @@ Aplicados en `supabase/migrations/20260812210000_ajustes_modelo.sql`.
 | **D4** | Trigger `family_permissions_evitar_huerfano` | Complementa lo que RLS no verifica: el estado global posterior |
 | **D5** | Tabla `storage_purge_queue` + 3 triggers `AFTER DELETE` | Hace efectivo el derecho de supresión más allá de Postgres |
 | **D8** | `push_subscriptions.profile_id` pasa a `ON DELETE SET NULL` | Evita que borrar un perfil deje sin notificaciones a quien lo administraba |
+| **D6** | `consents.document = 'acceso_familiar_representante'` (Sprint 15, tarea 15.1, `20260817220000_perfiles_gestionados.sql`) | No la usa RLS: es el registro probatorio de representación que exige §9.4 de `modelo-permisos.md`, insertado por `crear_perfil_gestionado()` (§2.7) |
 
 **Sobre `created_by_profile_id` (D2).** Ninguna política la lee, pero **se sella igual** con el trigger `sellar_created_by_profile_id` (`BEFORE INSERT OR UPDATE` en las 8 tablas): en el alta se fija con el perfil actor y después es inmutable, para sesiones de usuario. La razón es que trazabilidad falsificable no es trazabilidad: si mañana el producto pide *"quien subió puede corregir su propia carga durante N horas"* —el escenario que la [deuda D2](./modelo-permisos.md#d2-created_by_profile_id-en-las-tablas-de-contenido) anticipa—, la columna tiene que ser confiable **desde el primer día**, porque retro-completarla es imposible.
 
@@ -270,7 +275,6 @@ Aplicados en `supabase/migrations/20260812210000_ajustes_modelo.sql`.
 | Deuda | Estado | Mitigación vigente |
 |---|---|---|
 | **D3** `CHECK` de monotonía de los flags | Abierta | Las políticas de lectura son monótonas: una fila incoherente degrada a "puede ver", no a "escribe a ciegas" |
-| **D6** registro del consentimiento | Abierta — requisito de salida del Sprint 12 | Ninguna. Es el punto flojo declarado del caso B |
 | **D7** el autorizado debe tener cuenta | Abierta | La fila queda **inerte** (un perfil sin `user_id` nunca coincide con una sesión), pero se ve como un acceso concedido. Debe rechazarlo la Server Action del ABM del Sprint 2 |
 | **D9** turnos: `can_upload` cambia `status` | Abierta — decisión del Sprint 6 | Hoy confirmar o cancelar un turno es `can_manage` |
 

@@ -27,13 +27,18 @@
 
 import { revalidatePath } from "next/cache"
 
+import { headers } from "next/headers"
+
+import { normalizarIp } from "@/lib/auditoria"
 import {
   ErrorPerfilInvalido,
   ErrorPermisoDenegado,
   esErrorDeGuarda,
   requerirPermiso,
+  requerirSesion,
 } from "@/lib/auth/guardas"
-import { registrarConsentimiento } from "@/lib/legales"
+import { registrarConsentimiento, VERSION_LEGALES } from "@/lib/legales"
+import { hoyIsoUshuaia } from "@/lib/turnos/fecha"
 
 export type EstadoFamilia = {
   error: string | null
@@ -43,6 +48,8 @@ export type EstadoFamilia = {
 const PATRON_EMAIL = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/
 const PATRON_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** Fecha pura `YYYY-MM-DD`, mismo patrón que `lib/validacion/signo.schema.ts`. */
+const PATRON_FECHA = /^\d{4}-\d{2}-\d{2}$/
 
 /**
  * Mensaje NEUTRO a propósito: lo mismo si el email no tiene cuenta, si no
@@ -303,4 +310,105 @@ export async function revocarPermiso(
 
   revalidatePath("/familia")
   return { error: null, mensaje: "Acceso revocado." }
+}
+
+/**
+ * Crear un perfil gestionado (Sprint 15, tarea 15.1): "Crear un perfil para
+ * un familiar sin cuenta" en `/familia`. Sirve para dos casos con el mismo
+ * mecanismo -un chico, o una persona mayor sin email-: el texto de la UI es
+ * deliberadamente neutro (docs/modelo-permisos.md §8.4: el modelo no
+ * distingue por edad, ninguna política lee `date_of_birth`).
+ *
+ * A diferencia de `invitarFamiliar` -que hace UN `insert` porque
+ * `family_permissions_insert_autoridad` ya autoriza esa fila sola-, acá hay
+ * TRES escrituras relacionadas (perfil, fila de arranque, consentimiento del
+ * representante) y perderlas a mitad de camino dejaría un perfil gestionado
+ * sin ningún `can_manage` -el estado prohibido por la sección 8.2-. Por eso
+ * se llama al RPC transaccional `crear_perfil_gestionado`
+ * (`supabase/migrations/20260817220000_perfiles_gestionados.sql`) en vez de
+ * tres `insert` sueltos desde acá.
+ */
+export type EstadoCrearGestionado = {
+  error: string | null
+  mensaje: string | null
+}
+
+/** Traduce los códigos de error del RPC `crear_perfil_gestionado`. */
+function mapearErrorCrearGestionado(error: { code?: string; message?: string }): string {
+  if (error.code === "22023") {
+    // invalid_parameter_value: el RPC ya redactó el mensaje en español
+    // (nombre vacío, fecha faltante o futura, versión de legales faltante).
+    return error.message || "Revisá los datos del formulario e intentá de nuevo."
+  }
+  if (error.code === "42501") {
+    return "No pudimos crear el perfil: tu cuenta todavía no tiene su propio perfil."
+  }
+  console.error("[familia] Error inesperado al crear un perfil gestionado:", error)
+  return "Ocurrió un problema y no pudimos crear el perfil. Probá de nuevo en unos minutos."
+}
+
+export async function crearPerfilGestionado(
+  _estadoPrevio: EstadoCrearGestionado,
+  formData: FormData,
+): Promise<EstadoCrearGestionado> {
+  const nombre = normalizarTexto(formData.get("fullName"))
+  const fechaNacimiento = normalizarTexto(formData.get("dateOfBirth"))
+  const confirmoRepresentante = esCasillaMarcada(formData.get("confirmoRepresentante"))
+
+  if (!nombre) {
+    return { error: "Ingresá el nombre completo.", mensaje: null }
+  }
+  if (!PATRON_FECHA.test(fechaNacimiento)) {
+    return { error: "Ingresá la fecha de nacimiento.", mensaje: null }
+  }
+  // Fechas puras (YYYY-MM-DD): comparar como STRINGS contra hoyIsoUshuaia()
+  // es el equivalente TypeScript del bang `!Y-m-d` de la regla global -acá
+  // ni siquiera hace falta construir un `Date`, así que no hay instante de
+  // por medio que pueda arrastrar la hora del proceso (mismo criterio que
+  // lib/perfiles/edad.ts, que documenta el paralelo completo con la regla
+  // PHP)-.
+  if (fechaNacimiento > hoyIsoUshuaia()) {
+    return { error: "La fecha de nacimiento no puede ser futura.", mensaje: null }
+  }
+  if (!confirmoRepresentante) {
+    return {
+      error: "Tenés que confirmar que actuás como representante para continuar.",
+      mensaje: null,
+    }
+  }
+
+  let sesion: Awaited<ReturnType<typeof requerirSesion>>
+  try {
+    sesion = await requerirSesion({ siNoHaySesion: "lanzar" })
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message, mensaje: null }
+    }
+    throw error
+  }
+
+  const { supabase } = sesion
+
+  const encabezados = await headers()
+  const ip =
+    normalizarIp(encabezados.get("x-forwarded-for")) ??
+    normalizarIp(encabezados.get("x-real-ip"))
+
+  const { data: perfilCreado, error } = await supabase.rpc("crear_perfil_gestionado", {
+    p_full_name: nombre,
+    p_date_of_birth: fechaNacimiento,
+    p_legales_version: VERSION_LEGALES,
+    p_ip: ip,
+  })
+
+  if (error) {
+    return { error: mapearErrorCrearGestionado(error), mensaje: null }
+  }
+
+  revalidatePath("/familia")
+  revalidatePath("/perfiles")
+  return {
+    error: null,
+    mensaje: `Creaste el perfil de ${perfilCreado.full_name}. Ya aparece en tu selector de perfiles, marcado como gestionado por vos.`,
+  }
 }

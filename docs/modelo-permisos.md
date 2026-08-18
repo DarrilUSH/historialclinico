@@ -566,7 +566,7 @@ El modelo **no** implementa reglas automáticas por edad. `profiles.date_of_birt
 - Un hijo chico se modela como **perfil gestionado** (`user_id IS NULL`), administrado por madre o padre: es exactamente el caso B, con otro vínculo jurídico detrás (responsabilidad parental en lugar de mandato).
 - Un adolescente puede tener **perfil con cuenta**, y entonces es titular pleno: puede revocarle el acceso a su madre y ella no puede reponérselo sin que él lo otorgue.
 - **No hay transición automática al cumplir años.** El Código Civil y Comercial argentino reconoce autonomía progresiva en decisiones de salud (art. 26), pero traducir eso a una regla de software —a qué edad, para qué tipo de dato, con qué excepciones— es una decisión de producto y legal que este sprint no tiene mandato para tomar. Queda registrada como decisión **deliberadamente no tomada**, igual que el catálogo global de médicos en `modelo-datos.md`.
-- Lo que sí exige el modelo hoy: quien crea un perfil gestionado **declara** que tiene el consentimiento del titular o su representación legal. Hoy esa declaración no se persiste en ningún lado → [Deuda D6](#d6-registro-del-consentimiento-en-perfiles-gestionados).
+- Lo que exige el modelo: quien crea un perfil gestionado **declara** que tiene el consentimiento del titular o su representación legal. Desde el Sprint 15 (tarea 15.1) esa declaración se persiste como consentimiento → [Deuda D6](#d6-registro-del-consentimiento-en-perfiles-gestionados-aplicada).
 
 ### 8.5 Borrado de un perfil: el `CASCADE` y lo que el `CASCADE` no alcanza
 
@@ -647,9 +647,9 @@ Los datos de salud son **datos sensibles** (art. 2 y 7): su tratamiento requiere
 | **Rectificación** (art. 16) | Editar sus datos. Perfil con cuenta: lo hace el titular. Perfil gestionado: lo hace un `can_manage`, **por cuenta de** el titular y con la edición auditada | Modelado acá |
 | **Supresión** (art. 16) | Borrar el perfil → `CASCADE` sobre todo el historial. Requiere además el borrado explícito de los objetos de Storage | Modelado acá; **incompleto sin la [Deuda D5](#d5-limpieza-de-storage-al-borrar-un-perfil)** |
 
-### 9.4 El punto flojo declarado: el consentimiento del perfil gestionado
+### 9.4 El consentimiento del perfil gestionado
 
-Todo el caso B descansa en que quien crea el perfil de Roberto **tiene su consentimiento o su representación legal**. Hoy eso es una suposición: no hay ningún registro de esa declaración en la base. Está anotado como [Deuda D6](#d6-registro-del-consentimiento-en-perfiles-gestionados) y debe resolverse antes del Sprint 12, donde las páginas legales y el consentimiento son requisito de salida.
+Todo el caso B descansa en que quien crea el perfil de Roberto **tiene su consentimiento o su representación legal**. Desde el Sprint 15 (tarea 15.1) esa declaración queda registrada: crear un perfil gestionado desde `/familia` pasa por el RPC transaccional `crear_perfil_gestionado()` (`supabase/migrations/20260817220000_perfiles_gestionados.sql`), que en la misma transacción que crea el perfil y su fila de arranque inserta una fila de `consents` con `document = 'acceso_familiar_representante'`. Cierra la [Deuda D6](#d6-registro-del-consentimiento-en-perfiles-gestionados-aplicada).
 
 ---
 
@@ -664,7 +664,7 @@ Detectados al escribir este documento. **Estado al cierre de la tarea de RLS del
 | D3 `CHECK` de monotonía de los flags | Abierta | mitigada: las políticas de lectura son monótonas |
 | D4 invariante de no orfandad | **APLICADA** | trigger `family_permissions_evitar_huerfano` |
 | D5 limpieza de Storage al borrar | **APLICADA** — opción 2 (tabla + triggers); el job que la drena es del Sprint 6 | tabla `storage_purge_queue` |
-| D6 registro del consentimiento | Abierta | requisito de salida del Sprint 12 |
+| D6 registro del consentimiento | **APLICADA** (Sprint 15, tarea 15.1) | `20260817220000_perfiles_gestionados.sql` — RPC `crear_perfil_gestionado` |
 | D7 el autorizado debe tener cuenta | Abierta | debe validarlo la Server Action del ABM (Sprint 2) |
 | D8 `push_subscriptions.profile_id` → `SET NULL` | **APLICADA** | `20260812210000_ajustes_modelo.sql` |
 | D9 turnos: `can_upload` cambia `status` | Abierta | decisión del Sprint 6 |
@@ -707,11 +707,11 @@ La descripción original de cada una se conserva abajo como registro del anális
   2. **Tabla de purga** (`storage_objetos_a_borrar`) alimentada por un trigger `BEFORE DELETE` sobre `documents` / `insurance_cards` / `profiles`, consumida por un job. Robusta ante cualquier vía de borrado, a costa de una tabla y un job más.
 - **Recomendación:** la opción 1 en el Sprint 4 (cuando exista el pipeline de subida) y evaluar la 2 al implementar la baja de cuenta.
 
-### D6. Registro del consentimiento en perfiles gestionados
+### D6. Registro del consentimiento en perfiles gestionados — **APLICADA**
 
-- **Qué falta:** persistir que quien creó el perfil de una persona que no puede consentir en la app **declaró** tener su consentimiento o su representación legal.
-- **Propuesta:** columnas en `profiles` (`consentimiento_declarado_at timestamptz`, `consentimiento_declarado_por uuid`) o, más liviano, una fila de `access_logs` con una acción nueva del enum al crear el perfil gestionado. La segunda opción no requiere tocar `profiles` pero exige `ALTER TYPE public.access_action ADD VALUE`.
-- **Cuándo:** decisión de producto y legal. **Requisito de salida del Sprint 12**, no del Sprint 1.
+- **Qué faltaba:** persistir que quien creó el perfil de una persona que no puede consentir en la app **declaró** tener su consentimiento o su representación legal.
+- **Qué se aplicó (Sprint 15, tarea 15.1, `20260817220000_perfiles_gestionados.sql`):** ninguna de las dos propuestas originales (columnas nuevas en `profiles`, o un valor nuevo de `access_action`). Se reutilizó `consents` -la tabla que ya resuelve el mismo problema para `acceso_familiar` desde el Sprint 12- con un tercer valor de `document`: `'acceso_familiar_representante'`. Cada llamada a `crear_perfil_gestionado()` inserta una fila con ese documento, la versión vigente de los términos y la IP de origen, **en la misma transacción** que crea el perfil y su fila de arranque.
+- **Por qué no las propuestas originales:** columnas nuevas en `profiles` habrían duplicado lo que `consents` ya modela bien (documento + versión + fecha + IP, append-only); un valor nuevo de `access_action` habría necesitado `ALTER TYPE ... ADD VALUE` en una migración aparte de la que lo usa (Postgres no permite las dos cosas en la misma transacción), y `access_logs` no es append-only por la misma razón probatoria que `consents` sí lo es desde el día uno.
 
 ### D7. El autorizado debe tener cuenta
 

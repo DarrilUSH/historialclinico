@@ -12,6 +12,19 @@
  * tipografía de nombre en `text-xl`/`text-2xl`, sin animación de entrada ni
  * micro-interacciones de más -la única señal de interactividad es un
  * levantamiento sutil al pasar el mouse y un retroceso al presionar-.
+ *
+ * ## Distinción de "perfil gestionado" (Sprint 15, tarea 15.1)
+ *
+ * `BadgeRelacion` (esPropio/canUpload/canManage) contesta "¿qué podés hacer
+ * vos con este perfil?" -y ya decía "Gestionado por vos" para un
+ * `can_manage` que no es el tuyo, sea o no el perfil gestionado-.
+ * `perfil.user_id === null` contesta una pregunta DISTINTA: "¿esta persona
+ * tiene cuenta propia, o depende de que alguien entre a mirar sus datos?".
+ * Las dos pueden divergir -un `can_manage` sobre un perfil CON cuenta
+ * también existe (docs/modelo-permisos.md §4.3)-, así que se muestran como
+ * dos señales separadas: la segunda, un subtítulo chico y discreto, nunca
+ * reemplaza a la primera. Texto neutro a propósito -"sin cuenta propia", no
+ * "niño" ni "adulto mayor"-: el mismo mecanismo sirve para los dos casos.
  */
 
 import type { ReactNode } from "react"
@@ -98,7 +111,12 @@ function TarjetaPerfil({
         {perfil.full_name}
       </span>
 
-      <BadgeRelacion esPropio={esPropio} canUpload={canUpload} canManage={canManage} />
+      <div className="flex flex-col items-center gap-1">
+        <BadgeRelacion esPropio={esPropio} canUpload={canUpload} canManage={canManage} />
+        {perfil.user_id === null && (
+          <span className="text-xs text-muted-foreground">Sin cuenta propia</span>
+        )}
+      </div>
     </button>
   )
 }

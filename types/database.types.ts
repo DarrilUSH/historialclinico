@@ -1315,6 +1315,43 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      crear_perfil_gestionado: {
+        Args: {
+          p_date_of_birth: string
+          p_full_name: string
+          p_ip?: unknown
+          p_legales_version: string
+        }
+        Returns: {
+          allergies: string[]
+          avatar_storage_path: string | null
+          blood_type: string | null
+          chronic_conditions: string[]
+          created_at: string
+          created_by_profile_id: string | null
+          critical_medication: string[]
+          date_of_birth: string | null
+          display_density: Database["public"]["Enums"]["display_density"]
+          emergency_contact: string | null
+          emergency_contact_phone: string | null
+          emergency_contact_relationship: string | null
+          full_name: string
+          id: string
+          national_id: string | null
+          phone: string | null
+          role: Database["public"]["Enums"]["user_role"]
+          sos_notes: string | null
+          sos_updated_at: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "profiles"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       descartar_documento_recien_subido: {
         Args: { doc_id: string }
         Returns: {

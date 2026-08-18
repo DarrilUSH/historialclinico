@@ -56,6 +56,44 @@ Samsung Galaxy A71 (SM-A715F), Android 13, Chrome — 2026-08-13, vía ADB (`adb
 
 Flujo verificado con toques e ingreso de texto reales por ADB: login de María → selección del perfil gestionado de Roberto → inicio. El camino de error (submit vacío) también se verificó en pantalla física.
 
+| sprint15-familia-formulario.png | `/familia` (tarea 15.1) en el dispositivo real, sesión VIVA de María: la sección nueva "Crear un perfil para un familiar sin cuenta" con el formulario completo con datos reales tipeados en el teléfono -"Lucas Gomez" en Nombre completo, "12/04/2019" en Fecha de nacimiento (picker nativo de Android sobre `type="date"`)- y el checkbox de consentimiento del representante marcado |
+| sprint15-familia-creado.png | La MISMA pantalla justo después de tocar "Crear perfil" de verdad: mensaje de éxito real "Creaste el perfil de Lucas Gomez. Ya aparece en tu selector de perfiles, marcado como gestionado por vos.", con el formulario ya reseteado (vacío otra vez, listo para cargar a otra persona) |
+| sprint15-perfil-gestionado.png | `/perfiles` (selector "estilo Netflix") en el dispositivo real, tras la creación: "Lucas Gomez" aparece con badge "Gestionado por vos" **y** el subtítulo discreto nuevo "Sin cuenta propia" -las dos señales juntas, ninguna reemplaza a la otra-, junto a "María Gómez" ("Tu perfil", sin el subtítulo) y "Roberto Gómez" (el gestionado preexistente del seed, con el mismo subtítulo nuevo) |
+
+## Sprint 15 · tarea 15.1 — Perfiles gestionados desde /familia
+
+**2026-08-17.** Samsung Galaxy A71 real (`R58N85AW49F`), `adb reverse tcp:3000 tcp:3000` + `adb forward tcp:9222 localabstract:chrome_devtools_remote`, CDP nativo por WebSocket de Node (`ws`, mismo método que el resto de este archivo). Login real de María (`maria@ejemplo.com.ar`) tecleado por CDP (`Runtime.evaluate` fijando `.value` con el setter nativo de `HTMLInputElement` + `dispatchEvent(new Event('input'))`, el mismo truco que ya usa `campo-texto.tsx#manejarTranscripcion` para el dictado), selección de su propio perfil en `/perfiles` y navegación a `/familia`.
+
+**Flujo real de punta a punta, con toques equivalentes reales (no una llamada directa a la Server Action ni un INSERT por SQL):**
+
+1. `/familia` mostró la sección nueva "Crear un perfil para un familiar sin cuenta" -texto neutro, sin decir "niño" ni "adulto mayor"- con el formulario completo (`sprint15-familia-formulario.png` antes de tocar nada).
+2. Se tipeó "Lucas Gomez" en Nombre completo y "12/04/2019" en Fecha de nacimiento -confirmado que el campo es un `<input type="date">` real por el picker nativo de Android que muestra "12/04/2019" ya formateado a la convención argentina- y se tocó el checkbox de consentimiento del representante.
+3. Se tocó "Crear perfil" de verdad: la Server Action `crearPerfilGestionado` corrió contra Supabase LOCAL (no simulado), invocando el RPC `crear_perfil_gestionado()`. La pantalla mostró el mensaje de éxito real "Creaste el perfil de Lucas Gomez. Ya aparece en tu selector de perfiles, marcado como gestionado por vos." con el formulario reseteado (`sprint15-familia-creado.png`).
+4. Navegación a `/perfiles`: "Lucas Gomez" aparece en el selector con badge "Gestionado por vos" y el subtítulo nuevo "Sin cuenta propia" -las dos señales visibles a la vez, la distinción de la sección 3 del encargo- junto a María ("Tu perfil") y Roberto (el gestionado preexistente del seed, con el mismo subtítulo) (`sprint15-perfil-gestionado.png`).
+
+**Verificación cruzada contra la base LOCAL** (no solo la pantalla), corrida inmediatamente después del toque real en "Crear perfil":
+
+```sql
+select p.full_name, p.date_of_birth, p.user_id, p.created_by_profile_id
+  from public.profiles p where p.full_name = 'Lucas Gomez';
+-- Lucas Gomez | 2019-04-12 | NULL | <id de María>
+
+select fp.can_view, fp.can_upload, fp.can_manage
+  from public.family_permissions fp
+  join public.profiles p on p.id = fp.owner_profile_id
+ where p.full_name = 'Lucas Gomez';
+-- t | t | t  (fila de arranque completa)
+
+select c.document, c.version, c.ip
+  from public.consents c join auth.users u on u.id = c.user_id
+ where u.email = 'maria@ejemplo.com.ar' and c.document = 'acceso_familiar_representante';
+-- acceso_familiar_representante | 2026-08-14-v1 | ::ffff:127.0.0.1
+```
+
+Los tres resultados confirman, con datos que salieron del toque real en el teléfono (no de un fixture de prueba), exactamente lo que las 17 pruebas nuevas del BLOQUE 20 de `scripts/test-rls.sql` ya demuestran contra sesiones simuladas: perfil gestionado (`user_id NULL`) con `created_by_profile_id` sellado, fila de arranque con los tres flags en `true`, y el consentimiento del representante sellado con la versión vigente de los términos.
+
+**Suites completas corridas antes de esta verificación:** `npx tsc --noEmit` limpio; `npx eslint .` limpio; `npm run test` → **753/753** (sin tests nuevos: la lógica de esta tarea vive en RLS/RPC, cubierta por el arnés SQL, no por Vitest); `node scripts/verificar-contraste.mjs` → **196/196 PASS, 0 fallas** (sin tokens de color nuevos: la sección nueva reutiliza `bg-primary/10`, `text-primary`, `text-foreground`, `text-muted-foreground`, `bg-muted/40`, todos ya verificados); `npm run build` → build de producción exitoso, 46 rutas, con el dev server detenido antes de correrlo (confirmado con `netstat -ano | grep :3000`) y reiniciado después. RLS: `scripts/test-rls.sql` → **319/319 PASS × 2 corridas consecutivas** (302 preexistentes + 17 del BLOQUE 20 nuevo); Storage RLS **27/27**, sin cambios (esta tarea no tocó Storage).
+
 ## Sprint 14 · tarea "Feedback de espera global" — velo de espera con etapas reales
 
 **2026-08-17.** Samsung Galaxy A71 real (`R58N85AW49F`), sesión VIVA de María sobre el perfil gestionado de Roberto (heredada de las tandas anteriores, sin volver a loguearse). `adb reverse --list` confirmó `tcp:3000` ya activo; la primera pestaña de Chrome encontrada por `adb forward tcp:9222 localabstract:chrome_devtools_remote` estaba en realidad sobre **`https://www.historialmedico.com.ar/turnos/nuevo`** (producción) — quedó abierta de una sesión anterior del dueño del dispositivo. Se navegó de inmediato a `http://localhost:3000/inicio` sin tocar ningún campo de esa pestaña, para no arriesgar datos reales de producción.

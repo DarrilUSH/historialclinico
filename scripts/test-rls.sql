@@ -4652,6 +4652,344 @@ select pruebas_rls.registrar('19. alta de cuenta',
 
 
 -- =============================================================================
+-- BLOQUE 20 — Perfiles gestionados desde /familia (Sprint 15, tarea 15.1)
+-- -----------------------------------------------------------------------------
+-- El RPC `crear_perfil_gestionado()` (`20260817220000_perfiles_gestionados.sql`)
+-- es un TERCER camino además de los dos ya probados: el de dos INSERT sueltos
+-- (BLOQUE 5) y el que dispara el trigger de alta de cuenta (BLOQUE 19). Este
+-- bloque prueba la operación completa -perfil + fila de arranque + consent del
+-- representante, atómicos- con tres cuentas nuevas:
+--   f2000aaa "Noelia" — crea el perfil gestionado.
+--   f2000bbb "Bruno"  — tercero AUTORIZADO después (Noelia le da can_view).
+--   f2000ccc "Carla"  — tercero que NUNCA recibe permiso.
+-- El id del perfil creado lo devuelve el RPC -no se puede fijar de antemano,
+-- profiles.id usa gen_random_uuid() por default- así que se guarda en un GUC
+-- de sesión (`pruebas_rls.perfil_lucas_id`) con set_config(..., false): a
+-- diferencia de request.jwt.claims (siempre `true`, local a la transacción),
+-- acá se necesita que el valor sobreviva el `commit` de la transacción que lo
+-- generó para poder leerlo en los bloques begin/commit siguientes.
+-- =============================================================================
+\echo '### BLOQUE 20 — perfiles gestionados desde /familia (crear_perfil_gestionado)'
+
+-- Pre-limpieza defensiva (una corrida anterior abortada a la mitad dejaría
+-- estas filas y el INSERT de auth.users de abajo chocaría contra users_pkey).
+-- Los perfiles gestionados que Noelia haya creado se borran ANTES que su
+-- cuenta -mismo motivo que en toda la suite: el trigger de no orfandad
+-- abortaría si se lo intentara al revés-.
+delete from public.profiles where created_by_profile_id = 'f2000000-0000-4000-8000-00000000f001';
+delete from auth.users      where id in (
+    'f2000aaa-1111-4111-8111-111111111111',
+    'f2000bbb-2222-4222-8222-222222222222',
+    'f2000ccc-3333-4333-8333-333333333333',
+    'f2000ddd-4444-4444-8444-444444444444');
+
+insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
+values
+    ('f2000aaa-1111-4111-8111-111111111111', 'usuario20a@test.local', '{}', '{}'),
+    ('f2000bbb-2222-4222-8222-222222222222', 'usuario20b@test.local', '{}', '{}'),
+    ('f2000ccc-3333-4333-8333-333333333333', 'usuario20c@test.local', '{}', '{}'),
+    ('f2000ddd-4444-4444-8444-444444444444', 'usuario20d@test.local', '{}', '{}');
+
+-- El trigger de alta ya les creó su perfil propio con id aleatorio; se
+-- descartan y se reinsertan con ids fijos (mismo patrón que el BLOQUE 15).
+delete from public.profiles
+ where user_id in (
+    'f2000aaa-1111-4111-8111-111111111111',
+    'f2000bbb-2222-4222-8222-222222222222',
+    'f2000ccc-3333-4333-8333-333333333333',
+    'f2000ddd-4444-4444-8444-444444444444')
+   and id not in (
+    'f2000000-0000-4000-8000-00000000f001',
+    'f2000000-0000-4000-8000-00000000f002',
+    'f2000000-0000-4000-8000-00000000f003');
+
+insert into public.profiles (id, user_id, full_name, role) values
+    ('f2000000-0000-4000-8000-00000000f001', 'f2000aaa-1111-4111-8111-111111111111', 'Noelia Bloque20', 'family_member'),
+    ('f2000000-0000-4000-8000-00000000f002', 'f2000bbb-2222-4222-8222-222222222222', 'Bruno Bloque20',  'family_member'),
+    ('f2000000-0000-4000-8000-00000000f003', 'f2000ccc-3333-4333-8333-333333333333', 'Carla Bloque20',  'family_member');
+-- f2000ddd se queda SIN perfil propio a propósito -ver el caso "actor sin
+-- perfil" más abajo-, borrándole el que el trigger de alta le creó.
+delete from public.profiles where user_id = 'f2000ddd-4444-4444-8444-444444444444';
+
+
+-- ── Noelia crea el perfil gestionado de "Lucas" -- [CRITERIO DE ACEPTACIÓN]
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare
+    v      text;
+    fila   public.profiles%rowtype;
+begin
+    select * into fila from public.crear_perfil_gestionado(
+        'Lucas Bloque20', date '2019-05-10', '2026-08-14-v1', '203.0.113.5'::inet);
+    v := fila.full_name || ' / user_id ' ||
+         case when fila.user_id is null then 'NULL' else 'NOT NULL' end || ' / creado_por ' ||
+         case when fila.created_by_profile_id = 'f2000000-0000-4000-8000-00000000f001' then 'Noelia' else 'otro' end;
+    perform set_config('pruebas_rls.perfil_lucas_id', fila.id::text, false);
+    perform pruebas_rls.registrar('20. perfiles gestionados',
+        'Noelia crea "Lucas" con crear_perfil_gestionado()  [CRITERIO DE ACEPTACIÓN]',
+        'Lucas Bloque20 / user_id NULL / creado_por Noelia', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('20. perfiles gestionados',
+       'La fila de arranque quedó con los tres flags en true',
+       'true/true/true',
+       (select can_view::text || '/' || can_upload::text || '/' || can_manage::text
+          from public.family_permissions
+         where owner_profile_id = current_setting('pruebas_rls.perfil_lucas_id')::uuid
+           and granted_profile_id = 'f2000000-0000-4000-8000-00000000f001'));
+
+select pruebas_rls.registrar('20. perfiles gestionados',
+       'El consentimiento del representante quedó sellado (consent sellado)',
+       'acceso_familiar_representante/2026-08-14-v1/203.0.113.5',
+       (select document || '/' || version || '/' || host(ip)
+          from public.consents
+         where user_id = 'f2000aaa-1111-4111-8111-111111111111'
+           and document = 'acceso_familiar_representante'));
+
+
+-- ── Noelia (creadora) ve a Lucas en su selector.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('20. perfiles gestionados',
+       'Noelia ve a Lucas en su selector de perfiles', '1 filas',
+       count(*) || ' filas')
+  from public.profiles where id = current_setting('pruebas_rls.perfil_lucas_id')::uuid;
+
+commit;
+
+
+-- ── Carla, sin ningún permiso, NO ve a Lucas.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000ccc-3333-4333-8333-333333333333","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('20. perfiles gestionados',
+       'Carla (sin permiso) NO ve a Lucas', '0 filas',
+       count(*) || ' filas')
+  from public.profiles where id = current_setting('pruebas_rls.perfil_lucas_id')::uuid;
+
+commit;
+
+
+-- ── anon no ve nada de esto.
+begin;
+select set_config('request.jwt.claims', '', true);
+set local role anon;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.profiles
+         where id = current_setting('pruebas_rls.perfil_lucas_id')::uuid;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('20. perfiles gestionados',
+        'anon lee el perfil de Lucas', 'denegado (42501)', v);
+end $$;
+
+commit;
+
+
+-- ── Noelia autoriza a Bruno con can_view (flujo existente de invitar,
+--    docs/modelo-permisos.md §4.4 ⚑: puede otorgar porque Lucas es gestionado
+--    y ella tiene can_manage). Después, Bruno SÍ ve a Lucas.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+insert into public.family_permissions (owner_profile_id, granted_profile_id, can_view, can_upload, can_manage)
+values (current_setting('pruebas_rls.perfil_lucas_id')::uuid, 'f2000000-0000-4000-8000-00000000f002', true, false, false);
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000bbb-2222-4222-8222-222222222222","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('20. perfiles gestionados',
+       'Bruno, autorizado después, SÍ ve a Lucas  [CRITERIO DE ACEPTACIÓN]', '1 filas',
+       count(*) || ' filas')
+  from public.profiles where id = current_setting('pruebas_rls.perfil_lucas_id')::uuid;
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000ccc-3333-4333-8333-333333333333","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('20. perfiles gestionados',
+       'Carla sigue sin ver a Lucas después de autorizar a Bruno', '0 filas',
+       count(*) || ' filas')
+  from public.profiles where id = current_setting('pruebas_rls.perfil_lucas_id')::uuid;
+
+commit;
+
+
+-- ── No-orfandad intacta: Noelia (única can_manage) no puede renunciar sola.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        delete from public.family_permissions
+         where owner_profile_id = current_setting('pruebas_rls.perfil_lucas_id')::uuid
+           and granted_profile_id = 'f2000000-0000-4000-8000-00000000f001';
+        v := 'renunció';
+    exception when sqlstate '23001' then v := 'rechazado (23001)';
+             when others            then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('20. perfiles gestionados',
+        'Noelia (única can_manage de un perfil creado por RPC) no puede renunciar sola (D4 intacta)',
+        'rechazado (23001)', v);
+end $$;
+
+commit;
+
+
+-- ── Guardas de validación del RPC (errcode 22023, mensaje en español).
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.crear_perfil_gestionado('   ', date '2019-01-01', '2026-08-14-v1', null);
+        v := 'creado';
+    exception when sqlstate '22023' then v := 'rechazado (22023)';
+             when others            then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('20. perfiles gestionados',
+        'Nombre vacío (o solo espacios) es rechazado', 'rechazado (22023)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.crear_perfil_gestionado('Fecha Futura', current_date + 1, '2026-08-14-v1', null);
+        v := 'creado';
+    exception when sqlstate '22023' then v := 'rechazado (22023)';
+             when others            then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('20. perfiles gestionados',
+        'Fecha de nacimiento futura es rechazada', 'rechazado (22023)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.crear_perfil_gestionado('Sin Fecha', null, '2026-08-14-v1', null);
+        v := 'creado';
+    exception when sqlstate '22023' then v := 'rechazado (22023)';
+             when others            then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('20. perfiles gestionados',
+        'Fecha de nacimiento NULL es rechazada (obligatoria en este flujo)', 'rechazado (22023)', v);
+end $$;
+
+commit;
+
+-- ── Actor sin perfil propio (guarda 1): f2000ddd no tiene fila en profiles.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000ddd-4444-4444-8444-444444444444","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.crear_perfil_gestionado('Sin Perfil Propio', date '2020-01-01', '2026-08-14-v1', null);
+        v := 'creado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('20. perfiles gestionados',
+        'Una cuenta sin perfil propio no puede crear un gestionado', 'rechazado (42501)', v);
+end $$;
+
+commit;
+
+-- ── anon no puede ejecutar el RPC (sin GRANT EXECUTE).
+begin;
+select set_config('request.jwt.claims', '', true);
+set local role anon;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.crear_perfil_gestionado('Intento Anónimo', date '2020-01-01', '2026-08-14-v1', null);
+        v := 'creado';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('20. perfiles gestionados',
+        'anon no puede ejecutar crear_perfil_gestionado (sin GRANT EXECUTE)', 'denegado (42501)', v);
+end $$;
+
+commit;
+
+
+-- ── Idempotencia/replay: llamar al RPC otra vez con el mismo actor crea un
+--    SEGUNDO perfil independiente -no corrompe ni fusiona con "Lucas"-, con
+--    su propia fila de arranque y su propio consent. No hay clave de
+--    deduplicación (cada alta es una declaración de representación propia,
+--    igual que dos invitaciones separadas se auditan como dos filas), así
+--    que "replay-safe" acá significa "seguro de repetir", no "deduplicado".
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2000aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare
+    v    text;
+    fila public.profiles%rowtype;
+begin
+    select * into fila from public.crear_perfil_gestionado(
+        'Sofía Bloque20', date '2021-02-20', '2026-08-14-v1', null);
+    v := case when fila.id <> current_setting('pruebas_rls.perfil_lucas_id')::uuid
+              then 'perfil nuevo e independiente' else 'mismo id que Lucas (mal)' end;
+    perform set_config('pruebas_rls.perfil_sofia_id', fila.id::text, false);
+    perform pruebas_rls.registrar('20. perfiles gestionados',
+        'Replay del RPC con el mismo actor crea un SEGUNDO perfil independiente',
+        'perfil nuevo e independiente', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('20. perfiles gestionados',
+       'Noelia terminó administrando 2 perfiles gestionados creados por ella (Lucas + Sofía)', '2',
+       (select count(*)::text from public.family_permissions
+         where granted_profile_id = 'f2000000-0000-4000-8000-00000000f001'
+           and can_manage
+           and owner_profile_id in (
+               current_setting('pruebas_rls.perfil_lucas_id')::uuid,
+               current_setting('pruebas_rls.perfil_sofia_id')::uuid)));
+
+select pruebas_rls.registrar('20. perfiles gestionados',
+       'El replay dejó DOS consents de representante para Noelia, uno por cada alta', '2',
+       (select count(*)::text from public.consents
+         where user_id = 'f2000aaa-1111-4111-8111-111111111111'
+           and document = 'acceso_familiar_representante'));
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
@@ -4715,6 +5053,22 @@ delete from auth.users       where id in (
     'f1900aaa-1111-4111-8111-111111111111',
     'f1900bbb-2222-4222-8222-222222222222',
     'f1900ccc-3333-4333-8333-333333333333');
+-- Entidades del BLOQUE 20 (Sprint 15, tarea 15.1). Los perfiles gestionados
+-- creados por crear_perfil_gestionado() -Lucas y, del replay, Sofía- primero
+-- -mismo motivo que el resto de este bloque: el trigger de no orfandad
+-- abortaría si se borrara antes la cuenta de Noelia-, filtrados por
+-- created_by_profile_id en vez de por su id -generado por gen_random_uuid(),
+-- no fijo- para no depender de que los GUC de sesión sigan vivos acá.
+delete from public.profiles
+ where created_by_profile_id = 'f2000000-0000-4000-8000-00000000f001';
+-- Las cuatro cuentas del bloque. f2000ddd nunca administró nada (guarda 1);
+-- las otras tres solo tenían su perfil propio, ya sin nada gestionado
+-- colgando después del delete de arriba.
+delete from auth.users       where id in (
+    'f2000aaa-1111-4111-8111-111111111111',
+    'f2000bbb-2222-4222-8222-222222222222',
+    'f2000ccc-3333-4333-8333-333333333333',
+    'f2000ddd-4444-4444-8444-444444444444');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 
 drop schema pruebas_rls cascade;

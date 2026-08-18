@@ -68,13 +68,26 @@ import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
 export const VERSION_LEGALES = "2026-08-14-v1"
 
 /**
- * Los tres documentos que este proyecto hace firmar, calcados 1:1 del CHECK
- * `consents_document_valido` de la migración. `'privacidad'` y `'terminos'`
- * se firman juntos al registrarse; `'acceso_familiar'` se firma cada vez que
- * una cuenta otorga acceso sobre un perfil a otra persona
- * (`docs/modelo-permisos.md` §4.4).
+ * Los cuatro documentos que este proyecto hace firmar, calcados 1:1 del
+ * CHECK `consents_document_valido` de la migración. `'privacidad'` y
+ * `'terminos'` se firman juntos al registrarse; `'acceso_familiar'` se firma
+ * cada vez que una cuenta otorga acceso sobre un perfil EXISTENTE a otra
+ * cuenta (`docs/modelo-permisos.md` §4.4); `'acceso_familiar_representante'`
+ * se firma al CREAR un perfil gestionado nuevo (Sprint 15, tarea 15.1;
+ * `docs/modelo-permisos.md` §8.4/§9.4, deuda D6) — declara que quien lo crea
+ * tiene el consentimiento del titular o su representación legal (Ley
+ * 25.326, patria potestad/tutela). A diferencia de `'acceso_familiar'`, ese
+ * cuarto documento no lo firma esta función: lo firma el RPC
+ * `crear_perfil_gestionado` (`supabase/migrations/20260817220000_perfiles_
+ * gestionados.sql`), en la misma transacción que crea el perfil y su fila de
+ * arranque — se lista igual acá porque el CHECK de la base y este tipo
+ * tienen que coincidir siempre.
  */
-export type DocumentoLegal = "privacidad" | "terminos" | "acceso_familiar"
+export type DocumentoLegal =
+  | "privacidad"
+  | "terminos"
+  | "acceso_familiar"
+  | "acceso_familiar_representante"
 
 /** IP del cliente actual, o `null` si no hay ninguna cabecera utilizable. Ver `normalizarIp`. */
 async function obtenerIpActual(): Promise<string | null> {
