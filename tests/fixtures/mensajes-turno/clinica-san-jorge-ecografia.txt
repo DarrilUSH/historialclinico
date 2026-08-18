@@ -1,0 +1,15 @@
+Clinica San Jorge: Se asigna turno para ecografía vesical.
+
+Turno        : 07/10/2024     14:15 HS
+Paciente     : DN12345678 PEREZ JUAN CARLOS ALBERTO
+Coseguro    : $1345  Valor del estudio al momento de asignar turno, sujeto a modificación. Se puede abonar con débito, crédito o efectivo.
+Especialidad : ECOGRAFISTA
+Prestador    : SERV. DE ECOGRAFIA - DR. JUAREZ
+Lugar Aten.  : ANEXO DR JORGE SAGARDIA - DE LA ESTANCIA 1955
+RECUERDE     : [*]CONFIRMAR SU TURNO PERSONALMENTE 15 MINUTOS ANTES
+
+PREPARACION: ECOGRAFIA VESICAL Y GINECOLOGICA POR VIA ABDOMINAL: IR AL BAÑO Y VACIAR LA VEJIGA. A CONTINUACION TOMAR DE MANERA CONTINUA 750 CC A 1 LITRO DE AGUA SIN GAS Y RETENER (NO IR AL BAÑO) DURANTE UNA HORA. ESTO QUIERE DECIR QUE DEBERA TERMINAR DE TOMAR EL AGUA 1 HORA ANTES DEL TURNO.
+
+IMPORTANTE: ASISTIR 15 MINUTOS ANTES CON ORDEN MEDICA EN MANO (SI ES DIGITAL IMPRESA  Y DEBE DECIR EMERGENCIA COVID 19), SIN EXCEPCIÓN, DE LO CONTRARIO NO SE PODRÁ REALIZAR EL ESTUDIO.
+
+Estimado/a su turno ha sido asignado con éxito, responder OK para finalizar. Desde la Clínica San Jorge le deseamos tenga un excelente día!
