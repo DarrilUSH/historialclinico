@@ -81,7 +81,19 @@ export function PantallaNuevoEstudio() {
   const [error, setError] = React.useState<string | null>(null)
   const [duplicado, setDuplicado] = React.useState<DuplicadoDetectado | null>(null)
 
+  // Guardia SÍNCRONA contra el doble envío — mismo patrón canónico que
+  // `components/coberturas/formulario-cobertura.tsx#manejarSubmit` (ese
+  // comentario documenta el mecanismo completo: por qué un `ref` y no un
+  // `useState`, y la reproducción real -dos invocaciones de una Server Action
+  // llamada directo, sin pasar por `<form action>`- que lo motivó). Acá los
+  // tres caminos que terminan llamando a `subirDocumento` -elegir un archivo,
+  // "Probar de nuevo", "Cargar igual"- pasan todos por esta MISMA función
+  // `subir`, así que un solo guardia alcanza para los tres.
+  const enviandoRef = React.useRef(false)
+
   async function subir(listo: ArchivoListo, forzar = false) {
+    if (enviandoRef.current) return
+    enviandoRef.current = true
     setArchivo(listo)
     setError(null)
     setEstado("subiendo")
@@ -96,21 +108,25 @@ export function PantallaNuevoEstudio() {
 
     try {
       // En éxito esta llamada no vuelve: la acción redirige a
-      // `/estudios/nuevo/procesando`.
+      // `/estudios/nuevo/procesando`. No hace falta liberar el guardia en ese
+      // camino -este componente se desmonta con la navegación-.
       const resultado = await subirDocumento(formData)
 
       if (resultado?.duplicado) {
         setDuplicado(resultado.duplicado)
         setEstado("duplicado")
+        enviandoRef.current = false
       } else if (resultado?.error) {
         setError(resultado.error)
         setEstado("error")
+        enviandoRef.current = false
       }
     } catch {
       // Red caída, request abortada, respuesta ilegible. Un `redirect()` de la
       // Server Action NO cae acá: lo intercepta el runtime de React antes.
       setError("No pudimos subir el estudio. Revisá tu conexión y probá de nuevo.")
       setEstado("error")
+      enviandoRef.current = false
     }
   }
 
