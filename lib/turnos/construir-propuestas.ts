@@ -28,6 +28,22 @@
  *    precarga recorta defensivamente a los mismos máximos que exige guardar
  *    el turno, para que revisar y guardar nunca choque con un error de "campo
  *    demasiado largo" que la persona no generó a mano.
+ *
+ * ## Deuda declarada: NO se cruza `lugarNombre` contra el catálogo REFES
+ *
+ * El encargo de la tarea deja como BONUS (opcional, "si es simple") ofrecer
+ * la precarga completa con coordenadas cuando `lugarNombre` matchea un centro
+ * sincronizado del catálogo REFES (`lib/lugares/sugerencias.ts`, tarea 16.3).
+ * No se implementa acá: decidir con confianza que "ANEXO DR JORGE SAGARDIA"
+ * (texto libre de un mensaje de WhatsApp, sin ID de REFES) es EL MISMO centro
+ * que una fila puntual del catálogo -y no una sede parecida de otra
+ * institución- es un problema de fuzzy-matching real, con el riesgo real de
+ * mandar a la familia a la dirección de otra clínica si se equivoca. Reusar
+ * `lib/lugares/consulta.ts` para una búsqueda ademas exigiría tocar la base
+ * desde este módulo (que hoy es 100% puro) o subir esa responsabilidad al
+ * Route Handler. Queda declarado como mejora futura, no como olvido -el campo
+ * `lugarNombre`/`lugarDireccion` que sí devuelve este módulo, tal como los
+ * escribió la clínica, sigue siendo información correcta y útil sin el cruce-.
  */
 
 import { mapearEspecialidadCatalogo } from "@/lib/especialidades/mapear-catalogo"
