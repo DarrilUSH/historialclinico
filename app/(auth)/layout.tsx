@@ -30,6 +30,7 @@
 import type { ReactNode } from "react"
 
 import { PiePaginasLegales } from "@/components/legal/pie-paginas-legales"
+import { RegistroServiceWorkerAnonimo } from "@/components/pwa/registro-sw-anonimo"
 
 export default function LayoutAuth({ children }: { children: ReactNode }) {
   return (
@@ -41,6 +42,11 @@ export default function LayoutAuth({ children }: { children: ReactNode }) {
     // (`app/(app)/(con-nav)/layout.tsx`), y este árbol es hermano del de aquel:
     // nunca hay dos <main> en la misma página.
     <main className="flex min-h-dvh w-full flex-1 flex-col items-center justify-center gap-2 bg-muted/30 px-4 py-10 chica:gap-1 chica:px-3 chica:py-6">
+      {/* Hotfix instalación PWA (2026-08-18): el worker también se registra
+          en las pantallas de entrada — sin esto, instalar la app parado en
+          /login la degrada a un acceso directo. Ver el encabezado de
+          components/pwa/registro-sw-anonimo.tsx. */}
+      <RegistroServiceWorkerAnonimo />
       {children}
       <PiePaginasLegales mostrarAyuda={false} />
     </main>
