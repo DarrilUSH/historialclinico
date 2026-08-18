@@ -45,12 +45,22 @@
  *
  * ## Contrato de retorno
  *
- * En éxito **no retorna**: hace `redirect()` a `/estudios/nuevo/procesando`.
- * El `redirect` va FUERA del `try/catch` a propósito -funciona lanzando
- * `NEXT_REDIRECT`, y un `catch` que se lo trague deja la navegación colgada-.
- * El `{ documentoId }` del tipo de retorno existe igual porque es el dato que
- * el Share Target y los tests necesitan cuando llamen al núcleo sin navegar, y
- * porque deja el tipo honesto: en error se devuelve `{ error }`.
+ * En éxito devuelve `{ documentoId }` **sin redirigir**, y quien la llamó
+ * navega a `/estudios/nuevo/procesando?doc=<documentoId>`.
+ *
+ * Antes hacía `redirect()`. Se cambió en el hotfix del "error de red
+ * fantasma" por la misma razón que `crearCobertura` -ver el bloque de
+ * `ResultadoGuardadoCobertura` en `app/(app)/(con-nav)/coberturas/actions.ts`
+ * para el porqué medido-: esta acción se invoca A MANO
+ * (`await subirDocumento(fd)` en `nuevo/pantalla-carga.tsx`, porque el
+ * formulario arma el `Blob` ya comprimido), y en Next 16 un `redirect()` de
+ * Server Action **rechaza la promesa** de quien la invocó. Ese rechazo caía en
+ * el `catch` de la pantalla y pintaba "No pudimos subir el estudio. Revisá tu
+ * conexión y probá de nuevo." sobre una subida que había salido bien.
+ *
+ * El `{ documentoId }` del tipo de retorno ya existía porque es el dato que
+ * el Share Target y los tests necesitan cuando llamen al núcleo sin navegar;
+ * ahora además es lo que hace posible navegar desde el cliente.
  *
  * Hay una TERCERA salida que tampoco redirige: `duplicado` (hotfix de huella
  * digital, Sprint 17 en vivo). `ingestarDocumento` encontró un archivo
@@ -168,8 +178,9 @@ export async function subirDocumento(formData: FormData): Promise<EstadoSubida> 
   // del router sin el documento recién creado.
   revalidatePath("/estudios")
 
-  // Fuera del try/catch: ver el contrato de retorno en el encabezado.
-  redirect(`/estudios/nuevo/procesando?doc=${documentoId}`)
+  // Sin `redirect()`: ver "Contrato de retorno" en el encabezado. La pantalla
+  // navega con `router.push` usando este `documentoId`.
+  return { error: null, documentoId, duplicado: null }
 }
 
 const ERROR_INESPERADO_CONFIRMACION =

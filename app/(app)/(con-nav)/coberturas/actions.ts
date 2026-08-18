@@ -69,6 +69,37 @@ export interface EstadoCoberturaAccion {
   error: string | null
 }
 
+/**
+ * Resultado de las DOS acciones que el formulario invoca a mano
+ * (`crearCobertura` / `actualizarCobertura`). **No redirigen: devuelven a
+ * dónde ir** y el cliente navega con `router.push`.
+ *
+ * ## Por qué no un `redirect()`, como el resto de las acciones de este archivo
+ *
+ * Hotfix del "error de red fantasma". En Next 16 una Server Action que hace
+ * `redirect()` **rechaza la promesa** que ve quien la invocó -es el mecanismo
+ * por el que el runtime propaga la orden de navegar-. Con `<form action>` o
+ * `useActionState` eso es invisible: la promesa la espera React, que reconoce
+ * ese rechazo y navega. Pero cuando la acción se llama a mano
+ * (`const r = await crearCobertura(fd)`, obligatorio acá porque el formulario
+ * arma los blobs de las fotos, ver `components/coberturas/formulario-cobertura.tsx`)
+ * el rechazo cae en el `try/catch` de quien llamó, y un `catch` genérico lo
+ * confunde con una red caída. Verificado en el Galaxy A71 contra un build de
+ * producción: el POST vuelve `200` con `x-action-redirect: /coberturas?creada=1;push`,
+ * la fila YA está insertada, y aun así el formulario pintaba
+ * "No pudimos guardar la cobertura. Revisá tu conexión y probá de nuevo.".
+ *
+ * Devolver el destino en vez de redirigir corta el problema de raíz: en el
+ * camino feliz la promesa **resuelve**, y el `catch` del cliente vuelve a
+ * significar lo único que debería significar -que la request no llegó-.
+ *
+ * `marcarPrincipal` y `eliminarCobertura` NO cambian: se usan con
+ * `useActionState`, donde el `redirect()` es el patrón correcto.
+ */
+export type ResultadoGuardadoCobertura =
+  | { ok: true; destino: string }
+  | { ok: false; error: string }
+
 const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const SIN_PERFIL_ACTIVO =
@@ -204,11 +235,11 @@ function mapearErrorEscrituraCobertura(
  * `components/coberturas/formulario-cobertura.tsx` más, opcionalmente, los
  * blobs ya comprimidos `frente`/`dorso`.
  */
-export async function crearCobertura(formData: FormData): Promise<EstadoCoberturaAccion> {
+export async function crearCobertura(formData: FormData): Promise<ResultadoGuardadoCobertura> {
   try {
     const activo = await obtenerPerfilActivo()
     if (!activo) {
-      return { error: SIN_PERFIL_ACTIVO }
+      return { ok: false, error: SIN_PERFIL_ACTIVO }
     }
 
     const { supabase } = await requerirPermiso(activo.perfil.id, "upload", {
@@ -217,7 +248,7 @@ export async function crearCobertura(formData: FormData): Promise<EstadoCobertur
 
     const validacion = validarCobertura(datosCrudosDelFormulario(formData))
     if (!validacion.ok) {
-      return { error: validacion.error }
+      return { ok: false, error: validacion.error }
     }
     const { datos } = validacion
 
@@ -258,6 +289,7 @@ export async function crearCobertura(formData: FormData): Promise<EstadoCobertur
     } catch (errorSubida) {
       await limpiarObjetosSubidos([frontPath, backPath])
       return {
+        ok: false,
         error: errorSubida instanceof Error ? errorSubida.message : ERROR_INESPERADO_CREAR,
       }
     }
@@ -281,31 +313,37 @@ export async function crearCobertura(formData: FormData): Promise<EstadoCobertur
       // Compensación: la fila no quedó, así que las fotos recién subidas
       // quedarían huérfanas -mismo motivo que `lib/documentos/ingesta.ts`-.
       await limpiarObjetosSubidos([frontPath, backPath])
-      return { error: mapearErrorEscrituraCobertura(error, ERROR_INESPERADO_CREAR) }
+      return { ok: false, error: mapearErrorEscrituraCobertura(error, ERROR_INESPERADO_CREAR) }
     }
   } catch (error) {
     if (esErrorDeGuarda(error)) {
-      return { error: error.message }
+      return { ok: false, error: error.message }
     }
     console.error("[coberturas] Fallo inesperado al crear una cobertura:", error)
-    return { error: ERROR_INESPERADO_CREAR }
+    return { ok: false, error: ERROR_INESPERADO_CREAR }
   }
 
+  // `revalidatePath` sigue siendo necesario aunque acá ya no haya `redirect()`:
+  // viaja en la respuesta de la acción (`x-action-revalidated`) y es lo que
+  // hace que el `router.push` del cliente traiga la lista CON la cobertura
+  // nueva en vez de la copia que el router ya tenía.
   revalidatePath("/coberturas")
-  redirect("/coberturas?creada=1")
+  return { ok: true, destino: "/coberturas?creada=1" }
 }
 
 /** Edición de una cobertura ya cargada: datos, y opcionalmente reemplazo de frente/dorso. */
-export async function actualizarCobertura(formData: FormData): Promise<EstadoCoberturaAccion> {
+export async function actualizarCobertura(
+  formData: FormData,
+): Promise<ResultadoGuardadoCobertura> {
   try {
     const activo = await obtenerPerfilActivo()
     if (!activo) {
-      return { error: SIN_PERFIL_ACTIVO }
+      return { ok: false, error: SIN_PERFIL_ACTIVO }
     }
 
     const coberturaId = campo(formData, "coberturaId")
     if (!PATRON_UUID.test(coberturaId)) {
-      return { error: SIN_COBERTURA_ID }
+      return { ok: false, error: SIN_COBERTURA_ID }
     }
 
     const { supabase } = await requerirPermiso(activo.perfil.id, "manage", {
@@ -314,7 +352,7 @@ export async function actualizarCobertura(formData: FormData): Promise<EstadoCob
 
     const validacion = validarCobertura(datosCrudosDelFormulario(formData))
     if (!validacion.ok) {
-      return { error: validacion.error }
+      return { ok: false, error: validacion.error }
     }
     const { datos } = validacion
 
@@ -349,6 +387,7 @@ export async function actualizarCobertura(formData: FormData): Promise<EstadoCob
       }
     } catch (errorSubida) {
       return {
+        ok: false,
         error: errorSubida instanceof Error ? errorSubida.message : ERROR_INESPERADO_EDITAR,
       }
     }
@@ -376,21 +415,22 @@ export async function actualizarCobertura(formData: FormData): Promise<EstadoCob
       .eq("profile_id", activo.perfil.id)
 
     if (error) {
-      return { error: mapearErrorEscrituraCobertura(error, ERROR_INESPERADO_EDITAR) }
+      return { ok: false, error: mapearErrorEscrituraCobertura(error, ERROR_INESPERADO_EDITAR) }
     }
     if (!count) {
-      return { error: ERROR_COBERTURA_NO_ENCONTRADA }
+      return { ok: false, error: ERROR_COBERTURA_NO_ENCONTRADA }
     }
   } catch (error) {
     if (esErrorDeGuarda(error)) {
-      return { error: error.message }
+      return { ok: false, error: error.message }
     }
     console.error("[coberturas] Fallo inesperado al editar una cobertura:", error)
-    return { error: ERROR_INESPERADO_EDITAR }
+    return { ok: false, error: ERROR_INESPERADO_EDITAR }
   }
 
+  // Ver la nota de `crearCobertura`: revalidar sigue haciendo falta sin redirect.
   revalidatePath("/coberturas")
-  redirect("/coberturas?editada=1")
+  return { ok: true, destino: "/coberturas?editada=1" }
 }
 
 /** Marca una cobertura existente como principal (desde la billetera, sin pasar por el formulario de edición completo). */

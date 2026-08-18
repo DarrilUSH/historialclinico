@@ -65,6 +65,8 @@ import { VeloEspera } from "@/components/base/velo-espera"
 import { CargadorDocumento, type ArchivoListo } from "@/components/documentos/cargador-documento"
 import { formatearBytes } from "@/lib/archivos/validacion"
 
+import { useRouter } from "next/navigation"
+
 import { subirDocumento } from "../actions"
 
 type Estado = "eligiendo" | "subiendo" | "error" | "duplicado"
@@ -76,6 +78,7 @@ interface DuplicadoDetectado {
 }
 
 export function PantallaNuevoEstudio() {
+  const router = useRouter()
   const [estado, setEstado] = React.useState<Estado>("eligiendo")
   const [archivo, setArchivo] = React.useState<ArchivoListo | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -107,23 +110,30 @@ export function PantallaNuevoEstudio() {
     if (forzar) formData.append("forzar", "1")
 
     try {
-      // En éxito esta llamada no vuelve: la acción redirige a
-      // `/estudios/nuevo/procesando`. No hace falta liberar el guardia en ese
-      // camino -este componente se desmonta con la navegación-.
       const resultado = await subirDocumento(formData)
 
-      if (resultado?.duplicado) {
+      if (resultado.duplicado) {
         setDuplicado(resultado.duplicado)
         setEstado("duplicado")
         enviandoRef.current = false
-      } else if (resultado?.error) {
+      } else if (resultado.error) {
         setError(resultado.error)
         setEstado("error")
         enviandoRef.current = false
+      } else if (resultado.documentoId) {
+        // La acción YA NO redirige (hotfix del "error de red fantasma": un
+        // `redirect()` de Server Action rechaza la promesa de quien la invoca
+        // a mano, y ese rechazo terminaba en el `catch` de abajo pintando un
+        // error de conexión sobre una subida exitosa — ver el "Contrato de
+        // retorno" en `../actions.ts`).
+        //
+        // El guardia queda tomado y el estado sigue en "subiendo" a propósito:
+        // la pantalla no debe volver a habilitarse mientras navega.
+        router.push(`/estudios/nuevo/procesando?doc=${resultado.documentoId}`)
       }
     } catch {
-      // Red caída, request abortada, respuesta ilegible. Un `redirect()` de la
-      // Server Action NO cae acá: lo intercepta el runtime de React antes.
+      // Ahora sí: acá SOLO llegan fallas de verdad de la request (red caída,
+      // request abortada, respuesta ilegible).
       setError("No pudimos subir el estudio. Revisá tu conexión y probá de nuevo.")
       setEstado("error")
       enviandoRef.current = false

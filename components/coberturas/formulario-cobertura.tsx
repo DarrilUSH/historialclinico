@@ -22,6 +22,7 @@
 
 import * as React from "react"
 
+import { useRouter } from "next/navigation"
 import { CreditCardIcon, SaveIcon } from "lucide-react"
 
 import {
@@ -66,6 +67,7 @@ export function FormularioCobertura({
   tieneFrenteExistente = false,
   tieneDorsoExistente = false,
 }: FormularioCoberturaProps) {
+  const router = useRouter()
   const [estado, setEstado] = React.useState<EstadoCoberturaAccion>(ESTADO_INICIAL)
   const [enviando, setEnviando] = React.useState(false)
   const [esPrincipal, setEsPrincipal] = React.useState(valoresIniciales?.esPrincipal ?? false)
@@ -109,17 +111,29 @@ export function FormularioCobertura({
 
     try {
       const accion = modo === "crear" ? crearCobertura : actualizarCobertura
-      // En éxito esta llamada no vuelve: la acción redirige a `/coberturas`.
       const resultado = await accion(formData)
 
-      if (resultado?.error) {
-        setEstado({ error: resultado.error })
-        setEnviando(false)
-        enviandoRef.current = false
+      if (resultado.ok) {
+        // La acción YA NO redirige: devuelve a dónde ir y navegamos acá. Ver el
+        // bloque de `ResultadoGuardadoCobertura` en
+        // `app/(app)/(con-nav)/coberturas/actions.ts` para el porqué completo —
+        // en resumen, un `redirect()` de Server Action RECHAZA la promesa de
+        // quien la invoca a mano, y ese rechazo caía en el `catch` de abajo
+        // haciendo pasar un guardado exitoso por una caída de red.
+        //
+        // El guardia NO se libera y `enviando` queda en `true` a propósito: el
+        // botón tiene que seguir deshabilitado hasta que la navegación se lleve
+        // puesta la pantalla, no volver a habilitarse por un instante.
+        router.push(resultado.destino)
+        return
       }
+
+      setEstado({ error: resultado.error })
+      setEnviando(false)
+      enviandoRef.current = false
     } catch {
-      // Red caída, request abortada. Un `redirect()` de la Server Action NO
-      // cae acá: lo intercepta el runtime de React antes.
+      // Ahora sí: acá SOLO llegan fallas de verdad de la request (red caída,
+      // request abortada). El camino feliz resuelve por el `if` de arriba.
       setEstado({ error: ERROR_RED })
       setEnviando(false)
       enviandoRef.current = false
