@@ -72,8 +72,28 @@ export function FormularioCobertura({
   const [frente, setFrente] = React.useState<ArchivoCredencialListo | null>(null)
   const [dorso, setDorso] = React.useState<ArchivoCredencialListo | null>(null)
 
+  // Guardia SÍNCRONA contra el doble envío (hotfix, error fugaz al guardar).
+  // `enviando` (estado de React) recién deshabilita el botón después de un
+  // ciclo de render — y en ese margen un segundo disparo del `submit` (doble
+  // toque en pantalla táctil, o Enter en un campo de texto casi a la vez que
+  // un toque en el botón) puede arrancar un segundo `manejarSubmit` antes de
+  // que el primero llegue a deshabilitar nada. Reproducido de punta a punta:
+  // dos invocaciones concurrentes de `crearCobertura` con `esPrincipal`
+  // marcado compiten por el índice único parcial
+  // `insurance_cards_una_principal_idx`; la que pierde devuelve
+  // `ERROR_UNA_PRINCIPAL` y este componente lo pinta un instante antes de que
+  // la que ganó complete su `redirect()` y se lleve puesta la pantalla —el
+  // "error que aparece y desaparece solo, con la cobertura guardada igual"
+  // reportado desde producción. Un `ref`, no estado: tiene que estar
+  // disponible en la MISMA pasada síncrona en la que corre este handler,
+  // antes de que React tenga oportunidad de re-renderizar y deshabilitar el
+  // botón.
+  const enviandoRef = React.useRef(false)
+
   async function manejarSubmit(evento: React.FormEvent<HTMLFormElement>) {
     evento.preventDefault()
+    if (enviandoRef.current) return
+    enviandoRef.current = true
     setEstado(ESTADO_INICIAL)
     setEnviando(true)
 
@@ -95,12 +115,14 @@ export function FormularioCobertura({
       if (resultado?.error) {
         setEstado({ error: resultado.error })
         setEnviando(false)
+        enviandoRef.current = false
       }
     } catch {
       // Red caída, request abortada. Un `redirect()` de la Server Action NO
       // cae acá: lo intercepta el runtime de React antes.
       setEstado({ error: ERROR_RED })
       setEnviando(false)
+      enviandoRef.current = false
     }
   }
 

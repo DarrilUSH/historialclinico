@@ -30,8 +30,18 @@ export function VisorCredencialLanzador({
   const [abierto, setAbierto] = React.useState<"front" | "back" | null>(null)
 
   if (!tieneFrente && !tieneDorso) {
+    // `chica:basis-full`: hotfix (evidencia real) — este párrafo es hijo de
+    // la fila `chica:flex-row chica:flex-wrap` de `tarjeta-cobertura.tsx`, la
+    // misma que comparte con el bloque de encabezado (proveedor + badge
+    // "Principal"). A diferencia de las miniaturas (ancho fijo, `shrink-0`,
+    // conviven bien en esa fila), esta es una oración completa: sin
+    // `basis-full` competía por la MISMA línea que el badge y las cajas se
+    // pisaban. `basis-full` la manda a una segunda línea, a todo el ancho de
+    // la tarjeta -mismo tratamiento que ya tiene en GRANDE, donde este bloque
+    // siempre estuvo apilado debajo-, sin truncar ni acortar el texto (docs/
+    // densidad.md §4 regla 5: la densidad reorganiza, no esconde contenido).
     return (
-      <p className="flex items-center gap-2 text-sm text-muted-foreground">
+      <p className="flex items-center gap-2 text-sm text-muted-foreground chica:basis-full">
         <ImageOffIcon className="size-4 shrink-0" aria-hidden="true" />
         Todavía no cargaste fotos de la credencial.
       </p>

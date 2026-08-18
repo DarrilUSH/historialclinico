@@ -39,8 +39,24 @@ export function TarjetaCobertura({
           esos dos bloques ya tenían como hijos directos de la `Tarjeta`
           (arriba), así que en GRANDE el resultado es pixel a pixel el mismo
           -flex-col con el mismo gap-, ni un cambio real de layout: docs/
-          densidad.md §4 regla 1. */}
-      <div className="flex flex-col gap-4 chica:flex-row chica:items-start chica:justify-between chica:gap-2">
+          densidad.md §4 regla 1.
+
+          Hotfix (evidencia real, credencial SIN fotos): la tanda B solo
+          probó esta fila con las MINIATURAS (`chica:gap-1.5`, `shrink-0`,
+          dos cajas de ancho fijo -ver `visor-credencial-lanzador.tsx`-), que
+          conviven bien con el encabezado porque nunca piden más ancho del
+          que les sobra. El estado vacío del visor (`tieneFrente` y
+          `tieneDorso` los dos `false`) devuelve en cambio un párrafo de
+          oración completa sin `shrink-0` ni ancho fijo: sin `flex-wrap`
+          termina compitiendo por la MISMA línea que el badge "Principal" -que
+          sí tiene `shrink-0`- y las cajas se pisan en vez de acomodarse.
+          `chica:flex-wrap` acá + `chica:basis-full` en ese párrafo (ver el
+          otro archivo) lo bajan a una segunda línea DENTRO de esta misma fila
+          -mismo `chica:gap-2` como separación vertical, sin agregar ningún
+          espaciado nuevo- en vez de compartirla. Las miniaturas no declaran
+          `basis-full`, así que siguen compartiendo la fila exactamente igual
+          que antes. */}
+      <div className="flex flex-col gap-4 chica:flex-row chica:flex-wrap chica:items-start chica:justify-between chica:gap-2">
         <div className="flex items-start justify-between gap-3 chica:min-w-0 chica:flex-1 chica:gap-2">
           <div className="flex items-start gap-3 chica:min-w-0 chica:gap-2">
             <span
