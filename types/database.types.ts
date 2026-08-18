@@ -305,6 +305,7 @@ export type Database = {
           profile_id: string
           province: string | null
           specialties: string[]
+          specialty: string | null
           updated_at: string
         }
         Insert: {
@@ -325,6 +326,7 @@ export type Database = {
           profile_id: string
           province?: string | null
           specialties?: string[]
+          specialty?: string | null
           updated_at?: string
         }
         Update: {
@@ -345,6 +347,7 @@ export type Database = {
           profile_id?: string
           province?: string | null
           specialties?: string[]
+          specialty?: string | null
           updated_at?: string
         }
         Relationships: [

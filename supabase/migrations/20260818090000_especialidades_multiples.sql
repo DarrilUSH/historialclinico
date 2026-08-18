@@ -77,28 +77,41 @@
 -- `'{}'` -mismo criterio que ya usó el Sprint 8 para arrays: `'{}'` es "no
 -- hay ninguna cargada", no un valor de relleno-.
 --
--- ── `specialty` SE ELIMINA, NO QUEDA COMO COLUMNA MUERTA
+-- ── `specialty` QUEDA EN DESUSO ACÁ; SE ELIMINA EN EL CICLO SIGUIENTE
+--    (corrección de auditoría del orquestador sobre la entrega original)
 --
--- Se evaluó dejar `specialty` como una copia de solo lectura del primer
--- elemento (por si algo externo la leía todavía), pero mantener dos columnas
--- con la misma información -una siempre derivable de la otra- es la clase
--- exacta de fuente doble de verdad que este proyecto evita en otros lados
--- (`documents.doctor_name` es la ÚNICA excepción documentada, y es
--- deliberada porque captura un dato textual histórico que puede divergir del
--- `doctors` vigente -ver `20260812200000_schema_inicial.sql` §4.4-; acá no
--- hay ese motivo: `specialty` y `specialties[1]` significarían siempre lo
--- mismo, así que tener las dos solo crea la posibilidad de que un `UPDATE`
--- futuro toque una y no la otra). Se verificó que ninguna función, vista ni
--- trigger de la base lee `doctors.specialty` -el único índice que la usaba,
+-- La entrega original de esta tarea ELIMINABA `specialty` al final de esta
+-- misma migración, con el argumento -correcto en abstracto- de no dejar una
+-- fuente doble de verdad. La auditoría lo cambió por el patrón
+-- EXPANDIR-CONTRAER, y el motivo es el protocolo de deploy de este proyecto:
+-- las migraciones se aplican a producción con `npx supabase db push` ANTES
+-- del push de código (así el código nuevo nunca encuentra una base vieja).
+-- Esa misma coreografía tiene la ventana opuesta: entre el `db push` y el
+-- fin del build de Vercel (~2 minutos), EL CÓDIGO VIEJO sigue vivo, y ese
+-- código hace `select ... specialty ...` en /medicos y en los selectores de
+-- turnos, e INSERT/UPDATE con `specialty` al guardar un médico. Con la
+-- columna eliminada, esas pantallas se rompen durante la ventana — la clase
+-- de "producción a mitad de camino" que este proyecto prometió no tener.
+--
+-- Por eso esta migración (fase EXPANDIR):
+--   · crea `specialties` y migra los datos;
+--   · le quita a `specialty` el NOT NULL (§5) — el código NUEVO no la
+--     escribe, y sin esto sus altas fallarían;
+--   · NO la elimina: queda en desuso, con su último valor congelado, y el
+--     código viejo sigue funcionando entero durante la ventana.
+--
+-- La fase CONTRAER -`drop column specialty` + `drop function` del helper si
+-- correspondiera- va en una migración del PRÓXIMO ciclo de `db push`
+-- (Sprint 17), cuando el código que la lee ya no exista en producción desde
+-- hace días. La ventana de "dos columnas" es transitoria y nadie escribe la
+-- vieja: la posibilidad de divergencia real es nula, y la deuda queda
+-- anotada en docs/estado-proyecto.md para que el ciclo siguiente la cierre.
+--
+-- Se verificó que ninguna función, vista ni trigger de la base lee
+-- `doctors.specialty` -el único índice que la usaba,
 -- `doctors_profile_specialty_idx`, se reemplaza más abajo- y que el código
--- de la app (`app/(app)/(con-nav)/medicos/actions.ts`,
--- `app/(app)/(con-nav)/medicos/page.tsx`,
--- `app/(app)/(con-nav)/medicos/[id]/editar/page.tsx`,
--- `app/(app)/(con-nav)/turnos/nuevo/page.tsx`,
--- `app/(app)/(con-nav)/turnos/[id]/editar/page.tsx`,
--- `components/medicos/tarjeta-medico.tsx`,
--- `lib/turnos/autocompletar-medico.ts`) migra en el mismo commit que esta
--- migración. `appointments.specialty` y `documents.specialty` son columnas
+-- de la app migra a `specialties` en el mismo commit que esta migración.
+-- `appointments.specialty` y `documents.specialty` son columnas
 -- INDEPENDIENTES (el turno es para UNA especialidad concreta, el documento
 -- describe la especialidad del estudio) y esta migración no las toca.
 --
@@ -115,7 +128,7 @@ alter table public.doctors
     add column specialties text[] not null default '{}';
 
 comment on column public.doctors.specialties is
-    'Especialidades del médico (Sprint 16, tarea 16.2), cero o más. La primera es la PRINCIPAL: lib/turnos/autocompletar-medico.ts la usa para precargar appointments.specialty al elegir este médico en un turno, y components/medicos/formulario-medico.tsx la ofrece primera en los chips. Texto libre -no hay FK ni CHECK contra un catálogo cerrado-: lib/especialidades/catalogo.ts solo alimenta el autocompletar, nunca bloquea una especialidad que no está en la lista. Reemplaza a la columna specialty (un solo valor), eliminada más abajo en esta misma migración.';
+    'Especialidades del médico (Sprint 16, tarea 16.2), cero o más. La primera es la PRINCIPAL: lib/turnos/autocompletar-medico.ts la usa para precargar appointments.specialty al elegir este médico en un turno, y components/medicos/formulario-medico.tsx la ofrece primera en los chips. Texto libre -no hay FK ni CHECK contra un catálogo cerrado-: lib/especialidades/catalogo.ts solo alimenta el autocompletar, nunca bloquea una especialidad que no está en la lista. Reemplaza a la columna specialty (un solo valor), que queda EN DESUSO -nullable, sin lectores en el código nuevo- y se elimina en la migración de contracción del próximo ciclo de db push (ver §5 y el encabezado).';
 
 
 -- =============================================================================
@@ -182,14 +195,21 @@ create index doctors_specialties_gin_idx
     on public.doctors using gin (specialties);
 
 comment on index public.doctors_specialties_gin_idx is
-    'Soporta filtros por especialidad (operadores de arrays: @>, &&) si el directorio de médicos alguna vez necesita "mostrame los que son cardiólogos". Reemplaza a doctors_profile_specialty_idx (btree sobre la columna specialty, eliminada abajo).';
+    'Soporta filtros por especialidad (operadores de arrays: @>, &&) si el directorio de médicos alguna vez necesita "mostrame los que son cardiólogos". Reemplaza a doctors_profile_specialty_idx (btree sobre la columna specialty, en desuso desde esta migración y eliminada en el ciclo siguiente).';
 
 
 -- =============================================================================
--- 5. Columna vieja: se elimina (ver "specialty SE ELIMINA" en el encabezado)
+-- 5. Columna vieja: pierde el NOT NULL y queda en desuso (fase EXPANDIR —
+--    ver "`specialty` QUEDA EN DESUSO ACÁ" en el encabezado). El código nuevo
+--    no la escribe: sin este cambio, toda alta de médico fallaría apenas se
+--    deploye. La eliminación real (fase CONTRAER) va en una migración del
+--    próximo ciclo de `db push`, con el código viejo ya fuera de producción.
 -- =============================================================================
 
 alter table public.doctors
-    drop column specialty;
+    alter column specialty drop not null;
+
+comment on column public.doctors.specialty is
+    'EN DESUSO desde el Sprint 16 (tarea 16.2): reemplazada por specialties (text[], la primera es la principal). Se conserva solo para que el código anterior siga funcionando durante la ventana entre el db push y el deploy del código; nadie la escribe desde entonces y su valor queda congelado. Eliminarla es la fase de contracción, planificada para la migración del próximo ciclo (Sprint 17) — deuda anotada en docs/estado-proyecto.md.';
 
 -- Fin de la migración.

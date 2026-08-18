@@ -30,7 +30,11 @@ import { linkComoLlegar } from "@/lib/logistica/deep-links"
 import { direccionCompleta } from "@/lib/ubicacion/formato"
 import type { Database } from "@/types/database.types"
 
-type FilaMedico = Database["public"]["Tables"]["doctors"]["Row"]
+// Sin `specialty`: la columna quedó EN DESUSO en la fase de expansión de la
+// migración 20260818090000 (§5) y las páginas consultan columnas explícitas
+// que ya no la traen — exigirla acá obligaría a cada SELECT a pedir un dato
+// que nadie muestra.
+type FilaMedico = Omit<Database["public"]["Tables"]["doctors"]["Row"], "specialty">
 
 const FORMATO_FECHA_CORTA = new Intl.DateTimeFormat("es-AR", {
   timeZone: "UTC",
