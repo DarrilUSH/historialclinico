@@ -1,15 +1,24 @@
 # Estado del proyecto — Historial Médico
 
-> **Última actualización:** 2026-08-14 ~22:30 — **EL SITIO ESTÁ EN PRODUCCIÓN: https://www.historialmedico.com.ar**
+> **Última actualización:** 2026-08-17 ~21:30 — **EL SITIO ESTÁ EN PRODUCCIÓN: https://www.historialmedico.com.ar**
 > Este documento existe para retomar el trabajo exactamente donde quedó. Léelo completo antes de tocar nada.
+
+## CORTE 2026-08-17 — Sprints 13 y 14 completos en producción; Google OAuth listo para el 17
+
+- **Sprint 13 (letra grande/chica) ✅ y Sprint 14 (densidad chica v2 nativa) ✅, auditados y en producción.** El 14 salió en tres partes: 14.1 retokenizado nativo + **default = chica para todo el mundo** (migración `20260817150000_default_chica.sql`, aplicada a prod por el usuario vía `db push`; quien elige grande queda recordado), tanda A (`5724781` + fix `079e4dd`: /inicio 3 columnas, /medicacion y /turnos como filas densas, /signos tabla; de paso se arregló el bug de hidratación del dictado y el SELECT de /turnos sin lat/lng que escondía "Pedir viaje") y tanda B (`b6e8f0f`: /estudios, /coberturas, /medicos, /familia, /sos). Métricas reales en el Galaxy: /medicacion 1,78× vs chica v1; protegidos sin comprimir: SOS (sangre gigante + tel: alto), acciones principales de médicos, formulario de permisos de familia, legibilidad de ejes en gráficos (chica 180px). Todo el detalle en `docs/capturas/dispositivo-real/README.md`.
+- **Velo de espera global ✅ (`ceaa5c9`, pedido del usuario del 2026-08-17):** `components/base/velo-espera.tsx` — overlay con aparición diferida 450ms, `role="status"`, bloqueo `inert` detrás. Aplicado a: ingesta de estudios en sus 3 etapas reales ("Subiendo…"→"La IA está leyendo…"→"Guardando…"), botón A/a ("Ajustando el tamaño de letra…"), login/registro. Los formularios rápidos siguen con el spinner del botón (criterio documentado en el componente). Trajo la primera infraestructura de tests de render (jsdom + testing-library, solo ese archivo; suite 753/753).
+- **Google OAuth para el Sprint 17 LISTO (trámite guiado, usuario lo completó):** proyecto Google `gen-lang-client-0873820464`, Gmail API habilitada, consentimiento "Historial Médico" (External, en prueba), usuario como test user, cliente web con callbacks `https://www.historialmedico.com.ar/api/gmail/callback` y `http://localhost:3000/api/gmail/callback`. `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` en Vercel (Sensitive) y en `.env.local` (verificadas solo por nombre). Al cerrar el Sprint 17: tocar "Publicar aplicación" (pantalla Público) para que los refresh tokens no venzan cada 7 días.
+- **SMTP/mail personalizado: DESCARTADO por el usuario (2026-08-15) — no volver a proponerlo.**
+- **Sprint 16 sumó un 4.º ítem (2026-08-17):** pegar el mensaje de WhatsApp de la clínica en "Nuevo turno" → Gemini pre-carga el formulario (fecha DD/MM argentina, especialidad, prestador, lugar, preparación+coseguro a notas) para revisión humana; nunca guarda solo. Ejemplo real de la Clínica San Jorge en la conversación del 17.
+- **Próximo:** Sprint 15 (perfiles de niños con graduación) → 16 (ciudad/provincia, especialidades, REFES, mensaje de clínica) → 17 (ingesta Gmail con etiqueta+filtros automáticos). Backlog: aceptación de invitaciones; temas para la consulta; cerrar/limitar registro público (decisión del usuario pendiente).
 
 ## PRODUCCIÓN (2026-08-14)
 
 - **Vivo en https://www.historialmedico.com.ar** (Vercel auto-deploy desde main — ¡cada push a main VA A PRODUCCIÓN!). Base: Supabase cloud `nbypcqhojmixlxvkflrp` con las 20 migraciones aplicadas (20 tablas, 0 sin RLS, 4 buckets, 3 crons, Vault configurado). Env vars cargadas por el usuario. Site URL y Redirect de Auth apuntando al dominio.
 - **Las migraciones NO se aplican con el push del código**: cada migración nueva requiere que el usuario corra `npx supabase db push` (ya logueado+linkeado).
 - **Hotfixes post-estreno aplicados**: raíz `/` redirige (adiós placeholder "en construcción"), alta de cuenta por trigger en la base (funciona con confirmación por email; `4f02427` + `20260814140000`), ojito de contraseñas y feedback inmediato del A/a (`7a9fab1`).
-- **Pendientes del usuario**: (1) terminar SMTP de Brevo en Supabase → después el orquestador redacta los templates en castellano; (2) decisión de cerrar/limitar el registro público; (3) prueba final: registro real desde el celular.
-- **Backlog** (ROADMAP §Backlog): aceptación de invitaciones familiares; "temas para la consulta" (notas por turno integradas a la ficha IA); SMTP; registro.
+- **Pendientes del usuario**: (1) decisión de cerrar/limitar el registro público; (2) prueba final: registro real desde el celular. (El SMTP propio quedó descartado el 2026-08-15.)
+- **Backlog** (ROADMAP §Backlog): aceptación de invitaciones familiares; "temas para la consulta" (notas por turno integradas a la ficha IA); registro público.
 
 ## Qué es esto
 
