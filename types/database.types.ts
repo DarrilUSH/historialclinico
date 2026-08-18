@@ -500,6 +500,45 @@ export type Database = {
           },
         ]
       }
+      gmail_connections: {
+        Row: {
+          connected_at: string
+          email: string
+          expired_at: string | null
+          granted_scopes: string | null
+          label_id: string | null
+          label_name: string
+          last_ok_at: string | null
+          status: string
+          token_secret_id: string | null
+          user_id: string
+        }
+        Insert: {
+          connected_at?: string
+          email: string
+          expired_at?: string | null
+          granted_scopes?: string | null
+          label_id?: string | null
+          label_name?: string
+          last_ok_at?: string | null
+          status?: string
+          token_secret_id?: string | null
+          user_id: string
+        }
+        Update: {
+          connected_at?: string
+          email?: string
+          expired_at?: string | null
+          granted_scopes?: string | null
+          label_id?: string | null
+          label_name?: string
+          last_ok_at?: string | null
+          status?: string
+          token_secret_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       health_centers: {
         Row: {
           address: string | null
@@ -1405,6 +1444,7 @@ export type Database = {
       }
     }
     Functions: {
+      borrar_conexion_gmail: { Args: { p_usuario: string }; Returns: undefined }
       cerrar_alerta_medicacion: {
         Args: { p_entregas: number; p_fallos: number; p_id: string }
         Returns: boolean
@@ -1548,6 +1588,26 @@ export type Database = {
       generar_alertas_medicacion: { Args: never; Returns: number }
       generar_recordatorios_pendientes: { Args: never; Returns: number }
       generar_tomas_del_dia: { Args: { fecha?: string }; Returns: number }
+      guardar_conexion_gmail: {
+        Args: {
+          p_email: string
+          p_label_id: string
+          p_label_name: string
+          p_refresh_token: string
+          p_scopes: string
+          p_usuario: string
+        }
+        Returns: undefined
+      }
+      leer_refresh_token_gmail: { Args: { p_usuario: string }; Returns: string }
+      marcar_conexion_gmail_activa: {
+        Args: { p_usuario: string }
+        Returns: undefined
+      }
+      marcar_conexion_gmail_vencida: {
+        Args: { p_usuario: string }
+        Returns: undefined
+      }
       nombres_de_perfiles_vinculados: {
         Args: never
         Returns: {

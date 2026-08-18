@@ -95,6 +95,79 @@ describe("components/base/velo-espera.tsx", () => {
 
       expect(screen.queryByRole("status")).toBeNull()
     })
+
+    it("no queda montado para siempre si el temporizador dispara DESPUÉS de que `visible` volvió a false [regresión, Sprint 17]", () => {
+      // ── LA VENTANA REAL, Y POR QUÉ HAY QUE FORZARLA
+      //
+      // El ajuste de estado del render apaga `montado` en el acto, y la
+      // limpieza del efecto cancela el temporizador. Pero la limpieza es un
+      // efecto PASIVO: React la agenda para después del commit. Si el
+      // temporizador dispara en esa ventana, `setMontado(true)` entra con
+      // `visible` ya en `false`, y desde ahí `visible === visiblePrevio` para
+      // siempre: el ajuste del render no vuelve a correr y el velo queda
+      // montado de forma permanente, con toda la página `inert` detrás.
+      //
+      // `rerender` de testing-library envuelve todo en `act`, que flushea los
+      // efectos pasivos de inmediato: la ventana no existe adentro del test.
+      // Por eso se captura el callback del temporizador y se lo ejecuta A MANO
+      // después del rerender — que es exactamente lo que pasa en el navegador
+      // cuando ya había disparado antes de que corriera la limpieza.
+      //
+      // Encontrado en el Galaxy real desconectando Gmail (Sprint 17, 17.1):
+      // la Server Action revalida la ruta y el `isPending` de `useActionState`
+      // se apaga alrededor de los 450 ms, justo en la ventana.
+      const disparos: Array<() => void> = []
+      const espia = vi
+        .spyOn(window, "setTimeout")
+        .mockImplementation(((callback: () => void) => {
+          disparos.push(callback)
+          return 0 as unknown as ReturnType<typeof window.setTimeout>
+        }) as unknown as typeof window.setTimeout)
+
+      const { rerender } = render(<VeloEspera visible mensaje="Desconectando…" />)
+      rerender(<VeloEspera visible={false} mensaje="Desconectando…" />)
+
+      expect(disparos).toHaveLength(1)
+      act(() => {
+        for (const disparar of disparos) disparar()
+      })
+      espia.mockRestore()
+
+      expect(screen.queryByRole("status")).toBeNull()
+      // Y la página de atrás quedó utilizable: sin `inert` ni scroll bloqueado.
+      expect(document.body.style.overflow).not.toBe("hidden")
+      for (const hijo of Array.from(document.body.children)) {
+        expect(hijo.hasAttribute("inert")).toBe(false)
+      }
+    })
+
+    it("si `visible` vuelve a `true` después de ese falso disparo, el velo aparece igual", () => {
+      // La guarda no puede dejar el componente inutilizable para siempre: el
+      // caso de "desconectar, arrepentirse y volver a conectar" tiene que
+      // seguir mostrando el velo.
+      const disparos: Array<() => void> = []
+      const espia = vi
+        .spyOn(window, "setTimeout")
+        .mockImplementation(((callback: () => void) => {
+          disparos.push(callback)
+          return 0 as unknown as ReturnType<typeof window.setTimeout>
+        }) as unknown as typeof window.setTimeout)
+
+      const { rerender } = render(<VeloEspera visible mensaje="Desconectando…" />)
+      rerender(<VeloEspera visible={false} mensaje="Desconectando…" />)
+      act(() => {
+        for (const disparar of disparos) disparar()
+      })
+      espia.mockRestore()
+      expect(screen.queryByRole("status")).toBeNull()
+
+      rerender(<VeloEspera visible mensaje="Conectando…" />)
+      act(() => {
+        vi.advanceTimersByTime(450)
+      })
+
+      expect(screen.getByRole("status").textContent).toContain("Conectando…")
+    })
   })
 
   describe("mensaje por etapa", () => {

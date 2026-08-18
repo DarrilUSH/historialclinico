@@ -163,6 +163,38 @@ export const RUTA_MANIFEST = "/manifest.webmanifest"
 export const RUTA_COMPARTIR = "/api/compartir"
 
 /**
+ * Las dos puntas del consentimiento de Gmail (Sprint 17, tarea 17.1):
+ * `/api/gmail/conectar` manda a la pantalla de Google y
+ * `/api/gmail/callback` recibe la vuelta.
+ *
+ * Son "públicas" en el mismo sentido que `RUTA_COMPARTIR`, y por el mismo
+ * motivo: **"no las corta el proxy con un 401 JSON", NO "cualquiera puede
+ * usarlas sin sesión"**. Las dos exigen sesión en su propio handler -y el
+ * callback exige además el `state` firmado, con su nonce y con la cuenta
+ * cotejada contra `auth.getUser()`-; lo único que cambia esta declaración es
+ * el modo de falla.
+ *
+ * Por qué hace falta. Quien llega a `/api/gmail/callback` es el navegador
+ * volviendo de `accounts.google.com` con una navegación de nivel superior: si
+ * la sesión venció mientras la persona leía la pantalla de consentimiento,
+ * la regla genérica de `/api` (ver `esRutaDeApi` en `proxy.ts`) le mostraría
+ * un `{"error":"..."}` crudo como página de aterrizaje, sin ningún camino de
+ * vuelta. Con esta excepción, el handler contesta `303 → /login?desde=/perfil/gmail`
+ * y la persona vuelve por donde vino. Lo mismo vale para `/api/gmail/conectar`,
+ * que es literalmente lo que hay detrás de un botón grande.
+ *
+ * Se declaran por NOMBRE y no como el prefijo `/api/gmail`: la 17.2 va a
+ * sumar endpoints de barrido bajo esa misma rama que SÍ tienen que contestar
+ * 401 en JSON -los llama un `fetch`, no una navegación-, y una regla por
+ * prefijo se los llevaría puestos. Mismo criterio con el que
+ * `RUTA_CRON_ALERTAS_MEDICACION` no hizo pública toda la rama `/api/push/`.
+ *
+ * `tests/unit/rutas.test.ts` cubre las dos.
+ */
+export const RUTA_GMAIL_CONECTAR = "/api/gmail/conectar"
+export const RUTA_GMAIL_CALLBACK = "/api/gmail/callback"
+
+/**
  * Rutas públicas: se sirven con o sin sesión. Cada entrada cubre la ruta
  * exacta y sus subrutas (`/recuperar` cubre `/recuperar/confirmar`), salvo
  * `/` que se compara exacta —si no, cubriría toda la aplicación—.
@@ -191,6 +223,8 @@ export const RUTAS_PUBLICAS = [
   RUTA_CRON_RECORDATORIOS,
   RUTA_CRON_ALERTAS_MEDICACION,
   RUTA_COMPARTIR,
+  RUTA_GMAIL_CONECTAR,
+  RUTA_GMAIL_CALLBACK,
 ] as const
 
 /**

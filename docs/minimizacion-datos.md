@@ -443,7 +443,101 @@ servicio externo y que no se guarda.
 
 ---
 
-## 10. Referencias
+## 10. Conexión de Gmail (Sprint 17, tarea 17.1)
+
+Conectar la casilla de correo de la persona es, con diferencia, el permiso más
+grande que esta aplicación pide. Este apartado declara qué se guarda, qué no y
+cuál es el compromiso de lectura — con la misma disciplina de lista blanca que
+el resto del documento, aplicada esta vez a una CREDENCIAL y no a un contexto.
+
+### 10.1 Qué se guarda, exactamente
+
+Una fila en `public.gmail_connections`, una por CUENTA (no por perfil):
+
+| Dato | Por qué está |
+|---|---|
+| `user_id` | De quién es la casilla. Es la cuenta que inició sesión, no el perfil que esté mirando. |
+| `email` | La dirección conectada. Se muestra en pantalla para que la persona pueda confirmar **cuál** de sus cuentas de Google conectó — con dos cuentas en el teléfono es fácil consentir con la que no era. |
+| `status`, `connected_at`, `last_ok_at`, `expired_at` | El estado de la conexión: si el permiso sigue vivo, desde cuándo y cuándo se venció. Es lo que hace que la pantalla pueda decir "se venció, volvé a conectar" en vez de "no tenés nada". |
+| `label_id`, `label_name` | La etiqueta `historialmedico` de esa casilla. Es el `labelIds` con el que la tarea 17.2 lee **solo** esos mensajes. |
+| `granted_scopes` | Diagnóstico: qué permisos concedió Google de verdad. No se le concede a `authenticated`. |
+| `token_secret_id` | Puntero a la fila del Vault. **No es el token.** Tampoco se le concede a `authenticated`. |
+
+Y el **refresh token**, cifrado, en `vault.secrets` bajo el nombre
+determinístico `gmail_refresh_token_<user_id>`. Nunca en una columna de
+`public`, nunca en texto plano, nunca al alcance de `anon` ni de
+`authenticated` (el esquema `vault` no les concede nada). El razonamiento
+completo de por qué Vault y no cifrado propio está en el encabezado de
+`supabase/migrations/20260818130000_gmail_conexiones.sql`.
+
+### 10.2 Qué NO se guarda
+
+- **Ningún contenido de correo.** En esta tarea la aplicación no lee ni un
+  mensaje: conecta, crea la etiqueta y guarda el estado. Nada más.
+- **Ningún access token.** Duran una hora y se piden frescos cada vez
+  (`lib/gmail/conexiones-admin.ts`); lo más que existe es una copia en memoria
+  del proceso, que muere con la instancia.
+- **Ningún historial de conexiones.** Reconectar es un `UPSERT` sobre la misma
+  fila, no una fila más: guardar el rastro de las direcciones que la persona
+  ya desconectó sería retener exactamente lo que pidió sacar.
+- **El `client_secret` de la aplicación** no toca la base ni el navegador: vive
+  solo en `GOOGLE_CLIENT_SECRET` del entorno de servidor.
+
+### 10.3 El compromiso de lectura limitada
+
+Los tres permisos que se piden (`gmail.readonly`, `gmail.labels`,
+`gmail.settings.basic`) se piden **juntos en la primera conexión**, para no
+tener que mandar a la persona a una segunda pantalla de consentimiento en la
+17.2. De los tres, el único amplio es `gmail.readonly`: técnicamente habilita
+a leer toda la casilla, y hay que decirlo con esas palabras porque es la
+verdad. Google **no ofrece un scope acotado a una etiqueta** — `gmail.metadata`
+no deja ver ni el cuerpo ni los adjuntos, que es justo lo que hay que importar.
+
+Entonces la limitación no la impone Google: **la impone el código, y queda
+declarada acá**. El compromiso es que toda lectura de mensajes de la tarea
+17.2 se hace con `labelIds=<label_id de esta fila>`, nunca sobre la casilla
+entera y nunca con una `q` de búsqueda libre. La pantalla de conexión
+(`components/gmail/panel-conexion-gmail.tsx`) se lo dice a la persona antes de
+que toque el botón, con esas mismas palabras: *"solo los correos de la etiqueta
+historialmedico… nada más de tu casilla"*.
+
+### 10.4 Cortar el acceso, y que cortar signifique cortar
+
+"Desconectar" hace las tres cosas que tiene que hacer, en este orden
+(`app/(app)/(con-nav)/perfil/gmail/actions.ts`):
+
+1. **Revoca el permiso contra Google** (`oauth2.googleapis.com/revoke`). Es lo
+   único que de verdad apaga el acceso del lado de Google.
+2. **Borra la fila** de `gmail_connections`.
+3. **Borra el secreto del Vault**, por nombre — y un trigger `AFTER DELETE`
+   sobre la tabla lo vuelve a hacer por si la fila desapareciera por otra vía.
+
+Si el paso 1 falla (Google caído, o el permiso ya sacado desde la cuenta de
+Google), los pasos 2 y 3 se hacen igual **y la pantalla lo dice**, con el
+enlace a los permisos de la cuenta de Google para terminarlo a mano. Dejar la
+conexión puesta "por las dudas" sería mostrarle a la persona una casilla
+conectada que ella ya pidió cortar.
+
+La **baja de la cuenta** (derecho de supresión, Ley 25.326 arts. 14-16) se
+lleva las dos cosas: la fila por el `ON DELETE CASCADE` del `user_id` y el
+token cifrado por el mismo trigger. Sin ese trigger, el secreto sobreviviría a
+la supresión — el BLOQUE 23 de `scripts/test-rls.sql` lo prueba borrando una
+cuenta y verificando que el Vault queda vacío.
+
+### 10.5 Cómo se verifica
+
+`scripts/test-rls.sql`, BLOQUE 23 (38 casos). Prueba las cuatro capas por
+separado, porque si mañana se cae una hay que saber cuál: RLS por fila
+(el dueño no ve la conexión de otra cuenta), privilegio por columna (ni en su
+propia fila puede leer `token_secret_id` ni `granted_scopes`, y un `select *`
+—lo que manda PostgREST sin lista de columnas— falla entero con 42501), el
+esquema `vault` inalcanzable para `anon` y `authenticated`, y las cinco
+funciones `SECURITY DEFINER` ejecutables solo por `service_role`. Más el ciclo
+de vida completo: guardar, vencer, reconectar, desconectar y la baja de cuenta.
+
+---
+
+## 11. Referencias
 
 - `lib/ficha/armado.ts` — el tipo `ContextoClinico` (la lista blanca) y el armado puro.
 - `lib/ficha/contexto.ts` — la lectura de la base, con los `select` acotados.
@@ -452,3 +546,6 @@ servicio externo y que no se guarda.
 - `docs/modelo-sos.md` §4.2 — por qué la ficha SOS sí muestra el DNI.
 - `supabase/migrations/20260812200000_schema_inicial.sql` §4.1 — los `COMMENT ON COLUMN` que anticiparon esta tarea.
 - `lib/gemini/schemas.ts` (`SCHEMA_ANALISIS_MENSAJE_TURNO`), `lib/gemini/prompt-turno.ts`, `lib/turnos/construir-propuestas.ts`, `app/api/turnos/analizar-mensaje/route.ts` — la función de la tarea 16.4 descripta en el §9.
+- `supabase/migrations/20260818130000_gmail_conexiones.sql` — la tabla, el Vault y las cinco funciones del §10; su encabezado tiene el porqué de cada decisión de guardado.
+- `lib/gmail/google-api.ts` (scopes y etiqueta), `lib/gmail/conexiones-admin.ts` (el único lugar por el que pasa el refresh token), `app/api/gmail/callback/route.ts`, `app/(app)/(con-nav)/perfil/gmail/` — el circuito del §10.
+- `scripts/test-rls.sql` BLOQUE 23 — las cuatro capas que separan el token de una sesión del navegador (§10.5).

@@ -71,6 +71,17 @@ delete from public.storage_purge_queue where source_table in ('documents', 'insu
 -- trigger evitar_perfil_gestionado_huerfano() previene borrar el administrador
 -- de un perfil gestionado. Se deja para que `npx supabase db reset` lo limpie.
 
+-- El BLOQUE 23 (Sprint 17) crea dos cuentas con conexión de Gmail. Se barren
+-- acá también, por si una corrida se cortó antes de su limpieza: sin esto, el
+-- `insert into auth.users` del bloque fallaría por clave duplicada y el
+-- `guardar_conexion_gmail` encontraría el secreto viejo en el Vault.
+delete from auth.users where id in (
+    'f2200aaa-1111-4111-8111-111111111111',
+    'f2200bbb-2222-4222-8222-222222222222');
+delete from vault.secrets where name in (
+    'gmail_refresh_token_f2200aaa-1111-4111-8111-111111111111',
+    'gmail_refresh_token_f2200bbb-2222-4222-8222-222222222222');
+
 -- El BLOQUE 11 genera tomas en una fecha sintética lejana (2099-06-15) también
 -- para las medicaciones del seed, que no cuelgan de los perfiles de prueba. Las
 -- borra al terminar; esto cubre el caso de una corrida que se cayó a la mitad.
@@ -6061,6 +6072,598 @@ commit;
 
 
 -- =============================================================================
+-- BLOQUE 23 — Conexión de Gmail y el refresh token (Sprint 17, tarea 17.1)
+-- -----------------------------------------------------------------------------
+-- `gmail_connections` guarda el ESTADO de la casilla conectada de una CUENTA;
+-- el `refresh_token` -la credencial de verdad, con la que se lee el correo de
+-- una persona hasta que ella revoque el permiso- vive CIFRADO en el Vault de
+-- Supabase (`20260818130000_gmail_conexiones.sql`). Este bloque prueba las
+-- cuatro capas que lo separan de una sesión del navegador, cada una por
+-- separado, porque si mañana se cae una hay que saber CUÁL:
+--
+--   1. **RLS por fila** — el dueño ve su conexión y NO la de otra cuenta.
+--   2. **Privilegio por COLUMNA** — ni siquiera dentro de su propia fila puede
+--      leer `token_secret_id` ni `granted_scopes`: no están en el GRANT. Un
+--      `select *` -que es lo que manda PostgREST si nadie nombra las columnas-
+--      no devuelve menos columnas: falla entero con 42501.
+--   3. **El esquema `vault` es inalcanzable** para `anon` y `authenticated`.
+--      Este es EL caso del bloque: aunque las tres capas de arriba fallaran a
+--      la vez, en `public` no hay ningún token que leer.
+--   4. **Las funciones SECURITY DEFINER** que tocan el Vault solo las puede
+--      ejecutar `service_role`.
+--
+-- Y además el ciclo de vida completo desde `service_role`: guardar, leer,
+-- vencer, reconectar, desconectar — y que la BAJA DE LA CUENTA se lleve el
+-- token cifrado, que es lo que hace que el derecho de supresión de la Ley
+-- 25.326 alcance también al Vault.
+-- =============================================================================
+\echo '### BLOQUE 23 — conexión de Gmail: el token no existe para el navegador'
+
+-- Dos cuentas: Elena conecta su Gmail, Rubén también (para probar el cruce).
+insert into auth.users (id, email, instance_id, aud, role, encrypted_password,
+                        email_confirmed_at, created_at, updated_at)
+values
+    ('f2200aaa-1111-4111-8111-111111111111', 'elena.gmail@ejemplo.com.ar',
+     '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+     'x', now(), now(), now()),
+    ('f2200bbb-2222-4222-8222-222222222222', 'ruben.gmail@ejemplo.com.ar',
+     '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+     'x', now(), now(), now());
+
+-- Las dos conexiones se crean por el ÚNICO camino que existe: la función
+-- SECURITY DEFINER, corriendo como service_role (que es como la llama
+-- app/api/gmail/callback/route.ts).
+begin;
+set local role service_role;
+
+do $$
+declare v text;
+begin
+    perform public.guardar_conexion_gmail(
+        'f2200aaa-1111-4111-8111-111111111111'::uuid,
+        'elena@gmail.com', 'ELENA-REFRESH-TOKEN', 'Label_100', 'historialmedico',
+        'https://www.googleapis.com/auth/gmail.readonly');
+    perform public.guardar_conexion_gmail(
+        'f2200bbb-2222-4222-8222-222222222222'::uuid,
+        'ruben@gmail.com', 'RUBEN-REFRESH-TOKEN', 'Label_200', 'historialmedico',
+        'https://www.googleapis.com/auth/gmail.readonly');
+
+    select count(*)::text into v from public.gmail_connections
+     where user_id in ('f2200aaa-1111-4111-8111-111111111111',
+                       'f2200bbb-2222-4222-8222-222222222222');
+    perform pruebas_rls.registrar('23. Gmail',
+        'service_role guarda las dos conexiones', '2', v);
+end $$;
+
+-- El token quedó en el Vault, cifrado, y NO en ninguna columna de public.
+do $$
+declare v text;
+begin
+    select public.leer_refresh_token_gmail('f2200aaa-1111-4111-8111-111111111111'::uuid) into v;
+    perform pruebas_rls.registrar('23. Gmail',
+        'service_role descifra el refresh token de Elena', 'ELENA-REFRESH-TOKEN',
+        coalesce(v, '(nulo)'));
+end $$;
+
+do $$
+declare v text;
+begin
+    -- Barrido de TODAS las columnas de texto de la tabla buscando el token.
+    -- Si alguna vez alguien agrega una columna `refresh_token text`, este caso
+    -- se cae y hay que mirar por qué.
+    select case when exists (
+        select 1 from public.gmail_connections c
+         where c::text like '%ELENA-REFRESH-TOKEN%'
+    ) then 'aparece en la tabla' else 'no aparece en la tabla' end into v;
+    perform pruebas_rls.registrar('23. Gmail',
+        'El refresh token NO está en ninguna columna de gmail_connections',
+        'no aparece en la tabla', v);
+end $$;
+
+commit;
+
+
+-- ── CAPA 1 y 2: la sesión de Elena
+begin;
+select set_config('request.jwt.claims',
+    '{"sub":"f2200aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.gmail_connections;
+        v := c::text || ' fila(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena ve UNA conexión: la suya (la de Rubén no existe para ella)',
+        '1 fila(s)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(max(email), '(ninguna)') into v from public.gmail_connections;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Y la que ve es la suya', 'elena@gmail.com', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.gmail_connections
+         where user_id = 'f2200bbb-2222-4222-8222-222222222222';
+        v := c::text || ' fila(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena pide explícitamente la conexión de Rubén', '0 fila(s)', v);
+end $$;
+
+-- CAPA 2: el privilegio por columna. Es lo que hace que ni en su propia fila
+-- pueda ver el puntero al Vault.
+do $$
+declare v text; t uuid;
+begin
+    begin
+        select token_secret_id into t from public.gmail_connections
+         where user_id = 'f2200aaa-1111-4111-8111-111111111111';
+        v := 'leído: ' || coalesce(t::text, 'nulo');
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena lee token_secret_id DE SU PROPIA FILA', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; s text;
+begin
+    begin
+        select granted_scopes into s from public.gmail_connections
+         where user_id = 'f2200aaa-1111-4111-8111-111111111111';
+        v := 'leído: ' || coalesce(s, 'nulo');
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena lee granted_scopes de su propia fila', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    -- `select *` es exactamente lo que manda PostgREST cuando nadie nombra las
+    -- columnas: tiene que FALLAR, no devolver menos columnas.
+    begin
+        execute 'select count(*) from (select * from public.gmail_connections) x' into c;
+        v := 'devolvió ' || c::text || ' fila(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena hace select * (lo que manda PostgREST sin lista de columnas)',
+        'denegado (42501)', v);
+end $$;
+
+-- Escrituras: las cuatro rechazadas, cada una por su lado.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.gmail_connections (user_id, email)
+        values ('f2200aaa-1111-4111-8111-111111111111', 'trucha@gmail.com');
+        v := 'insertada';
+    exception when insufficient_privilege then v := 'rechazada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena inserta una conexión a mano', 'rechazada (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        update public.gmail_connections set email = 'otra@gmail.com'
+         where user_id = 'f2200aaa-1111-4111-8111-111111111111';
+        v := 'actualizada';
+    exception when insufficient_privilege then v := 'rechazada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena edita su propia conexión', 'rechazada (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        delete from public.gmail_connections
+         where user_id = 'f2200aaa-1111-4111-8111-111111111111';
+        v := 'borrada';
+    exception when insufficient_privilege then v := 'rechazada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena borra su conexión sin pasar por la desconexión',
+        'rechazada (42501)', v);
+end $$;
+
+-- El centinela de siempre: RLS no cubre TRUNCATE, el revoke sí.
+do $$
+declare v text;
+begin
+    begin
+        execute 'truncate table public.gmail_connections';
+        v := 'vaciada';
+    exception when insufficient_privilege then v := 'rechazada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena hace TRUNCATE de la tabla de conexiones', 'rechazada (42501)', v);
+end $$;
+
+-- CAPA 3: el Vault. ESTE es el caso del bloque.
+do $$
+declare v text; c integer;
+begin
+    begin
+        execute 'select count(*) from vault.decrypted_secrets' into c;
+        v := 'leyó ' || c::text || ' secreto(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when invalid_schema_name     then v := 'denegado (3F000)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena lee vault.decrypted_secrets (donde vive el token descifrado)',
+        'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        execute 'select count(*) from vault.secrets' into c;
+        v := 'leyó ' || c::text || ' secreto(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when invalid_schema_name     then v := 'denegado (3F000)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena lee vault.secrets (donde vive el token cifrado)',
+        'denegado (42501)', v);
+end $$;
+
+-- CAPA 4: las funciones. Ninguna es ejecutable desde el navegador.
+do $$
+declare v text; t text;
+begin
+    begin
+        select public.leer_refresh_token_gmail('f2200aaa-1111-4111-8111-111111111111'::uuid) into t;
+        v := 'ejecutada: ' || coalesce(t, 'nulo');
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena ejecuta leer_refresh_token_gmail SOBRE SÍ MISMA',
+        'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text; t text;
+begin
+    begin
+        select public.leer_refresh_token_gmail('f2200bbb-2222-4222-8222-222222222222'::uuid) into t;
+        v := 'ejecutada: ' || coalesce(t, 'nulo');
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena ejecuta leer_refresh_token_gmail sobre la cuenta de Rubén',
+        'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.guardar_conexion_gmail(
+            'f2200aaa-1111-4111-8111-111111111111'::uuid,
+            'trucha@gmail.com', 'TOKEN-INVENTADO', 'Label_X', 'historialmedico', null);
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena ejecuta guardar_conexion_gmail', 'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.borrar_conexion_gmail('f2200bbb-2222-4222-8222-222222222222'::uuid);
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena ejecuta borrar_conexion_gmail sobre la cuenta de Rubén',
+        'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.marcar_conexion_gmail_vencida('f2200bbb-2222-4222-8222-222222222222'::uuid);
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena ejecuta marcar_conexion_gmail_vencida', 'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.marcar_conexion_gmail_activa('f2200aaa-1111-4111-8111-111111111111'::uuid);
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena ejecuta marcar_conexion_gmail_activa', 'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.gmail_conexion_borrar_secreto();
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'denegada (' || sqlstate || ')';
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'Elena ejecuta la función del trigger que borra secretos del Vault',
+        'denegada (42501)', v);
+end $$;
+
+-- `commit` y no `rollback`: los casos registrados viven en
+-- `pruebas_rls.resultado`, que es una tabla como cualquier otra — un rollback
+-- acá se llevaría puestos los resultados del bloque junto con los intentos
+-- fallidos. Y no hay nada que deshacer: las cuatro escrituras de arriba fueron
+-- rechazadas, así que esta transacción no cambió una sola fila.
+commit;
+
+
+-- ── Sin sesión: anon no ve nada de nada
+begin;
+set local role anon;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.gmail_connections;
+        v := c::text || ' fila(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'anon lee las conexiones de Gmail', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        execute 'select count(*) from vault.decrypted_secrets' into c;
+        v := 'leyó ' || c::text || ' secreto(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when invalid_schema_name     then v := 'denegado (3F000)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('23. Gmail',
+        'anon lee vault.decrypted_secrets', 'denegado (42501)', v);
+end $$;
+
+commit;
+
+
+-- ── El ciclo de vida, como lo corre la aplicación (service_role)
+begin;
+set local role service_role;
+
+do $$
+declare v text;
+begin
+    perform public.marcar_conexion_gmail_vencida('f2200aaa-1111-4111-8111-111111111111'::uuid);
+    select status || '/' || case when expired_at is null then 'sin fecha' else 'con fecha' end
+      into v from public.gmail_connections
+     where user_id = 'f2200aaa-1111-4111-8111-111111111111';
+    perform pruebas_rls.registrar('23. Gmail',
+        'invalid_grant deja la conexión vencida CON fecha (y no la borra)',
+        'vencida/con fecha', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    -- Reconectar es un UPSERT sobre la misma fila, con token nuevo.
+    perform public.guardar_conexion_gmail(
+        'f2200aaa-1111-4111-8111-111111111111'::uuid,
+        'elena@gmail.com', 'ELENA-TOKEN-NUEVO', 'Label_100', 'historialmedico', null);
+    select status || '/' || case when expired_at is null then 'sin fecha' else 'con fecha' end
+      into v from public.gmail_connections
+     where user_id = 'f2200aaa-1111-4111-8111-111111111111';
+    perform pruebas_rls.registrar('23. Gmail',
+        'Reconectar revive la conexión y limpia la fecha de vencimiento',
+        'conectada/sin fecha', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    select count(*) into c from public.gmail_connections
+     where user_id = 'f2200aaa-1111-4111-8111-111111111111';
+    v := c::text || ' fila';
+    perform pruebas_rls.registrar('23. Gmail',
+        'Y no crea una fila más: una cuenta, una casilla', '1 fila', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select public.leer_refresh_token_gmail('f2200aaa-1111-4111-8111-111111111111'::uuid) into v;
+    perform pruebas_rls.registrar('23. Gmail',
+        'El token viejo quedó pisado por el nuevo', 'ELENA-TOKEN-NUEVO',
+        coalesce(v, '(nulo)'));
+end $$;
+
+-- Desconectar: se lleva la fila Y el secreto.
+do $$
+declare v text; c integer;
+begin
+    perform public.borrar_conexion_gmail('f2200aaa-1111-4111-8111-111111111111'::uuid);
+    select count(*) into c from public.gmail_connections
+     where user_id = 'f2200aaa-1111-4111-8111-111111111111';
+    v := c::text || ' fila(s)';
+    perform pruebas_rls.registrar('23. Gmail',
+        'Desconectar borra la fila de conexión', '0 fila(s)', v);
+end $$;
+
+commit;
+
+-- El secreto del Vault se mira como postgres: service_role no es quien manda
+-- acá y el punto es verificar que NO QUEDÓ NADA, no quién puede verlo.
+do $$
+declare v text; c integer;
+begin
+    select count(*) into c from vault.secrets
+     where name = 'gmail_refresh_token_f2200aaa-1111-4111-8111-111111111111';
+    v := c::text || ' secreto(s)';
+    perform pruebas_rls.registrar('23. Gmail',
+        'Desconectar borra TAMBIÉN el token cifrado del Vault', '0 secreto(s)', v);
+end $$;
+
+-- La baja de la cuenta (derecho de supresión, Ley 25.326 arts. 14-16) tiene
+-- que llevarse las dos cosas: la fila por el CASCADE y el secreto por el
+-- trigger. Rubén sigue conectado justamente para probar esto.
+do $$
+declare v text; c integer;
+begin
+    select count(*) into c from vault.secrets
+     where name = 'gmail_refresh_token_f2200bbb-2222-4222-8222-222222222222';
+    v := c::text || ' secreto(s)';
+    perform pruebas_rls.registrar('23. Gmail',
+        'Antes de la baja, el token de Rubén está en el Vault', '1 secreto(s)', v);
+end $$;
+
+delete from auth.users where id = 'f2200bbb-2222-4222-8222-222222222222';
+
+do $$
+declare v text; c integer;
+begin
+    select count(*) into c from public.gmail_connections
+     where user_id = 'f2200bbb-2222-4222-8222-222222222222';
+    v := c::text || ' fila(s)';
+    perform pruebas_rls.registrar('23. Gmail',
+        'Borrar la CUENTA borra su conexión (ON DELETE CASCADE)', '0 fila(s)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    select count(*) into c from vault.secrets
+     where name = 'gmail_refresh_token_f2200bbb-2222-4222-8222-222222222222';
+    v := c::text || ' secreto(s)';
+    perform pruebas_rls.registrar('23. Gmail',
+        'Y se lleva el token cifrado del Vault (el trigger AFTER DELETE)',
+        '0 secreto(s)', v);
+end $$;
+
+-- Las dos capas por separado, leídas del catálogo: que falte la política y que
+-- falte el privilegio son candados independientes.
+do $$
+declare v text;
+begin
+    select string_agg(cmd, ',' order by cmd) into v
+      from pg_policies
+     where schemaname = 'public' and tablename = 'gmail_connections';
+    perform pruebas_rls.registrar('23. Gmail',
+        'gmail_connections tiene política SOLO de SELECT', 'SELECT',
+        coalesce(v, '(ninguna)'));
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(distinct privilege_type, ',' order by privilege_type), '(ninguno)')
+      into v
+      from information_schema.table_privileges
+     where table_schema = 'public' and table_name = 'gmail_connections'
+       and grantee in ('anon', 'authenticated');
+    perform pruebas_rls.registrar('23. Gmail',
+        'anon/authenticated no tienen NINGÚN privilegio de tabla entera',
+        '(ninguno)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(distinct column_name, ',' order by column_name), '(ninguna)')
+      into v
+      from information_schema.column_privileges
+     where table_schema = 'public' and table_name = 'gmail_connections'
+       and grantee = 'authenticated';
+    perform pruebas_rls.registrar('23. Gmail',
+        'Las columnas concedidas a authenticated son exactamente las de estado',
+        'connected_at,email,expired_at,label_id,label_name,last_ok_at,status,user_id', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(p.proname, ',' order by p.proname), '(ninguna)') into v
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname like '%gmail%'
+       and has_function_privilege('authenticated', p.oid, 'EXECUTE');
+    perform pruebas_rls.registrar('23. Gmail',
+        'authenticated no puede ejecutar NINGUNA función de Gmail',
+        '(ninguna)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(p.proname, ',' order by p.proname), '(ninguna)') into v
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in ('guardar_conexion_gmail', 'leer_refresh_token_gmail',
+                         'borrar_conexion_gmail', 'marcar_conexion_gmail_vencida',
+                         'marcar_conexion_gmail_activa')
+       and has_function_privilege('service_role', p.oid, 'EXECUTE');
+    perform pruebas_rls.registrar('23. Gmail',
+        'service_role sí puede ejecutar las cinco',
+        'borrar_conexion_gmail,guardar_conexion_gmail,leer_refresh_token_gmail,marcar_conexion_gmail_activa,marcar_conexion_gmail_vencida',
+        v);
+end $$;
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
@@ -6160,6 +6763,20 @@ delete from auth.users       where id in (
     'f2100888-8888-4888-8888-888888888888',
     'f2100777-9999-4999-8999-999999999999',
     'f2100666-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+-- Cuentas del BLOQUE 23 (Sprint 17, tarea 17.1). La de Rubén ya se borró
+-- dentro del bloque -es parte de lo que prueba: que la baja de cuenta se lleve
+-- el token del Vault-, así que este delete solo alcanza a la de Elena. Va con
+-- `in (...)` igual, para que el bloque siga limpiando bien si algún día se
+-- interrumpe antes de esa baja. El CASCADE se lleva la fila de
+-- gmail_connections y el trigger AFTER DELETE se lleva el secreto del Vault;
+-- por las dudas -una fila borrada a mano, un secreto huérfano de una corrida
+-- interrumpida- se barren también los secretos por nombre.
+delete from auth.users where id in (
+    'f2200aaa-1111-4111-8111-111111111111',
+    'f2200bbb-2222-4222-8222-222222222222');
+delete from vault.secrets where name in (
+    'gmail_refresh_token_f2200aaa-1111-4111-8111-111111111111',
+    'gmail_refresh_token_f2200bbb-2222-4222-8222-222222222222');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 
 drop schema pruebas_rls cascade;

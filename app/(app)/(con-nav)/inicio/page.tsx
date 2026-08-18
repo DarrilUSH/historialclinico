@@ -58,6 +58,7 @@ import {
   HospitalIcon,
   ListChecksIcon,
   type LucideIcon,
+  MailIcon,
   PillIcon,
   StethoscopeIcon,
 } from "lucide-react"
@@ -173,7 +174,7 @@ export default async function PaginaInicio() {
           MercadoPago/bancos (3-4 tiles por fila con label corto)-, y ganan
           una fila entera contra la grilla de 2 columnas del Sprint 13 (6
           tiles: 2 filas de 3 en vez de 3 filas de 2). Con las dos cards del
-          Sprint 16 son 8 tiles: 3 filas, la última con 2. Los dos títulos que
+          Sprint 16 y la de Gmail del 17 son 9 tiles: 3 filas justas. Los dos títulos que
           no entraban así nomás son "Ficha para el médico" -que lleva un label
           corto SOLO en chica- y "Especialidades" -una sola palabra larga, que
           se resuelve con separación silábica: ver `TarjetaAcceso` más abajo-. */}
@@ -308,6 +309,27 @@ export default async function PaginaInicio() {
             descripcion="Editar datos vitales"
           />
         )}
+
+        {/*
+          Acceso a /perfil/gmail (Sprint 17, tarea 17.1). Es la ÚNICA card de
+          esta grilla que no habla del perfil activo: la casilla de correo es
+          de la CUENTA logueada y vale para todos los perfiles que administre
+          -mismo caso que las notificaciones push (nota ⑰ de la migración de
+          RLS) y que el modo de letra-. Por eso no lleva gate de permiso: no
+          hay un permiso sobre el perfil que decida si alguien puede conectar
+          SU propio correo. La pantalla de destino lo aclara con todas las
+          letras para que "viendo a Roberto" no haga pensar que se conecta el
+          Gmail de Roberto.
+
+          Va última a propósito: las ocho de arriba son el historial de la
+          persona que se está mirando, y esta es configuración de la cuenta.
+        */}
+        <TarjetaAcceso
+          href="/perfil/gmail"
+          Icono={MailIcon}
+          titulo="Tu Gmail"
+          descripcion="Traer turnos y estudios desde tu correo"
+        />
       </div>
 
       {/*

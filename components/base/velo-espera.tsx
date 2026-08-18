@@ -125,11 +125,41 @@ export function VeloEspera({
     return () => window.clearTimeout(id)
   }, [visible, retrasoMs])
 
+  /**
+   * Lo que de verdad decide si el velo está en pantalla: `montado` **y**
+   * `visible`, no `montado` a secas.
+   *
+   * ── EL VELO QUE NO SE IBA MÁS (encontrado en el Galaxy real, Sprint 17)
+   *
+   * El ajuste de estado durante el render de arriba apaga `montado` cuando
+   * `visible` pasa a `false`, y la limpieza del efecto cancela el temporizador.
+   * Pero las dos cosas ocurren en momentos distintos: el ajuste corre EN EL
+   * RENDER y la limpieza del efecto es PASIVA -React la agenda para después
+   * del commit-. Entre esas dos hay una ventana, y si el temporizador de
+   * `retrasoMs` dispara justo ahí, ejecuta `setMontado(true)` cuando `visible`
+   * ya vale `false`. A partir de ese momento `visible` y `visiblePrevio` son
+   * iguales para siempre, el ajuste del render no vuelve a correr, y el velo
+   * queda montado **de forma permanente**, con toda la página marcada `inert`
+   * detrás. La pantalla queda muerta.
+   *
+   * No es teórico: pasó al desconectar Gmail en el teléfono
+   * (`app/(app)/(con-nav)/perfil/gmail/`), donde la operación termina
+   * alrededor de los 450 ms del retraso —justo en la ventana— porque la Server
+   * Action revalida la ruta y el `isPending` de `useActionState` se apaga
+   * mientras el temporizador está por disparar. Probado en
+   * `tests/unit/base/velo-espera.test.tsx`.
+   *
+   * La condición derivada es la defensa correcta: `visible` es la fuente de
+   * verdad -viene de quien usa el componente- y `montado` es solo "ya pasó el
+   * retraso". Un `montado` viejo no puede pintar nada por su cuenta.
+   */
+  const mostrando = montado && visible
+
   // Bloqueo de teclado detrás del velo (ver "Accesibilidad" en el
-  // encabezado). Corre en un efecto aparte del de arriba porque depende de
-  // `montado` -el DOM del portal ya existe-, no de `visible`.
+  // encabezado). Corre en un efecto aparte del de arriba porque depende de que
+  // el DOM del portal ya exista, no solo de `visible`.
   React.useEffect(() => {
-    if (!montado || typeof document === "undefined") return
+    if (!mostrando || typeof document === "undefined") return
 
     const cuerpo = document.body
     const propio = contenedorRef.current
@@ -149,9 +179,9 @@ export function VeloEspera({
       for (const hijo of marcados) hijo.removeAttribute("inert")
       cuerpo.style.overflow = overflowPrevio
     }
-  }, [montado])
+  }, [mostrando])
 
-  if (!montado || typeof document === "undefined") return null
+  if (!mostrando || typeof document === "undefined") return null
 
   return createPortal(
     <div
