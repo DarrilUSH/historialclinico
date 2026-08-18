@@ -54,7 +54,7 @@ export default async function PaginaEditarMedico({
   const { data: medico } = await supabase
     .from("doctors")
     .select(
-      "id, full_name, specialty, license_number, institution, phone, address, city, province, latitude, longitude, notes",
+      "id, full_name, specialties, license_number, institution, phone, address, city, province, latitude, longitude, notes",
     )
     .eq("id", id)
     .eq("profile_id", activo.perfil.id)
@@ -66,7 +66,7 @@ export default async function PaginaEditarMedico({
 
   const valoresIniciales: Partial<ValoresMedico> = {
     nombre: medico.full_name,
-    especialidad: medico.specialty ?? "",
+    especialidades: medico.specialties,
     matricula: medico.license_number ?? "",
     institucion: medico.institution ?? "",
     telefono: medico.phone ?? "",

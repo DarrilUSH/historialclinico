@@ -34,12 +34,26 @@
  * `lugarDireccion`: se completan solo si el campo está vacío en el momento de
  * la elección, cada uno de forma independiente -a diferencia de
  * latitud/longitud, que se completan JUNTAS o ninguna-.
+ *
+ * ## Varias especialidades: se autocompleta con la PRINCIPAL (Sprint 16, tarea 16.2)
+ *
+ * `doctors.specialties` puede tener más de un valor (médico con "Clínica
+ * Médica" y "Cardiología" cargadas, por ejemplo). `especialidad` en el turno
+ * es SIEMPRE una sola (`appointments.specialty`, el turno es para una
+ * especialidad concreta), así que `especialidad` se completa con
+ * `specialties[0]` -la PRIMERA, que `components/medicos/formulario-medico.tsx`
+ * ya trata como la "principal" al armar los chips-. Se eligió la primera en
+ * vez de abrir un paso extra para que la persona elija cuál de varias: el
+ * campo sigue siendo texto libre editable, así que si la principal no es la
+ * que corresponde a este turno, corregirla es tan simple como borrar y
+ * tipear -mismo criterio de "ayuda, no imposición" que el resto de este
+ * archivo-.
  */
 
 export interface MedicoParaAutocompletar {
   id: string
   full_name: string
-  specialty: string | null
+  specialties: string[]
   institution: string | null
   address: string | null
   city: string | null
@@ -79,8 +93,8 @@ export function camposAutocompletadosDesdeMedico(
     cambios.medico = doctor.full_name
   }
 
-  if (doctor.specialty && estaVacio(actuales.especialidad)) {
-    cambios.especialidad = doctor.specialty
+  if (doctor.specialties.length > 0 && estaVacio(actuales.especialidad)) {
+    cambios.especialidad = doctor.specialties[0]
   }
 
   if (doctor.institution && estaVacio(actuales.lugarNombre)) {

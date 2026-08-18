@@ -259,9 +259,11 @@ insert into public.family_permissions (
 -- 4. MÉDICOS (directorio de profesionales)
 -- =============================================================================
 
--- Cardiólogo
+-- Clínica médica Y cardióloga (Sprint 16, tarea 16.2: caso real del usuario
+-- -"mi médica real es clínica y cardióloga"-, sembrado acá para poder probar
+-- el directorio con multi-especialidad sin cargar nada a mano).
 insert into public.doctors (
-    id, profile_id, full_name, specialty, license_number,
+    id, profile_id, full_name, specialties, license_number,
     institution, phone, address, city, province,
     latitude, longitude, is_active,
     created_by_profile_id,
@@ -270,7 +272,7 @@ insert into public.doctors (
     '990e8400-e29b-41d4-a716-446655440001'::uuid,
     '660e8400-e29b-41d4-a716-446655440003'::uuid,
     'Dr. Carlos Rodríguez',
-    'Cardiología',
+    array['Clínica Médica', 'Cardiología'],
     'MN 45678',
     'Clínica Ushuaia',
     '+54 2901 234000',
@@ -284,9 +286,9 @@ insert into public.doctors (
     now(), now()
 ) on conflict (id) do nothing;
 
--- Endocrinólogo
+-- Endocrinóloga
 insert into public.doctors (
-    id, profile_id, full_name, specialty, license_number,
+    id, profile_id, full_name, specialties, license_number,
     institution, phone, address, city, province,
     latitude, longitude, is_active,
     created_by_profile_id,
@@ -295,7 +297,7 @@ insert into public.doctors (
     '990e8400-e29b-41d4-a716-446655440002'::uuid,
     '660e8400-e29b-41d4-a716-446655440003'::uuid,
     'Dra. Marcela Torres',
-    'Endocrinología',
+    array['Endocrinología'],
     'MN 56789',
     'Consultorio Torres',
     '+54 2901 234111',

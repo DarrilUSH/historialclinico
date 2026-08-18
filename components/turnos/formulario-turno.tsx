@@ -67,6 +67,17 @@
  * `/turnos/nuevo` con la última ciudad/provincia que el perfil haya usado
  * -`lib/ubicacion/ultima-usada.ts`-, nunca con un valor fijo: son una
  * sugerencia editable, no una imposición.
+ *
+ * ## Especialidad: autocompletar con el catálogo (Sprint 16, tarea 16.2)
+ *
+ * "Especialidad" usa `CampoAutocompletar` en vez de `CampoTexto`: sugiere del
+ * catálogo curado (`lib/especialidades/catalogo.ts`) a medida que se tipea,
+ * insensible a tildes/mayúsculas ("cardio" encuentra "Cardiología"), pero
+ * sigue siendo texto libre -si nada matchea, lo tipeado vale igual, mismo
+ * criterio que ya declaraba este campo antes de la tarea-. Elegir un médico
+ * del directorio (más abajo) sigue completando este campo con SU
+ * especialidad principal si está vacío, sin pisar lo ya tecleado -sin
+ * cambios respecto de antes, ver `lib/turnos/autocompletar-medico.ts`-.
  */
 
 import * as React from "react"
@@ -80,6 +91,7 @@ import {
   type EstadoTurnoAccion,
 } from "@/app/(app)/(con-nav)/turnos/actions"
 import { Alerta } from "@/components/base/alerta"
+import { CampoAutocompletar } from "@/components/base/campo-autocompletar"
 import { Boton } from "@/components/base/boton"
 import { CampoNumero } from "@/components/base/campo-numero"
 import { CampoTexto } from "@/components/base/campo-texto"
@@ -92,6 +104,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { CATALOGO_ESPECIALIDADES } from "@/lib/especialidades/catalogo"
 import {
   camposAutocompletadosDesdeMedico,
   type MedicoParaAutocompletar,
@@ -249,14 +262,15 @@ export function FormularioTurno({
           medicos.length > 0 && "chica:grid chica:grid-cols-2 chica:items-start chica:gap-3",
         )}
       >
-        <CampoTexto
+        <CampoAutocompletar
           id="especialidad"
           label="Especialidad"
           required
           maxLength={100}
           value={especialidad}
-          onChange={(evento) => setEspecialidad(evento.target.value)}
-          ayuda="Ej: Cardiología, Clínica médica, Oftalmología."
+          onChange={setEspecialidad}
+          opciones={CATALOGO_ESPECIALIDADES}
+          ayuda="Empezá a escribir para ver sugerencias (ej: Cardiología, Clínica Médica, Oftalmología)."
         />
 
         {medicos.length > 0 && (
@@ -278,7 +292,7 @@ export function FormularioTurno({
                 {medicos.map((doctor) => (
                   <SelectItem key={doctor.id} value={doctor.id}>
                     {doctor.full_name}
-                    {doctor.specialty ? ` — ${doctor.specialty}` : ""}
+                    {doctor.specialties.length > 0 ? ` — ${doctor.specialties.join(" · ")}` : ""}
                   </SelectItem>
                 ))}
               </SelectContent>

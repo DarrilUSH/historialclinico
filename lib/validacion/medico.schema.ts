@@ -38,15 +38,37 @@
  * de `PROVINCIAS_ARGENTINAS`. El `CHECK` `doctors_province_valida`
  * (`supabase/migrations/20260817231000_ciudad_provincia_direcciones.sql`) es
  * la misma lista copiada en el borde de la base.
+ *
+ * ## Especialidades: array, texto libre, sin catálogo cerrado (Sprint 16, tarea 16.2)
+ *
+ * `especialidades` reemplaza al viejo `especialidad` (un solo valor): un
+ * médico puede tener cero o más -`components/medicos/formulario-medico.tsx`
+ * las carga como chips, mismo patrón que `alergias`/`condicionesCronicas`/
+ * `medicacionCritica` de `lib/validacion/sos.schema.ts`-. La validación de
+ * acá es una COPIA local de `listaSos` (trim, descarta vacíos, deduplica sin
+ * distinguir mayúsculas con `toLocaleLowerCase("es-AR")`, tope de largo por
+ * ítem y de cantidad total), mismo criterio documentado en
+ * `sos.schema.ts`: "cada schema de `lib/validacion/` es dueño de su propia
+ * copia" en vez de importar cross-dominio. `lib/especialidades/catalogo.ts`
+ * SOLO alimenta el autocompletar (`components/base/campo-autocompletar.tsx`)
+ * -nunca hay un `z.enum()` ni un `CHECK` que la limite-: una especialidad
+ * rara no puede bloquear el alta de un médico. El `CHECK`
+ * `doctors_specialties_sin_vacios` y el tope de cantidad
+ * `doctors_specialties_cantidad_razonable`
+ * (`supabase/migrations/20260818090000_especialidades_multiples.sql`) son la
+ * red de la base para lo que este schema ya garantiza del lado de la app.
  */
 
 import { z } from "zod"
 
+import { MAX_ESPECIALIDADES_POR_MEDICO, MAX_LARGO_ESPECIALIDAD } from "@/lib/especialidades/catalogo"
 import { PROVINCIAS_ARGENTINAS } from "@/lib/ubicacion/provincias"
 
 const MENSAJE_COORDENADAS_INCOMPLETAS =
   "Cargá las dos coordenadas (latitud y longitud) o dejá las dos en blanco."
 const MENSAJE_PROVINCIA_INVALIDA = "Elegí una provincia de la lista."
+const MENSAJE_ESPECIALIDAD_LARGA = `Cada especialidad puede tener hasta ${MAX_LARGO_ESPECIALIDAD} caracteres.`
+const MENSAJE_DEMASIADAS_ESPECIALIDADES = `No se pueden cargar más de ${MAX_ESPECIALIDADES_POR_MEDICO} especialidades para un mismo médico.`
 
 /** Acepta coma o punto decimal (mismo criterio que `campo-numero.tsx#decimal`). Devuelve `null` si no es un número válido. */
 function parsearDecimal(valor: string): number | null {
@@ -72,6 +94,36 @@ const campoCoordenada = z
   .optional()
   .transform((valor) => (valor && valor.length > 0 ? valor : undefined))
 
+/**
+ * `especialidades`: copia local de `listaSos` (`lib/validacion/sos.schema.ts`)
+ * -trim, descarta vacíos, deduplica sin distinguir mayúsculas, topes de largo
+ * y de cantidad-. Ver el comentario de cabecera del archivo.
+ */
+const listaEspecialidades = z
+  .array(z.string({ message: "Cada especialidad debe ser texto." }))
+  .default([])
+  .transform((items) => {
+    const vistos = new Set<string>()
+    const resultado: string[] = []
+    for (const item of items) {
+      const limpio = item.trim()
+      if (limpio.length === 0) continue
+      const clave = limpio.toLocaleLowerCase("es-AR")
+      if (vistos.has(clave)) continue
+      vistos.add(clave)
+      resultado.push(limpio)
+    }
+    return resultado
+  })
+  .superRefine((items, ctx) => {
+    if (items.some((item) => item.length > MAX_LARGO_ESPECIALIDAD)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: MENSAJE_ESPECIALIDAD_LARGA })
+    }
+    if (items.length > MAX_ESPECIALIDADES_POR_MEDICO) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: MENSAJE_DEMASIADAS_ESPECIALIDADES })
+    }
+  })
+
 const schemaMedico = z
   .object({
     nombre: campoTexto(200, "El nombre es demasiado largo (máx. 200 caracteres).").min(
@@ -79,7 +131,7 @@ const schemaMedico = z
       "El nombre del médico es obligatorio.",
     ),
 
-    especialidad: campoTextoOpcional(150, "La especialidad es demasiado larga (máx. 150 caracteres)."),
+    especialidades: listaEspecialidades,
 
     matricula: campoTextoOpcional(100, "La matrícula es demasiado larga (máx. 100 caracteres)."),
 
@@ -152,7 +204,8 @@ const schemaMedico = z
 
 export interface DatosMedicoValidado {
   nombre: string
-  especialidad?: string
+  /** Ya trimeadas, sin vacías y sin duplicados. `[]` si no cargó ninguna. */
+  especialidades: string[]
   matricula?: string
   institucion?: string
   telefono?: string

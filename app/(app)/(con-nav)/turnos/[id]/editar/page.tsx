@@ -74,7 +74,7 @@ export default async function PaginaEditarTurno({
 
   const { data: medicos } = await supabase
     .from("doctors")
-    .select("id, full_name, specialty, institution, address, city, province, latitude, longitude")
+    .select("id, full_name, specialties, institution, address, city, province, latitude, longitude")
     .eq("profile_id", activo.perfil.id)
     .eq("is_active", true)
     .order("full_name", { ascending: true })

@@ -45,6 +45,12 @@ function formatearFecha(fechaIso: string): string {
 }
 
 function DatosMedico({ medico }: { medico: FilaMedico }) {
+  // Todas las especialidades juntas, en una sola línea ("Clínica Médica ·
+  // Cardiología", Sprint 16, tarea 16.2): la primera es la PRINCIPAL
+  // (`lib/turnos/autocompletar-medico.ts` la usa para precargar el turno),
+  // pero acá se muestran TODAS -"denso en chica, sin truncar" es el criterio
+  // de aceptación de la tarea, así que no hay recorte a la primera-.
+  const especialidades = medico.specialties.length > 0 ? medico.specialties.join(" · ") : null
   const detalle =
     [medico.license_number ? `Matrícula ${medico.license_number}` : null, medico.institution]
       .filter(Boolean)
@@ -57,17 +63,17 @@ function DatosMedico({ medico }: { medico: FilaMedico }) {
           cargada el h3 saltaba un nivel desde el h1 (Sprint 11, WCAG 1.3.1)-.
           El tamaño lo sigue dando `text-lg`. */}
       <h2 className="text-lg font-semibold text-balance text-foreground">{medico.full_name}</h2>
-      {/* Especialidad + matrícula + institución: TRES líneas en grande.
+      {/* Especialidades + matrícula + institución: TRES líneas en grande.
           Chica (Sprint 13, tarea 13.5) las combina en UNA -mismo patrón que
           `tarjeta-medicacion.tsx` (Tanda 3)-: las versiones largas se ocultan
           con `chica:hidden`, la combinada con `hidden chica:block`. */}
-      {medico.specialty && (
-        <p className="text-base text-muted-foreground chica:hidden">{medico.specialty}</p>
+      {especialidades && (
+        <p className="text-base text-balance text-muted-foreground chica:hidden">{especialidades}</p>
       )}
       {detalle && <p className="text-sm text-muted-foreground chica:hidden">{detalle}</p>}
-      {(medico.specialty || detalle) && (
-        <p className="hidden text-sm text-muted-foreground chica:block">
-          {[medico.specialty, detalle].filter(Boolean).join(" · ")}
+      {(especialidades || detalle) && (
+        <p className="hidden text-sm text-balance text-muted-foreground chica:block">
+          {[especialidades, detalle].filter(Boolean).join(" · ")}
         </p>
       )}
     </div>

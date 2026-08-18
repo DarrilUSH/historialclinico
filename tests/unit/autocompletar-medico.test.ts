@@ -1,6 +1,7 @@
 /**
  * Tests de `lib/turnos/autocompletar-medico.ts` (Sprint 10, tarea 10.1;
- * ciudad/provincia sumadas en el Sprint 16, tarea 16.1).
+ * ciudad/provincia sumadas en el Sprint 16, tarea 16.1; varias especialidades
+ * en el Sprint 16, tarea 16.2).
  *
  *   npm run test -- autocompletar-medico
  */
@@ -16,7 +17,7 @@ import {
 const DOCTOR: MedicoParaAutocompletar = {
   id: "990e8400-e29b-41d4-a716-446655440001",
   full_name: "Dr. Carlos Rodríguez",
-  specialty: "Cardiología",
+  specialties: ["Cardiología", "Clínica Médica"],
   institution: "Clínica Ushuaia",
   address: "Gob. Paz 150",
   city: "Ushuaia",
@@ -70,11 +71,21 @@ describe("lib/turnos/autocompletar-medico.ts", () => {
     expect(cambios.especialidad).toBeUndefined()
   })
 
-  it("no completa la especialidad si el médico no la tiene cargada", () => {
-    const doctorSinEspecialidad: MedicoParaAutocompletar = { ...DOCTOR, specialty: null }
+  it("no completa la especialidad si el médico no tiene ninguna cargada", () => {
+    const doctorSinEspecialidad: MedicoParaAutocompletar = { ...DOCTOR, specialties: [] }
     const cambios = camposAutocompletadosDesdeMedico(doctorSinEspecialidad, camposVacios())
 
     expect(cambios.especialidad).toBeUndefined()
+  })
+
+  it("completa la especialidad con la PRINCIPAL (la primera) cuando el médico tiene varias", () => {
+    const doctorConVarias: MedicoParaAutocompletar = {
+      ...DOCTOR,
+      specialties: ["Clínica Médica", "Cardiología"],
+    }
+    const cambios = camposAutocompletadosDesdeMedico(doctorConVarias, camposVacios())
+
+    expect(cambios.especialidad).toBe("Clínica Médica")
   })
 
   it("no pisa el lugar si ya está escrito", () => {
@@ -151,7 +162,7 @@ describe("lib/turnos/autocompletar-medico.ts", () => {
     const doctorMinimo: MedicoParaAutocompletar = {
       id: DOCTOR.id,
       full_name: "Dra. Marcela Torres",
-      specialty: null,
+      specialties: [],
       institution: null,
       address: null,
       city: null,

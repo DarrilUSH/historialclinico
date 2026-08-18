@@ -36,6 +36,17 @@
  * `resolverCoordenadas` intenta geocodificar con Nominatim
  * (`lib/ubicacion/geocodificacion.ts`), mejor esfuerzo, nunca bloquea el
  * guardado.
+ *
+ * ## Varias especialidades (Sprint 16, tarea 16.2)
+ *
+ * `doctors.specialty` (un solo valor) se reemplaza por `doctors.specialties`
+ * (`text[]`, ver `supabase/migrations/20260818090000_especialidades_multiples.sql`).
+ * `campoLista(formData, "especialidades")` lee TODOS los valores del campo
+ * -cada chip de `components/medicos/formulario-medico.tsx` viaja como su
+ * propio `<input type="hidden" name="especialidades">`, mismo mecanismo que
+ * ya usa `formulario-sos.tsx` para sus tres listas-, y
+ * `lib/validacion/medico.schema.ts` trimea/deduplica/valida antes de que
+ * llegue acá.
  */
 
 import { redirect } from "next/navigation"
@@ -74,10 +85,18 @@ function campo(formData: FormData, nombre: string): string {
   return typeof valor === "string" ? valor : ""
 }
 
+/** `formData.getAll(nombre)` filtrado a strings -mismo criterio que `turnos/actions.ts#campo` para `File` sueltos, aplicado a un campo múltiple-. */
+function campoLista(formData: FormData, nombre: string): string[] {
+  return formData.getAll(nombre).filter((valor): valor is string => typeof valor === "string")
+}
+
 function datosCrudosDelFormulario(formData: FormData) {
   return {
     nombre: campo(formData, "nombre"),
-    especialidad: campo(formData, "especialidad"),
+    // Sprint 16, tarea 16.2: un médico puede tener varias, cada una viaja
+    // como su propio valor de `especialidades` (ver
+    // `components/medicos/formulario-medico.tsx#CampoEspecialidades`).
+    especialidades: campoLista(formData, "especialidades"),
     matricula: campo(formData, "matricula"),
     institucion: campo(formData, "institucion"),
     telefono: campo(formData, "telefono"),
@@ -149,7 +168,7 @@ export async function crearMedico(
     const { error } = await supabase.from("doctors").insert({
       profile_id: activo.perfil.id,
       full_name: datos.nombre,
-      specialty: datos.especialidad ?? null,
+      specialties: datos.especialidades,
       license_number: datos.matricula ?? null,
       institution: datos.institucion ?? null,
       phone: datos.telefono ?? null,
@@ -211,7 +230,7 @@ export async function actualizarMedico(
       .update(
         {
           full_name: datos.nombre,
-          specialty: datos.especialidad ?? null,
+          specialties: datos.especialidades,
           license_number: datos.matricula ?? null,
           institution: datos.institucion ?? null,
           phone: datos.telefono ?? null,

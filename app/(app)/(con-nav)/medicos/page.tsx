@@ -32,7 +32,7 @@ export const metadata: Metadata = {
 }
 
 const COLUMNAS_MEDICO =
-  "id, profile_id, full_name, specialty, license_number, institution, phone, address, city, province, latitude, longitude, notes, is_active, deactivated_at, created_by_profile_id, created_at, updated_at"
+  "id, profile_id, full_name, specialties, license_number, institution, phone, address, city, province, latitude, longitude, notes, is_active, deactivated_at, created_by_profile_id, created_at, updated_at"
 
 export default async function PaginaMedicos() {
   const activo = await obtenerPerfilActivo()

@@ -304,7 +304,7 @@ export type Database = {
           phone: string | null
           profile_id: string
           province: string | null
-          specialty: string | null
+          specialties: string[]
           updated_at: string
         }
         Insert: {
@@ -324,7 +324,7 @@ export type Database = {
           phone?: string | null
           profile_id: string
           province?: string | null
-          specialty?: string | null
+          specialties?: string[]
           updated_at?: string
         }
         Update: {
@@ -344,7 +344,7 @@ export type Database = {
           phone?: string | null
           profile_id?: string
           province?: string | null
-          specialty?: string | null
+          specialties?: string[]
           updated_at?: string
         }
         Relationships: [
@@ -1403,6 +1403,10 @@ export type Database = {
       es_perfil_gestionado: { Args: { perfil: string }; Returns: boolean }
       es_sesion_de_usuario: { Args: never; Returns: boolean }
       es_titular: { Args: { perfil: string }; Returns: boolean }
+      especialidades_todas_no_vacias: {
+        Args: { valores: string[] }
+        Returns: boolean
+      }
       generar_alertas_medicacion: { Args: never; Returns: number }
       generar_recordatorios_pendientes: { Args: never; Returns: number }
       generar_tomas_del_dia: { Args: { fecha?: string }; Returns: number }

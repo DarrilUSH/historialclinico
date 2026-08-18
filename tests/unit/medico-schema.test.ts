@@ -1,17 +1,19 @@
 /**
- * Tests de `lib/validacion/medico.schema.ts` (Sprint 10, tarea 10.1).
+ * Tests de `lib/validacion/medico.schema.ts` (Sprint 10, tarea 10.1; varias
+ * especialidades sumadas en el Sprint 16, tarea 16.2).
  *
  *   npm run test -- medico-schema
  */
 
 import { describe, it, expect } from "vitest"
 
+import { MAX_ESPECIALIDADES_POR_MEDICO, MAX_LARGO_ESPECIALIDAD } from "@/lib/especialidades/catalogo"
 import { validarMedico } from "@/lib/validacion/medico.schema"
 
-function datosValidos(extra: Record<string, string> = {}) {
+function datosValidos(extra: Record<string, unknown> = {}) {
   return {
     nombre: "Dr. Carlos Rodríguez",
-    especialidad: "Cardiología",
+    especialidades: ["Cardiología"],
     matricula: "MN 45678",
     institucion: "Clínica Ushuaia",
     telefono: "+54 2901 234000",
@@ -31,7 +33,7 @@ describe("lib/validacion/medico.schema.ts", () => {
     expect(resultado.ok).toBe(true)
     if (resultado.ok) {
       expect(resultado.datos.nombre).toBe("Dr. Carlos Rodríguez")
-      expect(resultado.datos.especialidad).toBe("Cardiología")
+      expect(resultado.datos.especialidades).toEqual(["Cardiología"])
       expect(resultado.datos.matricula).toBe("MN 45678")
       expect(resultado.datos.institucion).toBe("Clínica Ushuaia")
       expect(resultado.datos.telefono).toBe("+54 2901 234000")
@@ -46,7 +48,7 @@ describe("lib/validacion/medico.schema.ts", () => {
   it("acepta un médico solo con el nombre (el resto es opcional)", () => {
     const resultado = validarMedico(
       datosValidos({
-        especialidad: "",
+        especialidades: [],
         matricula: "",
         institucion: "",
         telefono: "",
@@ -58,7 +60,7 @@ describe("lib/validacion/medico.schema.ts", () => {
     )
     expect(resultado.ok).toBe(true)
     if (resultado.ok) {
-      expect(resultado.datos.especialidad).toBeUndefined()
+      expect(resultado.datos.especialidades).toEqual([])
       expect(resultado.datos.matricula).toBeUndefined()
       expect(resultado.datos.institucion).toBeUndefined()
       expect(resultado.datos.telefono).toBeUndefined()
@@ -66,6 +68,56 @@ describe("lib/validacion/medico.schema.ts", () => {
       expect(resultado.datos.ciudad).toBeUndefined()
       expect(resultado.datos.provincia).toBeUndefined()
     }
+  })
+
+  // Sprint 16, tarea 16.2: varias especialidades.
+  it("acepta varias especialidades y conserva el orden (la primera queda como principal)", () => {
+    const resultado = validarMedico(datosValidos({ especialidades: ["Clínica Médica", "Cardiología"] }))
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.especialidades).toEqual(["Clínica Médica", "Cardiología"])
+    }
+  })
+
+  it("trimea cada especialidad", () => {
+    const resultado = validarMedico(datosValidos({ especialidades: ["  Cardiología  "] }))
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.especialidades).toEqual(["Cardiología"])
+    }
+  })
+
+  it("descarta especialidades en blanco", () => {
+    const resultado = validarMedico(datosValidos({ especialidades: ["Cardiología", "   ", ""] }))
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.especialidades).toEqual(["Cardiología"])
+    }
+  })
+
+  it("deduplica especialidades sin distinguir mayúsculas/tildes de capitalización, quedándose con la primera aparición", () => {
+    const resultado = validarMedico(datosValidos({ especialidades: ["Cardiología", "cardiología", "CARDIOLOGÍA"] }))
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.especialidades).toEqual(["Cardiología"])
+    }
+  })
+
+  it(`rechaza una especialidad de más de ${MAX_LARGO_ESPECIALIDAD} caracteres`, () => {
+    const resultado = validarMedico(datosValidos({ especialidades: ["a".repeat(MAX_LARGO_ESPECIALIDAD + 1)] }))
+    expect(resultado.ok).toBe(false)
+  })
+
+  it(`rechaza más de ${MAX_ESPECIALIDADES_POR_MEDICO} especialidades`, () => {
+    const muchas = Array.from({ length: MAX_ESPECIALIDADES_POR_MEDICO + 1 }, (_, i) => `Especialidad ${i}`)
+    const resultado = validarMedico(datosValidos({ especialidades: muchas }))
+    expect(resultado.ok).toBe(false)
+  })
+
+  it(`acepta exactamente ${MAX_ESPECIALIDADES_POR_MEDICO} especialidades`, () => {
+    const justas = Array.from({ length: MAX_ESPECIALIDADES_POR_MEDICO }, (_, i) => `Especialidad ${i}`)
+    const resultado = validarMedico(datosValidos({ especialidades: justas }))
+    expect(resultado.ok).toBe(true)
   })
 
   // Sprint 16, tarea 16.1: ciudad y provincia.
