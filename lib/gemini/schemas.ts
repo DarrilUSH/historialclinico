@@ -494,3 +494,226 @@ export function validarFichaGenerada(
 
   return { ok: false, errores };
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Schema del análisis de un mensaje de turno pegado desde WhatsApp (Sprint
+ * 16, tarea 16.4 — "pegá el mensaje que te mandó la clínica").
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  Igual que `SCHEMA_DOCUMENTO_MEDICO`, este schema pide una EXTRACCIÓN
+ *  literal, no un cálculo. La aritmética de calendario (año inferido, cotejo
+ *  de día de la semana), la reordenación de nombres "Apellido, Nombre" y el
+ *  mapeo al catálogo de especialidades NO se le piden a Gemini: viven en
+ *  `lib/turnos/normalizacion-mensaje.ts` y
+ *  `lib/especialidades/mapear-catalogo.ts`, código determinístico y
+ *  testeado. Pedirle a un modelo de lenguaje que haga cuentas de fechas es
+ *  exactamente el tipo de tarea donde puede errar con total confianza y sin
+ *  avisar -acá el cálculo es verificable con casos fijos, ahí no-. El trabajo
+ *  que SÍ le corresponde al modelo es el que un programa no puede hacer sin
+ *  entender el texto: decidir si "MAMOGRAFIA MAMOGRAFIA" es una persona o un
+ *  estudio, inferir "Ginecología" de un mensaje que solo habla de
+ *  colposcopías, o decidir si dos mensajes pegados juntos son dos turnos
+ *  distintos o un turno contado en dos partes.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * ## Por qué NO hay un campo de paciente/DNI
+ *
+ * El mensaje real de una clínica trae casi siempre el nombre y a veces el DNI
+ * del paciente (`docs/minimizacion-datos.md` §10). Ningún campo de este
+ * schema los pide: no es que se extraigan y se descarten después, es que
+ * **no existe dónde ponerlos** -la lista blanca es el schema mismo, mismo
+ * principio que `ContextoClinico` en `lib/ficha/armado.ts`
+ * (`docs/minimizacion-datos.md` §1, regla 2: "el tipo es la lista blanca")-.
+ * El prompt (`lib/gemini/prompt-turno.ts`) además le pide explícitamente al
+ * modelo que los ignore.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/** Si el campo "Profesional"/"Prestador"/"Práctica" del mensaje nombra una persona, un estudio, o no aparece. */
+export const TIPOS_PROFESIONAL_MENSAJE_TURNO = ['persona', 'estudio', 'ninguno'] as const;
+export type TipoProfesionalMensajeTurno = (typeof TIPOS_PROFESIONAL_MENSAJE_TURNO)[number];
+
+/**
+ * Cómo se relacionan los turnos detectados en el texto pegado, cuando trae
+ * más de un mensaje de WhatsApp concatenado (`tests/fixtures/mensajes-turno/README.md`
+ * §"Varios mensajes en un solo paste"):
+ * - `unico`: un solo turno, el caso más común.
+ * - `varios_turnos`: DOS mensajes con el mismo template repetido, cada uno
+ *   con su fecha/hora completas — son turnos DISTINTOS, hay que dividirlos.
+ * - `turno_mas_confirmacion`: un mensaje largo con contexto + un segundo
+ *   mensaje corto de confirmación con los datos finales — es UN turno, hay
+ *   que fusionarlos (la confirmación gana en día/hora/profesional).
+ */
+export const RELACIONES_MENSAJE_TURNO = ['unico', 'varios_turnos', 'turno_mas_confirmacion'] as const;
+export type RelacionMensajeTurno = (typeof RELACIONES_MENSAJE_TURNO)[number];
+
+function schemaTurnoExtraidoCrudo(): Schema {
+  return {
+    type: Type.OBJECT,
+    description: 'Datos de UN turno tal como aparecen en el mensaje, sin convertir ni completar nada.',
+    properties: {
+      fechaTexto: {
+        type: Type.STRING,
+        description:
+          'La fecha EXACTAMENTE como aparece en el mensaje (ej: "07/10/2024", "14/7", "26/5"). NO le agregues ' +
+          'el año si no está, NO la conviertas a otro formato. Cadena vacía si el mensaje no trae fecha.',
+      },
+      diaSemanaTexto: {
+        type: Type.STRING,
+        description:
+          'El día de la semana tal como aparece junto a la fecha (ej: "martes", "Mie"), si el mensaje lo ' +
+          'menciona. Cadena vacía si no lo menciona.',
+      },
+      horaTexto: {
+        type: Type.STRING,
+        description:
+          'La hora EXACTAMENTE como aparece en el mensaje (ej: "14:15 HS", "18.10hs", "09:45 hs"). Cadena ' +
+          'vacía si el mensaje NO menciona una hora — nunca inventes ni asumas una hora por defecto.',
+      },
+      tipoProfesional: {
+        type: Type.STRING,
+        format: 'enum',
+        enum: [...TIPOS_PROFESIONAL_MENSAJE_TURNO],
+        description:
+          '"persona" si el campo de profesional/prestador/práctica nombra a una persona; "estudio" si en ' +
+          'realidad nombra un estudio o práctica (ej: "MAMOGRAFIA MAMOGRAFIA", una punción); "ninguno" si el ' +
+          'mensaje no trae ningún campo de este tipo.',
+      },
+      profesionalTexto: {
+        type: Type.STRING,
+        description:
+          'El nombre de la persona o del estudio/práctica, ya limpio del rótulo del campo y de la parte del ' +
+          'texto que describe el servicio si viene junto (de "SERV. DE ECOGRAFIA - DR. JUAREZ" extraé solo ' +
+          '"Dr. Juárez"). Usá mayúscula/minúscula y tildes correctas del castellano si es una persona, pero NO ' +
+          'reordenes "Apellido, Nombre" ni "Apellido Nombre" — conservá la coma y el orden tal como aparecen, ' +
+          'eso se procesa aparte. Cadena vacía si tipoProfesional es "ninguno".',
+      },
+      especialidadTexto: {
+        type: Type.STRING,
+        description:
+          'La especialidad médica, explícita o inferida del contexto (tipo de estudio, prácticas mencionadas). ' +
+          'Cadena vacía si no hay ninguna pista razonable — no adivines al azar.',
+      },
+      especialidadInferida: {
+        type: Type.BOOLEAN,
+        description:
+          '`true` si especialidadTexto NO estaba escrita explícitamente en el mensaje y la inferiste vos del ' +
+          'contexto. `false` si el mensaje la menciona tal cual (o si especialidadTexto quedó vacía).',
+      },
+      lugarNombre: {
+        type: Type.STRING,
+        description: 'Nombre de la sede/institución/consultorio. Cadena vacía si no figura.',
+      },
+      lugarDireccion: {
+        type: Type.STRING,
+        description:
+          'Calle y altura, SOLO si el mensaje la menciona explícitamente. Si el lugar aparece solo por su ' +
+          'nombre en clave (ej: "Centro: LORIA") sin ninguna dirección, dejá este campo vacío — no inventes una.',
+      },
+      lugarCiudad: {
+        type: Type.STRING,
+        description: 'Localidad/ciudad del lugar, si el mensaje la menciona (por ejemplo dentro de una dirección completa). Cadena vacía si no figura.',
+      },
+      lugarProvincia: {
+        type: Type.STRING,
+        description: 'Provincia del lugar, si el mensaje la menciona. Cadena vacía si no figura.',
+      },
+      notas: {
+        type: Type.ARRAY,
+        description:
+          'Un elemento de texto por cada aviso operativo del mensaje: preparación previa, qué llevar, montos/' +
+          'coseguros/copagos, pedido de confirmar asistencia, checklist de documentación requerida, etc. NO ' +
+          'agregues nada si el mensaje dice explícitamente que NO hace falta preparación (ej: "No requiere.") ' +
+          '— una ausencia de preparación no es una nota. Lista vacía si el mensaje no trae ningún aviso de este tipo.',
+        items: { type: Type.STRING },
+      },
+    },
+    required: [
+      'fechaTexto',
+      'diaSemanaTexto',
+      'horaTexto',
+      'tipoProfesional',
+      'profesionalTexto',
+      'especialidadTexto',
+      'especialidadInferida',
+      'lugarNombre',
+      'lugarDireccion',
+      'lugarCiudad',
+      'lugarProvincia',
+      'notas',
+    ],
+    propertyOrdering: [
+      'fechaTexto',
+      'diaSemanaTexto',
+      'horaTexto',
+      'tipoProfesional',
+      'profesionalTexto',
+      'especialidadTexto',
+      'especialidadInferida',
+      'lugarNombre',
+      'lugarDireccion',
+      'lugarCiudad',
+      'lugarProvincia',
+      'notas',
+    ],
+  };
+}
+
+/**
+ * `responseSchema` del análisis de un mensaje de turno. `turnos` es un array
+ * (no un objeto único) porque un solo paste puede traer más de un mensaje
+ * concatenado — ver `RELACIONES_MENSAJE_TURNO` arriba.
+ */
+export const SCHEMA_ANALISIS_MENSAJE_TURNO: Schema = {
+  type: Type.OBJECT,
+  description:
+    'Análisis de un mensaje de WhatsApp de una clínica que asigna o recuerda uno o más turnos médicos.',
+  properties: {
+    turnos: {
+      type: Type.ARRAY,
+      description:
+        'Un elemento por cada turno identificado, en el orden en que aparecen en el texto. Normalmente uno ' +
+        'solo. Si relacion es "turno_mas_confirmacion", EXACTAMENTE dos elementos: primero el mensaje con más ' +
+        'contexto, segundo el de confirmación.',
+      items: schemaTurnoExtraidoCrudo(),
+    },
+    relacion: {
+      type: Type.STRING,
+      format: 'enum',
+      enum: [...RELACIONES_MENSAJE_TURNO],
+      description:
+        '"unico" para un solo turno (el caso más común); "varios_turnos" si el texto trae dos turnos DISTINTOS ' +
+        'pegados; "turno_mas_confirmacion" si trae un mensaje largo más su confirmación de datos finales.',
+    },
+    explicacion: {
+      type: Type.STRING,
+      description:
+        'Una frase breve en español explicando por qué elegiste esa relación (ej: "Dos turnos con horarios ' +
+        'distintos el mismo día"). Podés dejarla genérica ("Un solo turno") cuando relacion es "unico".',
+    },
+  },
+  required: ['turnos', 'relacion', 'explicacion'],
+  propertyOrdering: ['turnos', 'relacion', 'explicacion'],
+};
+
+/** Un turno tal como lo extrajo Gemini, sin normalizar — espejo de `schemaTurnoExtraidoCrudo()`. */
+export interface TurnoExtraidoCrudo {
+  fechaTexto: string;
+  diaSemanaTexto: string;
+  horaTexto: string;
+  tipoProfesional: TipoProfesionalMensajeTurno;
+  profesionalTexto: string;
+  especialidadTexto: string;
+  especialidadInferida: boolean;
+  lugarNombre: string;
+  lugarDireccion: string;
+  lugarCiudad: string;
+  lugarProvincia: string;
+  notas: string[];
+}
+
+/** Forma exacta del JSON que Gemini devuelve al usar `SCHEMA_ANALISIS_MENSAJE_TURNO` como `responseSchema`. */
+export interface AnalisisMensajeTurnoExtraido {
+  turnos: TurnoExtraidoCrudo[];
+  relacion: RelacionMensajeTurno;
+  explicacion: string;
+}

@@ -94,6 +94,31 @@
  * `CampoTexto` de siempre: sin buscador vacío, sin cartel que explique lo que
  * falta hacer, sin una sola diferencia respecto de antes de esta tarea.
  * Nadie tiene que descargar 36 mil centros para poder anotar un turno.
+ *
+ * ## "¿Te llegó el turno por WhatsApp? Pegalo acá" (Sprint 16, tarea 16.4)
+ *
+ * `AnalizadorMensajeTurno` (`components/turnos/analizador-mensaje-turno.tsx`)
+ * se renderiza ARRIBA del `<form>`, colapsado por defecto: pegar un mensaje y
+ * tocar "Analizar" manda el texto a `POST /api/turnos/analizar-mensaje`
+ * (Gemini) y, con el resultado, llama a `aplicarPropuesta` acá abajo. La IA
+ * NUNCA guarda nada -solo cambia el estado de los campos de este formulario,
+ * como si la persona los hubiera tipeado-; guardar sigue siendo,
+ * exclusivamente, el botón "Guardar turno" de siempre.
+ *
+ * Por eso `fecha`, `hora` y `notasPreparacion` pasaron de `defaultValue`
+ * (no controlados) a `value`/`onChange` como el resto de los campos: sin
+ * estado de React no hay forma de precargarlos después del primer render.
+ *
+ * **Analizar de nuevo pisa la precarga anterior, nunca una edición manual.**
+ * `lib/turnos/aplicar-precarga.ts` (con sus propios tests) recuerda, campo
+ * por campo, cuál fue el ÚLTIMO valor que puso la IA (`ultimaPrecargaRef`).
+ * Un campo se pisa con la propuesta nueva si está vacío, o si sigue
+ * exactamente como lo dejó la precarga anterior; si la persona ya lo corrigió
+ * a mano, "Analizar" no vuelve a tocarlo -ni con este mensaje ni con uno
+ * distinto pegado después-. Ver el comentario de cabecera de ese archivo para
+ * el razonamiento completo (por qué ni "solo completar lo vacío" -el criterio
+ * del `<Select>` de médico, más abajo- ni "pisar siempre todo" -el criterio
+ * de `elegirCentroDelCatalogo`- alcanzan acá).
  */
 
 import * as React from "react"
@@ -113,6 +138,7 @@ import { CampoNumero } from "@/components/base/campo-numero"
 import { CampoTexto } from "@/components/base/campo-texto"
 import { CampoTextarea } from "@/components/base/campo-textarea"
 import { CampoLugar } from "@/components/lugares/campo-lugar"
+import { AnalizadorMensajeTurno } from "@/components/turnos/analizador-mensaje-turno"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -123,10 +149,12 @@ import {
 } from "@/components/ui/select"
 import { CATALOGO_ESPECIALIDADES } from "@/lib/especialidades/catalogo"
 import { precargaDesdeCentro, type CentroSugerido } from "@/lib/lugares/sugerencias"
+import { aplicarPrecarga, type CamposPrecargables } from "@/lib/turnos/aplicar-precarga"
 import {
   camposAutocompletadosDesdeMedico,
   type MedicoParaAutocompletar,
 } from "@/lib/turnos/autocompletar-medico"
+import { propuestaACamposPrecargables, type PropuestaTurno } from "@/lib/turnos/construir-propuestas"
 import { direccionCompleta } from "@/lib/ubicacion/formato"
 import { PROVINCIAS_ARGENTINAS } from "@/lib/ubicacion/provincias"
 import { cn } from "@/lib/utils"
@@ -194,12 +222,20 @@ export function FormularioTurno({
 
   const [especialidad, setEspecialidad] = React.useState(valoresIniciales?.especialidad ?? "")
   const [medico, setMedico] = React.useState(valoresIniciales?.medico ?? "")
+  // `fecha`/`hora`/`notasPreparacion` pasaron de `defaultValue` a estado
+  // controlado en la tarea 16.4: precargarlos después de "Analizar" -que
+  // corre bien después del primer render- no es posible con un input no
+  // controlado. Ver "¿Te llegó el turno por WhatsApp?" en el comentario de
+  // cabecera del archivo.
+  const [fecha, setFecha] = React.useState(valoresIniciales?.fecha ?? "")
+  const [hora, setHora] = React.useState(valoresIniciales?.hora ?? "")
   const [lugarNombre, setLugarNombre] = React.useState(valoresIniciales?.lugarNombre ?? "")
   const [lugarDireccion, setLugarDireccion] = React.useState(valoresIniciales?.lugarDireccion ?? "")
   const [lugarCiudad, setLugarCiudad] = React.useState(valoresIniciales?.lugarCiudad ?? "")
   const [lugarProvincia, setLugarProvincia] = React.useState(valoresIniciales?.lugarProvincia ?? "")
   const [latitud, setLatitud] = React.useState(valoresIniciales?.latitud ?? "")
   const [longitud, setLongitud] = React.useState(valoresIniciales?.longitud ?? "")
+  const [notasPreparacion, setNotasPreparacion] = React.useState(valoresIniciales?.notasPreparacion ?? "")
   // El médico vinculado puede no estar entre los `medicos` ACTIVOS que recibe
   // este componente (fue dado de baja después de vincularse a este turno):
   // el `<Select>` entonces no lo muestra seleccionado, pero el campo oculto
@@ -287,233 +323,289 @@ export function FormularioTurno({
     if (precarga.latitud.length > 0) setMostrarCoordenadas(true)
   }
 
-  return (
-    <form id={ID_FORMULARIO} action={enviarAccion} className="flex flex-col gap-5">
-      {modo === "editar" && turnoId && <input type="hidden" name="turnoId" value={turnoId} />}
-      <input type="hidden" name="doctorId" value={doctorId} />
+  // Recuerda qué puso la ÚLTIMA precarga de IA en cada campo (Sprint 16,
+  // tarea 16.4): un `ref`, no estado -no hace falta re-renderizar cuando
+  // cambia, solo leerlo/escribirlo dentro de `aplicarPropuesta`-. Ver el
+  // razonamiento completo en `lib/turnos/aplicar-precarga.ts`.
+  const ultimaPrecargaRef = React.useRef<Partial<CamposPrecargables>>({})
 
-      {/*
-        Chica (Sprint 13, tarea 13.4): "Especialidad" y el `<Select>` de
-        "Médico (opcional)" -cuando hay directorio cargado- pasan a una
-        grilla de 2 columnas. Son DOS elementos consecutivos en el DOM (el
-        `<Select>` ya venía justo después de "Especialidad"), así que
-        ponerlos lado a lado con CSS Grid no reordena nada: el orden de
-        lectura de un lector de pantalla sigue siendo el mismo que el orden
-        visual (fila 1: especialidad, médico). El grid solo se activa cuando
-        existe el `<Select>` -sin directorio, "Especialidad" sigue sola a
-        ancho completo, en los dos modos-, y el campo "Médico" de texto
-        libre (más abajo, para carga manual) se queda fuera de esta grilla:
-        pairarlo también exigiría mover el `<Select>` de lugar, cosa que
-        cambiaría el orden en TODOS los modos, no solo en chica.
-      */}
-      <div
-        className={cn(
-          "flex flex-col gap-5",
-          medicos.length > 0 && "chica:grid chica:grid-cols-2 chica:items-start chica:gap-3",
-        )}
-      >
-        <CampoAutocompletar
-          id="especialidad"
-          label="Especialidad"
-          required
-          maxLength={100}
-          value={especialidad}
-          onChange={setEspecialidad}
-          opciones={CATALOGO_ESPECIALIDADES}
-          ayuda="Empezá a escribir para ver sugerencias (ej: Cardiología, Clínica Médica, Oftalmología)."
+  /**
+   * Aplica una `PropuestaTurno` (la principal, o una de `otrasPropuestas`
+   * elegida a mano) sobre el formulario. Nunca toca `doctorId` -la IA no
+   * intenta vincular un médico del directorio- ni latitud/longitud -el
+   * mensaje de WhatsApp no trae coordenadas, y esta tarea no geocodifica-.
+   */
+  function aplicarPropuesta(propuesta: PropuestaTurno) {
+    const actuales: CamposPrecargables = {
+      especialidad,
+      medico,
+      fecha,
+      hora,
+      lugarNombre,
+      lugarDireccion,
+      lugarCiudad,
+      lugarProvincia,
+      notasPreparacion,
+    }
+
+    const { siguientes, ultimaPrecarga } = aplicarPrecarga(
+      actuales,
+      propuestaACamposPrecargables(propuesta),
+      ultimaPrecargaRef.current,
+    )
+    ultimaPrecargaRef.current = ultimaPrecarga
+
+    setEspecialidad(siguientes.especialidad)
+    setMedico(siguientes.medico)
+    setFecha(siguientes.fecha)
+    setHora(siguientes.hora)
+    setLugarNombre(siguientes.lugarNombre)
+    setLugarDireccion(siguientes.lugarDireccion)
+    setLugarCiudad(siguientes.lugarCiudad)
+    setLugarProvincia(siguientes.lugarProvincia)
+    setNotasPreparacion(siguientes.notasPreparacion)
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      <AnalizadorMensajeTurno onAplicarPropuesta={aplicarPropuesta} />
+
+      <form id={ID_FORMULARIO} action={enviarAccion} className="flex flex-col gap-5">
+        {modo === "editar" && turnoId && <input type="hidden" name="turnoId" value={turnoId} />}
+        <input type="hidden" name="doctorId" value={doctorId} />
+
+        {/*
+          Chica (Sprint 13, tarea 13.4): "Especialidad" y el `<Select>` de
+          "Médico (opcional)" -cuando hay directorio cargado- pasan a una
+          grilla de 2 columnas. Son DOS elementos consecutivos en el DOM (el
+          `<Select>` ya venía justo después de "Especialidad"), así que
+          ponerlos lado a lado con CSS Grid no reordena nada: el orden de
+          lectura de un lector de pantalla sigue siendo el mismo que el orden
+          visual (fila 1: especialidad, médico). El grid solo se activa cuando
+          existe el `<Select>` -sin directorio, "Especialidad" sigue sola a
+          ancho completo, en los dos modos-, y el campo "Médico" de texto
+          libre (más abajo, para carga manual) se queda fuera de esta grilla:
+          pairarlo también exigiría mover el `<Select>` de lugar, cosa que
+          cambiaría el orden en TODOS los modos, no solo en chica.
+        */}
+        <div
+          className={cn(
+            "flex flex-col gap-5",
+            medicos.length > 0 && "chica:grid chica:grid-cols-2 chica:items-start chica:gap-3",
+          )}
+        >
+          <CampoAutocompletar
+            id="especialidad"
+            label="Especialidad"
+            required
+            maxLength={100}
+            value={especialidad}
+            onChange={setEspecialidad}
+            opciones={CATALOGO_ESPECIALIDADES}
+            ayuda="Empezá a escribir para ver sugerencias (ej: Cardiología, Clínica Médica, Oftalmología)."
+          />
+
+          {medicos.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="medico-directorio-trigger">Médico (opcional)</Label>
+              <Select
+                items={[
+                  { value: SENTINEL_NINGUN_MEDICO, label: "Ninguno" },
+                  ...medicos.map((doctor) => ({ value: doctor.id, label: doctor.full_name })),
+                ]}
+                value={doctorId || SENTINEL_NINGUN_MEDICO}
+                onValueChange={elegirMedicoDelDirectorio}
+              >
+                <SelectTrigger id="medico-directorio-trigger" className="w-full">
+                  <SelectValue placeholder="Elegir un médico de tu directorio" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={SENTINEL_NINGUN_MEDICO}>Ninguno</SelectItem>
+                  {medicos.map((doctor) => (
+                    <SelectItem key={doctor.id} value={doctor.id}>
+                      {doctor.full_name}
+                      {doctor.specialties.length > 0 ? ` — ${doctor.specialties.join(" · ")}` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-sm text-muted-foreground chica:hidden">
+                Completa lo que esté vacío (nombre, especialidad, lugar y coordenadas si el médico las
+                tiene cargadas). No pisa lo que ya escribiste.
+              </p>
+            </div>
+          )}
+        </div>
+
+        <CampoTexto
+          id="medico"
+          label="Médico"
+          maxLength={150}
+          value={medico}
+          onChange={(evento) => setMedico(evento.target.value)}
+          ayuda="Opcional. Podés elegirlo de tu directorio arriba o escribirlo directo."
         />
 
-        {medicos.length > 0 && (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
+          <CampoTexto
+            id="fecha"
+            label="Fecha"
+            type="date"
+            required
+            value={fecha}
+            onChange={(evento) => setFecha(evento.target.value)}
+            min={modo === "crear" ? fechaMinimaIso : undefined}
+          />
+          <CampoTexto
+            id="hora"
+            label="Hora"
+            type="time"
+            required
+            value={hora}
+            onChange={(evento) => setHora(evento.target.value)}
+          />
+        </div>
+
+        {catalogoDisponible ? (
+          <CampoLugar
+            id="lugarNombre"
+            label="Lugar"
+            maxLength={150}
+            value={lugarNombre}
+            onChange={setLugarNombre}
+            onElegirCentro={elegirCentroDelCatalogo}
+            ayuda="Escribí el nombre y elegilo del listado oficial: se completan solos la dirección, la ciudad y el mapa."
+            placeholder="Ej: clinica san jorge"
+          />
+        ) : (
+          <CampoTexto
+            id="lugarNombre"
+            label="Lugar"
+            maxLength={150}
+            value={lugarNombre}
+            onChange={(evento) => setLugarNombre(evento.target.value)}
+            ayuda="Nombre de la clínica o el consultorio (opcional)."
+          />
+        )}
+
+        <CampoTexto
+          id="lugarDireccion"
+          label="Dirección"
+          maxLength={300}
+          value={lugarDireccion}
+          onChange={(evento) => setLugarDireccion(evento.target.value)}
+          ayuda="Calle y altura (opcional)."
+        />
+
+        {/*
+          Ciudad + provincia (Sprint 16, tarea 16.1): en una grilla de 2
+          columnas, mismo criterio que fecha/hora de arriba -son dos campos
+          cortos y relacionados-. Sin esto, la geocodificación y "Cómo llegar"
+          no tenían de dónde sacar una localidad real y terminaban asumiendo
+          Ushuaia (ver el comentario de cabecera del archivo).
+        */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
+          <CampoTexto
+            id="lugarCiudad"
+            label="Ciudad"
+            maxLength={100}
+            value={lugarCiudad}
+            onChange={(evento) => setLugarCiudad(evento.target.value)}
+            ayuda="Ej: La Plata, CABA, Ushuaia (opcional)."
+          />
+
           <div className="flex flex-col gap-2">
-            <Label htmlFor="medico-directorio-trigger">Médico (opcional)</Label>
+            <Label htmlFor="lugarProvincia-trigger">Provincia</Label>
             <Select
-              items={[
-                { value: SENTINEL_NINGUN_MEDICO, label: "Ninguno" },
-                ...medicos.map((doctor) => ({ value: doctor.id, label: doctor.full_name })),
-              ]}
-              value={doctorId || SENTINEL_NINGUN_MEDICO}
-              onValueChange={elegirMedicoDelDirectorio}
+              items={OPCIONES_PROVINCIA}
+              value={lugarProvincia || ""}
+              onValueChange={(valor) => setLugarProvincia(String(valor ?? ""))}
             >
-              <SelectTrigger id="medico-directorio-trigger" className="w-full">
-                <SelectValue placeholder="Elegir un médico de tu directorio" />
+              <SelectTrigger id="lugarProvincia-trigger" className="w-full">
+                <SelectValue placeholder="Sin especificar" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={SENTINEL_NINGUN_MEDICO}>Ninguno</SelectItem>
-                {medicos.map((doctor) => (
-                  <SelectItem key={doctor.id} value={doctor.id}>
-                    {doctor.full_name}
-                    {doctor.specialties.length > 0 ? ` — ${doctor.specialties.join(" · ")}` : ""}
+                {OPCIONES_PROVINCIA.map((opcion) => (
+                  <SelectItem key={opcion.value || "sin-especificar"} value={opcion.value}>
+                    {opcion.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-sm text-muted-foreground chica:hidden">
-              Completa lo que esté vacío (nombre, especialidad, lugar y coordenadas si el médico las
-              tiene cargadas). No pisa lo que ya escribiste.
-            </p>
+            {/* El valor real que lee la Server Action: el `<Select>` es pura UI, mismo patrón que `doctorId` más arriba y que `formulario-sos.tsx#grupoSanguineo`. */}
+            <input type="hidden" name="lugarProvincia" value={lugarProvincia} />
           </div>
-        )}
-      </div>
-
-      <CampoTexto
-        id="medico"
-        label="Médico"
-        maxLength={150}
-        value={medico}
-        onChange={(evento) => setMedico(evento.target.value)}
-        ayuda="Opcional. Podés elegirlo de tu directorio arriba o escribirlo directo."
-      />
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
-        <CampoTexto
-          id="fecha"
-          label="Fecha"
-          type="date"
-          required
-          defaultValue={valoresIniciales?.fecha}
-          min={modo === "crear" ? fechaMinimaIso : undefined}
-        />
-        <CampoTexto id="hora" label="Hora" type="time" required defaultValue={valoresIniciales?.hora} />
-      </div>
-
-      {catalogoDisponible ? (
-        <CampoLugar
-          id="lugarNombre"
-          label="Lugar"
-          maxLength={150}
-          value={lugarNombre}
-          onChange={setLugarNombre}
-          onElegirCentro={elegirCentroDelCatalogo}
-          ayuda="Escribí el nombre y elegilo del listado oficial: se completan solos la dirección, la ciudad y el mapa."
-          placeholder="Ej: clinica san jorge"
-        />
-      ) : (
-        <CampoTexto
-          id="lugarNombre"
-          label="Lugar"
-          maxLength={150}
-          value={lugarNombre}
-          onChange={(evento) => setLugarNombre(evento.target.value)}
-          ayuda="Nombre de la clínica o el consultorio (opcional)."
-        />
-      )}
-
-      <CampoTexto
-        id="lugarDireccion"
-        label="Dirección"
-        maxLength={300}
-        value={lugarDireccion}
-        onChange={(evento) => setLugarDireccion(evento.target.value)}
-        ayuda="Calle y altura (opcional)."
-      />
-
-      {/*
-        Ciudad + provincia (Sprint 16, tarea 16.1): en una grilla de 2
-        columnas, mismo criterio que fecha/hora de arriba -son dos campos
-        cortos y relacionados-. Sin esto, la geocodificación y "Cómo llegar"
-        no tenían de dónde sacar una localidad real y terminaban asumiendo
-        Ushuaia (ver el comentario de cabecera del archivo).
-      */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
-        <CampoTexto
-          id="lugarCiudad"
-          label="Ciudad"
-          maxLength={100}
-          value={lugarCiudad}
-          onChange={(evento) => setLugarCiudad(evento.target.value)}
-          ayuda="Ej: La Plata, CABA, Ushuaia (opcional)."
-        />
-
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="lugarProvincia-trigger">Provincia</Label>
-          <Select
-            items={OPCIONES_PROVINCIA}
-            value={lugarProvincia || ""}
-            onValueChange={(valor) => setLugarProvincia(String(valor ?? ""))}
-          >
-            <SelectTrigger id="lugarProvincia-trigger" className="w-full">
-              <SelectValue placeholder="Sin especificar" />
-            </SelectTrigger>
-            <SelectContent>
-              {OPCIONES_PROVINCIA.map((opcion) => (
-                <SelectItem key={opcion.value || "sin-especificar"} value={opcion.value}>
-                  {opcion.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {/* El valor real que lee la Server Action: el `<Select>` es pura UI, mismo patrón que `doctorId` más arriba y que `formulario-sos.tsx#grupoSanguineo`. */}
-          <input type="hidden" name="lugarProvincia" value={lugarProvincia} />
         </div>
-      </div>
 
-      <div className="flex flex-col gap-3">
-        <Boton
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => setMostrarCoordenadas((valor) => !valor)}
-          aria-expanded={mostrarCoordenadas}
-          className="w-fit"
-        >
-          {mostrarCoordenadas ? "Ocultar coordenadas" : "¿Tenés las coordenadas? Pegalas de Google Maps"}
-        </Boton>
+        <div className="flex flex-col gap-3">
+          <Boton
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setMostrarCoordenadas((valor) => !valor)}
+            aria-expanded={mostrarCoordenadas}
+            className="w-fit"
+          >
+            {mostrarCoordenadas ? "Ocultar coordenadas" : "¿Tenés las coordenadas? Pegalas de Google Maps"}
+          </Boton>
 
-        {mostrarCoordenadas && (
-          <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-4 chica:gap-2 chica:p-3">
-            <a
-              href={urlMaps}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex w-fit items-center gap-2 text-sm font-medium text-primary underline underline-offset-2 hover:no-underline"
-            >
-              <MapPinnedIcon className="size-4 shrink-0" aria-hidden="true" />
-              Abrir en Google Maps para copiarlas
-            </a>
-            <p className="text-sm text-muted-foreground chica:hidden">
-              Buscá el lugar, mantené el dedo (o el clic) sobre el punto en el mapa y copiá los
-              números que aparecen. Pegalos acá abajo.
-            </p>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
-              <CampoNumero
-                id="latitud"
-                label="Latitud"
-                decimal
-                permiteNegativo
-                value={latitud}
-                onChange={(evento) => setLatitud(evento.target.value)}
-                ayuda="Ej: -54.8083"
-              />
-              <CampoNumero
-                id="longitud"
-                label="Longitud"
-                decimal
-                permiteNegativo
-                value={longitud}
-                onChange={(evento) => setLongitud(evento.target.value)}
-                ayuda="Ej: -68.3000"
-              />
+          {mostrarCoordenadas && (
+            <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-4 chica:gap-2 chica:p-3">
+              <a
+                href={urlMaps}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex w-fit items-center gap-2 text-sm font-medium text-primary underline underline-offset-2 hover:no-underline"
+              >
+                <MapPinnedIcon className="size-4 shrink-0" aria-hidden="true" />
+                Abrir en Google Maps para copiarlas
+              </a>
+              <p className="text-sm text-muted-foreground chica:hidden">
+                Buscá el lugar, mantené el dedo (o el clic) sobre el punto en el mapa y copiá los
+                números que aparecen. Pegalos acá abajo.
+              </p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
+                <CampoNumero
+                  id="latitud"
+                  label="Latitud"
+                  decimal
+                  permiteNegativo
+                  value={latitud}
+                  onChange={(evento) => setLatitud(evento.target.value)}
+                  ayuda="Ej: -54.8083"
+                />
+                <CampoNumero
+                  id="longitud"
+                  label="Longitud"
+                  decimal
+                  permiteNegativo
+                  value={longitud}
+                  onChange={(evento) => setLongitud(evento.target.value)}
+                  ayuda="Ej: -68.3000"
+                />
+              </div>
             </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
 
-      <CampoTextarea
-        id="notasPreparacion"
-        label="Notas de preparación"
-        rows={4}
-        maxLength={2000}
-        conDictado
-        defaultValue={valoresIniciales?.notasPreparacion}
-        ayuda="Ayuno, llevar estudios previos, suspender alguna medicación, etc. (opcional)."
-      />
+        <CampoTextarea
+          id="notasPreparacion"
+          label="Notas de preparación"
+          rows={4}
+          maxLength={2000}
+          conDictado
+          value={notasPreparacion}
+          onChange={(evento) => setNotasPreparacion(evento.target.value)}
+          ayuda="Ayuno, llevar estudios previos, suspender alguna medicación, etc. (opcional)."
+        />
 
-      {estado.error && <Alerta variante="error">{estado.error}</Alerta>}
+        {estado.error && <Alerta variante="error">{estado.error}</Alerta>}
 
-      <Boton type="submit" size="lg" cargando={pendiente}>
-        {modo === "crear" ? <CalendarPlusIcon aria-hidden="true" /> : <SaveIcon aria-hidden="true" />}
-        {modo === "crear" ? "Guardar turno" : "Guardar cambios"}
-      </Boton>
-    </form>
+        <Boton type="submit" size="lg" cargando={pendiente}>
+          {modo === "crear" ? <CalendarPlusIcon aria-hidden="true" /> : <SaveIcon aria-hidden="true" />}
+          {modo === "crear" ? "Guardar turno" : "Guardar cambios"}
+        </Boton>
+      </form>
+    </div>
   )
 }

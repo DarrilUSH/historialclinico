@@ -381,7 +381,69 @@ minimización no vació la ficha.
 
 ---
 
-## 9. Referencias
+## 9. Mensajes de turno pegados desde WhatsApp (Sprint 16, tarea 16.4)
+
+**Este caso es la excepción a la regla del §1.** Todo lo de arriba describe un
+contexto ARMADO A MANO, campo por campo, con una lista blanca explícita. La
+función "¿Te llegó el turno por WhatsApp? Pegalo acá" de `/turnos/nuevo`
+(`components/turnos/analizador-mensaje-turno.tsx`) no puede funcionar así: el
+insumo es texto libre que la persona pega tal cual le llegó, y la finalidad
+declarada -que Gemini identifique fecha, hora, profesional, especialidad y
+lugar dentro de ese texto- exige que el modelo vea el mensaje COMPLETO. No hay
+forma de "minimizar antes de mandar" un mensaje de WhatsApp sin arriesgarse a
+cortar justo el dato que hace falta leer.
+
+### 9.1 Qué viaja
+
+El texto pegado, completo, tal como lo escribió la persona -incluido lo que
+haya adentro: nombre y a veces DNI del paciente (`tests/fixtures/mensajes-turno/clinica-san-jorge-ecografia.txt`
+trae los dos), montos, teléfonos de la institución, cualquier dato que la
+clínica haya puesto en el mensaje original. `lib/gemini/prompt-turno.ts` viaja
+como prompt junto con el mensaje en un único `extraerJson` (`lib/gemini/client.ts`).
+
+### 9.2 Qué NO sale del otro lado (la lista blanca sigue existiendo, del lado de la SALIDA)
+
+Acá la minimización no puede aplicarse a la ENTRADA, así que se aplica con la
+misma fuerza a la SALIDA: `SCHEMA_ANALISIS_MENSAJE_TURNO`
+(`lib/gemini/schemas.ts`) **no tiene ningún campo para nombre ni DNI del
+paciente** -no es que se extraigan y se descarten después: no existe dónde
+ponerlos, mismo principio que `ContextoClinico` (§1, regla 2: "el tipo es la
+lista blanca")-. El prompt además se lo pide explícitamente al modelo (punto 9
+de `lib/gemini/prompt-turno.ts`): "no extraigas ni menciones en ningún campo
+el nombre del paciente ni su DNI/documento, aunque aparezcan en el mensaje".
+El DNI que trae el fixture de la Clínica San Jorge nunca aparece en ningún
+campo de `PropuestaTurno` (`lib/turnos/construir-propuestas.ts`) ni, por lo
+tanto, en ningún campo del formulario.
+
+### 9.3 El mensaje nunca se persiste
+
+`app/api/turnos/analizar-mensaje/route.ts` no escribe el mensaje en ninguna
+tabla, ni en ningún `console.*` -mismo criterio de "nunca se loguea" que
+`lib/ficha/generar.ts` aplica al contexto clínico (§6)-. Lo único que puede
+llegar a persistir, si la persona revisa y toca "Guardar turno", es el turno
+final en `appointments`, con los mismos campos que ya existían antes de esta
+tarea (`specialty`, `doctor_name`, `appointment_date`,
+`location_name`/`location_address`/`location_city`/`location_province`,
+`preparation_notes`) — ninguno de ellos guarda el texto crudo del mensaje.
+
+### 9.4 Riesgo residual declarado
+
+A diferencia del §5 -donde el riesgo es que texto libre ESCRITO POR UNA
+PERSONA dentro de un campo ya minimizado *pueda* contener un identificador-,
+acá el mensaje COMPLETO, con cualquier identificador que traiga, viaja
+siempre hacia Gemini como procesador externo. La mitigación es la misma que
+ya declara el §6 para lo que sale de la aplicación: **lo único que no puede
+filtrarse es lo que nunca se mandó**, y acá sí se manda. Lo que esta tarea
+puede controlar -y controla- es (1) que el mensaje no quede escrito en ningún
+lado de la propia infraestructura, y (2) que ningún identificador del mensaje
+pueda terminar precargado en un campo del formulario ni, por lo tanto,
+guardado en la base. `components/turnos/analizador-mensaje-turno.tsx` además
+avisa en pantalla, antes de tocar "Analizar", que el texto se manda a un
+servicio externo y que no se guarda.
+
+---
+
+## 10. Referencias
 
 - `lib/ficha/armado.ts` — el tipo `ContextoClinico` (la lista blanca) y el armado puro.
 - `lib/ficha/contexto.ts` — la lectura de la base, con los `select` acotados.
@@ -389,3 +451,4 @@ minimización no vació la ficha.
 - `docs/modelo-permisos.md` §9 — cumplimiento de la Ley 25.326 en el modelo de permisos.
 - `docs/modelo-sos.md` §4.2 — por qué la ficha SOS sí muestra el DNI.
 - `supabase/migrations/20260812200000_schema_inicial.sql` §4.1 — los `COMMENT ON COLUMN` que anticiparon esta tarea.
+- `lib/gemini/schemas.ts` (`SCHEMA_ANALISIS_MENSAJE_TURNO`), `lib/gemini/prompt-turno.ts`, `lib/turnos/construir-propuestas.ts`, `app/api/turnos/analizar-mensaje/route.ts` — la función de la tarea 16.4 descripta en el §9.
