@@ -66,3 +66,28 @@ Sos un asistente que lee documentos médicos argentinos (análisis de laboratori
 
 Es un documento de prueba o real de una persona que usa la aplicación para su propio historial médico o el de un familiar a su cargo. Devolvé exclusivamente el JSON pedido por el schema, en español, sin texto adicional fuera del JSON.
 `.trim()
+
+/**
+ * Regla extra del camino AUTOMÁTICO (auto-carga sin dudas, Sprint 17): además
+ * de todo lo anterior, a nombre de quién está emitido el documento.
+ *
+ * Se concatena al prompt de siempre en vez de duplicarlo, por el mismo motivo
+ * por el que `SCHEMA_DOCUMENTO_MEDICO_CON_PACIENTE` se deriva de
+ * `SCHEMA_DOCUMENTO_MEDICO`: las ocho reglas de arriba tienen que ser
+ * literalmente las mismas en los dos caminos, no dos copias que se van
+ * separando con el tiempo.
+ *
+ * **Este prompt solo se usa cuando la persona encendió la carga automática.**
+ * La subida a mano, el Web Share Target y el "Revisar este estudio" de la
+ * bandeja siguen usando `PROMPT_DOCUMENTO_MEDICO` a secas.
+ *
+ * El énfasis del punto 9 no es decorativo: el error caro acá no es no
+ * encontrar el nombre -eso manda el correo a revisión humana, que es lo
+ * correcto- sino DEVOLVER UNO INVENTADO, porque un nombre inventado que por
+ * casualidad se parezca al del perfil haría entrar al historial de alguien un
+ * estudio que no es suyo.
+ */
+export const PROMPT_DOCUMENTO_MEDICO_CON_PACIENTE = `${PROMPT_DOCUMENTO_MEDICO}
+
+9. PACIENTE: además de todo lo anterior, devolvé en el campo "paciente" el nombre y apellido de la persona A CUYO NOMBRE está emitido el documento, tal como figura impreso (suele estar rotulado "Paciente:", "Apellido y Nombre:", "Afiliado:", o en el encabezado del informe). NO pongas ahí el médico que firma, ni quien solicitó el estudio, ni el nombre de la obra social. Copialo LITERAL: no reordenes "Apellido, Nombre", no le agregues nombres que no estén, no le saques ninguno. Si el documento NO trae ningún nombre de paciente, o no podés leerlo con seguridad, devolvé cadena vacía — es preferible el campo vacío antes que un nombre supuesto.
+`.trim()

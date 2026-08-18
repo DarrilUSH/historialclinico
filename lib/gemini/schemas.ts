@@ -146,6 +146,59 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
   ],
 };
 
+/**
+ * Variante de `SCHEMA_DOCUMENTO_MEDICO` que además pregunta **a nombre de
+ * quién está emitido el documento** (auto-carga sin dudas, Sprint 17).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  ⚠️  ESTE SCHEMA ES EXCLUSIVO DEL CAMINO AUTOMÁTICO. La subida a mano, el
+ *      Web Share Target y el "Revisar este estudio" de la bandeja siguen
+ *      usando `SCHEMA_DOCUMENTO_MEDICO` de arriba, SIN el campo `paciente`:
+ *      su contrato de privacidad no cambia en nada.
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * ## Por qué existe un schema aparte y no un campo más en el de siempre
+ *
+ * Agregar `paciente` al schema único haría que TODAS las extracciones del
+ * producto -incluidas las que una persona está mirando en pantalla y va a
+ * confirmar a mano- devolvieran el nombre del paciente, un dato identificatorio
+ * que hoy no sale de ningún documento (`docs/minimizacion-datos.md` §4.1). El
+ * camino automático es el único que lo NECESITA, y lo necesita por un motivo
+ * de seguridad, no de producto: sin cotejar el nombre, una casilla que recibe
+ * los estudios de la madre podría cargárselos solos al historial del hijo. Un
+ * schema derivado deja el dato acotado a ese único camino y hace imposible que
+ * los dos se separen: las siete propiedades y el `required` del base se
+ * reutilizan tal cual, no se copian.
+ *
+ * ## Qué se hace con el nombre y qué NO
+ *
+ * Se compara en memoria contra `profiles.full_name` del perfil de destino
+ * (`lib/gmail/coincidencia-nombre.ts`) y se descarta. **No se persiste en
+ * ninguna tabla, no se escribe en ningún log y no vuelve al navegador.** Lo
+ * único que sobrevive a la comparación es un booleano. Ver
+ * `docs/minimizacion-datos.md` §10.7.
+ */
+export const SCHEMA_DOCUMENTO_MEDICO_CON_PACIENTE: Schema = {
+  ...SCHEMA_DOCUMENTO_MEDICO,
+  description:
+    'Datos estructurados extraídos de un documento médico, incluyendo a nombre de qué persona ' +
+    'está emitido (para verificar que corresponde al historial al que se lo va a agregar).',
+  properties: {
+    ...SCHEMA_DOCUMENTO_MEDICO.properties,
+    paciente: {
+      type: Type.STRING,
+      description:
+        'Nombre y apellido de la PERSONA PACIENTE a cuyo nombre está emitido el documento, tal como ' +
+        'figura impreso (por ejemplo en "Paciente:", "Apellido y Nombre:", el encabezado del informe o ' +
+        'la carátula del laboratorio). NO es el médico que firma ni quien solicitó el estudio. Copialo ' +
+        'literal, sin reordenar ni completar: si dice "GOMEZ, ROBERTO CARLOS" devolvé eso mismo. ' +
+        'Cadena vacía si el documento no trae ningún nombre de paciente — no lo deduzcas de nada.',
+    },
+  },
+  required: [...(SCHEMA_DOCUMENTO_MEDICO.required ?? []), 'paciente'],
+  propertyOrdering: ['paciente', ...(SCHEMA_DOCUMENTO_MEDICO.propertyOrdering ?? [])],
+};
+
 /** Categorías válidas de documento médico — espejo de `public.doc_category`. */
 export type CategoriaDocumentoExtraida =
   | 'laboratory'
@@ -179,6 +232,22 @@ export interface DocumentoMedicoExtraido {
   categoria: CategoriaDocumentoExtraida;
   metricas: MetricaExtraida[];
   texto_completo?: string;
+}
+
+/**
+ * Lo que devuelve Gemini con `SCHEMA_DOCUMENTO_MEDICO_CON_PACIENTE`: la misma
+ * extracción de siempre más el nombre del paciente.
+ *
+ * `paciente` es OPCIONAL en el tipo aunque el schema lo pida en `required`:
+ * defensivo, porque un modelo puede omitir un campo pedido y la compuerta de
+ * auto-carga tiene que poder tratar "no vino" exactamente igual que "vino
+ * vacío" — como una DUDA, que manda el correo a revisión humana.
+ *
+ * Este tipo NUNCA se persiste con el campo puesto: ver el comentario de
+ * `SCHEMA_DOCUMENTO_MEDICO_CON_PACIENTE`.
+ */
+export interface DocumentoMedicoConPacienteExtraido extends DocumentoMedicoExtraido {
+  paciente?: string;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

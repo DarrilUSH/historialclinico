@@ -45,7 +45,9 @@ import {
   RefreshCwIcon,
   RotateCcwIcon,
   SearchIcon,
+  SparklesIcon,
   Trash2Icon,
+  Undo2Icon,
   XIcon,
 } from "lucide-react"
 
@@ -58,6 +60,7 @@ import {
   aprenderRemitente,
   buscarCorreosAhora,
   descartarCorreo,
+  deshacerCargaAutomatica,
   ingerirAdjuntoDeCorreo,
   reabrirCorreo,
   sacarFiltroAprendido,
@@ -101,6 +104,37 @@ export interface CorreoParaBandeja {
   pareceTurno: boolean
   /** Ya hay una regla para este remitente: no se vuelve a ofrecer. */
   tieneFiltro: boolean
+  /**
+   * Por qué la carga automática NO lo trajo sola (Sprint 17), ya en
+   * castellano: "Quedó para que lo mires vos: no dice a nombre de quién
+   * viene." `null` si la carga automática está apagada — en ese caso no se
+   * evaluó nada y no hay nada que explicar.
+   */
+  motivoRevision: string | null
+}
+
+/**
+ * Un correo que la app trajo SOLA (Sprint 17). Es su propia forma y no una
+ * variante de `CorreoProcesadoParaBandeja` porque la pregunta que responde la
+ * tarjeta es otra: no "¿en qué terminó esto que revisaste?" sino "¿qué hizo la
+ * app mientras no mirabas, y cómo lo deshago?".
+ */
+export interface CorreoAutoCargadoParaBandeja {
+  id: string
+  asunto: string
+  remitente: string
+  /** "18/08/2026 03:12" — cuándo entró solo, no cuándo llegó el correo. */
+  cargadoElTexto: string
+  /** Qué se creó: "estudio" o "turno". */
+  tipo: "estudio" | "turno"
+  /** Cómo se llamó lo que se creó, para reconocerlo sin abrirlo. */
+  titulo: string
+  /** El estudio creado, si sigue existiendo. */
+  documentoId: string | null
+  /** El turno creado, si sigue existiendo. */
+  turnoId: string | null
+  /** A qué perfil se le sumó. */
+  perfilNombre: string | null
 }
 
 export interface CorreoProcesadoParaBandeja {
@@ -138,6 +172,8 @@ export interface FiltroParaBandeja {
 export interface BandejaGmailProps {
   pendientes: CorreoParaBandeja[]
   procesados: CorreoProcesadoParaBandeja[]
+  /** Lo que entró solo (Sprint 17). Vacío mientras el interruptor esté apagado. */
+  autoCargados: CorreoAutoCargadoParaBandeja[]
   filtros: FiltroParaBandeja[]
   /** Nombre del perfil activo: a quién se le van a sumar los estudios que se importen. */
   perfilActivoNombre: string | null
@@ -150,6 +186,7 @@ export interface BandejaGmailProps {
 export function BandejaGmail({
   pendientes,
   procesados,
+  autoCargados,
   filtros,
   perfilActivoNombre,
   puedeCargar,
@@ -179,8 +216,12 @@ export function BandejaGmail({
     sacarFiltroAprendido,
     ESTADO_CORREO_INICIAL,
   )
+  const [deshecho, deshacer, deshaciendo] = useActionState<EstadoCorreoGmail, FormData>(
+    deshacerCargaAutomatica,
+    ESTADO_CORREO_INICIAL,
+  )
 
-  const avisos = [descarte, reapertura, aprendizaje, olvido, ingesta]
+  const avisos = [descarte, reapertura, aprendizaje, olvido, ingesta, deshecho]
   const error = busqueda.error ?? avisos.find((estado) => estado.error)?.error ?? null
   const exito = busqueda.mensaje ?? avisos.find((estado) => estado.mensaje)?.mensaje ?? null
   // Solo `ingesta` lo llena (ver `EstadoCorreoGmail.duplicado`). `?? null`
@@ -281,6 +322,93 @@ export function BandejaGmail({
         </>
       )}
 
+      {/*
+        "Cargados automáticamente" va ARRIBA de "correos que ya revisaste" y
+        NO plegado, a diferencia de aquélla. Es lo único de esta pantalla que
+        la app hizo sin que nadie se lo pidiera en el momento: esconderlo
+        detrás de un `<details>` sería pedirle a la persona que busque lo que
+        más necesita ver.
+      */}
+      {autoCargados.length > 0 && (
+        <section
+          className="flex flex-col gap-3 rounded-lg border border-primary/40 bg-primary/5 p-4 chica:gap-2 chica:p-3"
+          aria-labelledby="titulo-auto-cargados"
+        >
+          <div className="flex flex-col gap-1">
+            <h3
+              id="titulo-auto-cargados"
+              className="flex items-center gap-2 text-base font-semibold chica:text-sm"
+            >
+              <SparklesIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              Cargados automáticamente
+            </h3>
+            <p className="text-sm text-muted-foreground chica:text-xs">
+              Estos entraron solos porque se leyeron sin ninguna duda. Si alguno no va, sacalo de un
+              toque con «Deshacer».
+            </p>
+          </div>
+
+          <ul className="flex flex-col gap-3 chica:gap-2">
+            {autoCargados.map((correo) => (
+              <li
+                key={correo.id}
+                className="flex flex-col gap-2 border-b border-border/60 pb-3 last:border-b-0 last:pb-0 chica:gap-1.5 chica:pb-2"
+              >
+                <div className="flex flex-col gap-0.5">
+                  <p className="text-base font-medium chica:text-sm">{correo.titulo}</p>
+                  <p className="text-sm text-muted-foreground chica:text-xs">
+                    {correo.tipo === "estudio" ? "Estudio" : "Turno"}
+                    {correo.perfilNombre ? ` de ${correo.perfilNombre}` : ""} · entró solo el{" "}
+                    {correo.cargadoElTexto}
+                  </p>
+                  <p className="truncate text-sm text-muted-foreground chica:text-xs">
+                    Del correo «{correo.asunto}» de {correo.remitente}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {correo.documentoId && (
+                    <Boton
+                      render={<a href={`/estudios/${correo.documentoId}`} />}
+                      nativeButton={false}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <FileTextIcon aria-hidden="true" />
+                      Ver el estudio
+                    </Boton>
+                  )}
+                  {correo.turnoId && (
+                    <Boton
+                      render={<a href={`/turnos/${correo.turnoId}`} />}
+                      nativeButton={false}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <CalendarPlusIcon aria-hidden="true" />
+                      Ver el turno
+                    </Boton>
+                  )}
+                  <form action={deshacer}>
+                    <input type="hidden" name="correoId" value={correo.id} />
+                    {correo.documentoId && (
+                      <input type="hidden" name="documentoId" value={correo.documentoId} />
+                    )}
+                    {correo.turnoId && (
+                      <input type="hidden" name="turnoId" value={correo.turnoId} />
+                    )}
+                    <Boton type="submit" variant="outline" size="sm" cargando={deshaciendo}>
+                      <Undo2Icon aria-hidden="true" />
+                      Deshacer
+                    </Boton>
+                  </form>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {procesados.length > 0 && (
         <details className="rounded-lg border border-border p-4 chica:p-3">
           <summary className="cursor-pointer text-base font-medium chica:text-sm">
@@ -350,6 +478,11 @@ export function BandejaGmail({
       />
       <VeloEspera visible={descartando || reabriendo} mensaje="Un momento…" />
       <VeloEspera
+        visible={deshaciendo}
+        mensaje="Sacándolo del historial…"
+        submensaje="El correo vuelve a la lista para que decidas vos."
+      />
+      <VeloEspera
         visible={aprendiendo}
         mensaje="Creando la regla en tu Gmail…"
         submensaje="Los próximos correos de esa dirección se van a etiquetar solos."
@@ -383,6 +516,15 @@ function CorreoPendiente({
         accionDescartar={accionDescartar}
         accionAprender={accionAprender}
       />
+
+      {/*
+        Por qué la carga automática no lo trajo sola (Sprint 17). Solo aparece
+        si el interruptor está prendido: con la función apagada nadie evaluó
+        nada, y una explicación de una decisión que no se tomó sería ruido.
+      */}
+      {correo.motivoRevision && (
+        <p className="text-sm text-muted-foreground chica:text-xs">{correo.motivoRevision}</p>
+      )}
 
       {aptos.length > 0 && (
         <ul className="flex flex-col gap-2 chica:gap-1.5">

@@ -67,3 +67,22 @@ export const ESTADO_CORREO_INICIAL: EstadoCorreoGmail = {
   mensaje: null,
   duplicado: null,
 }
+
+/**
+ * Estado del interruptor de carga automática (Sprint 17).
+ *
+ * Tiene su propio tipo -y no reusa `EstadoCorreoGmail`- porque el error de esta
+ * acción se muestra JUNTO AL INTERRUPTOR y no en la franja general de la
+ * bandeja: si alguien intenta prenderlo con un perfil que no administra, el
+ * mensaje tiene que aparecer al lado del selector que acaba de tocar, no
+ * cuatro secciones más arriba.
+ */
+export interface EstadoAutoCargaGmail {
+  error: string | null
+  mensaje: string | null
+}
+
+export const ESTADO_AUTO_CARGA_INICIAL: EstadoAutoCargaGmail = {
+  error: null,
+  mensaje: null,
+}

@@ -253,6 +253,15 @@ select id, status_code, content from net._http_response order by created desc li
 | `components/gmail/bandeja-gmail.tsx` | "Llegaron por Gmail": pendientes, ya procesados y filtros. |
 | `components/gmail/detalle-correo.tsx` | Diálogo de detalle (asunto/remitente/fecha completos + acciones) — ampliación en vivo, pedido del usuario en producción, 2026-08-18. |
 | `components/turnos/precarga-gmail.tsx` | El hermano automático del analizador de la 16.4. |
+| `supabase/migrations/20260818160000_gmail_auto_ingesta.sql` | La carga automática (§9): el interruptor, la marca de origen y las tres RPC — ampliación en vivo, pedido del usuario en producción, 2026-08-18. |
+| `lib/gmail/auto-ingesta.ts` | **Puro.** La compuerta "sin dudas" (§9.2): decide, sin llamar a nada, si un documento o un turno leídos entran solos. |
+| `lib/gmail/coincidencia-nombre.ts` | **Puro.** El cotejo de titularidad, contra `profiles.full_name`, para documentos y turnos. |
+| `lib/gmail/auto-carga.ts` | La pasada automática dentro del barrido: baja el adjunto, llama a Gemini, consulta la compuerta y carga o anota el motivo (§9.1). |
+| `lib/gmail/auto-ingesta-admin.ts` | `service_role`: enciende/apaga el interruptor, llama a las dos RPC de carga y hace el Deshacer (§9.5). |
+| `lib/gmail/pendientes-admin.ts` | `service_role`: las dos consultas sin sesión que la pasada automática necesita (huella ya cargada, otros pendientes para la marca de posible duplicado). |
+| `lib/documentos/ingesta-automatica.ts` | Sube el adjunto a Storage con `service_role` y crea el documento automático, con compensación si la RPC no devuelve `creado`. |
+| `lib/gemini/schemas.ts` / `lib/gemini/prompt-documento.ts` | `SCHEMA_DOCUMENTO_MEDICO_CON_PACIENTE` / `PROMPT_DOCUMENTO_MEDICO_CON_PACIENTE`: el schema y el prompt derivados, exclusivos del camino automático. |
+| `components/gmail/panel-auto-carga.tsx` | El interruptor y el selector de perfil de destino en `/perfil/gmail`. |
 
 ## 7. Cómo se verifica
 
@@ -287,6 +296,29 @@ docker exec -i supabase_db_historialclinico psql -U postgres -d postgres \
   (ampliación en vivo): el disparador trunca pero el diálogo muestra el
   asunto ENTERO, el nombre accesible completo, los links a estudio/turno
   según corresponda, y las acciones según el estado del correo.
+- `tests/unit/gmail-coincidencia-nombre.test.ts` — el cotejo de titularidad
+  (§9), en los dos sentidos: lo que TIENE que coincidir y, sobre todo, lo que
+  NO puede coincidir, con el caso real del encargo (la casilla que recibe los
+  estudios de la madre) en su propio `describe`.
+- `tests/unit/gmail-auto-ingesta.test.ts` — la compuerta "sin dudas" (§9.2),
+  un caso por cada `MotivoRevision`: si mañana alguien afloja un chequeo, el
+  test que se pone rojo lleva el nombre de lo que se aflojó.
+- `tests/unit/gmail-auto-carga.test.ts` — el circuito de la carga automática
+  de punta a punta, contra el mismo Gmail de mentira que `gmail-barrido.test.ts`:
+  correo perfecto que entra solo, cada tipo de duda con su motivo, duplicado
+  que ni siquiera llega a llamar a Gemini, e interruptor apagado que no toca
+  absolutamente nada.
+
+- `scripts/test-rls.sql` BLOQUE 25 (55 casos) — las cuatro guardas de
+  `ingresar_documento_automatico` / `ingresar_turno_automatico` con su versión
+  HOSTIL de cada una (perfil que la cuenta no administra, opt-in apagado,
+  replay, duplicado, correo ajeno, `can_manage` revocado DESPUÉS de encender
+  el interruptor), el CHECK+trigger que evita que un interruptor prendido
+  bloquee el borrado del perfil de destino, la inmutabilidad de
+  `auto_ingest_source` desde una sesión de usuario, y la mitad del Deshacer
+  que sí depende de sesión y de RLS —justo la que `tests/unit/gmail-auto-carga.test.ts`
+  declara en su propio comentario que no prueba, por ser borrado con la sesión
+  de la persona—.
 
 **Migración `20260818150000_huella_documentos.sql` (huella digital):** no
 tocó ninguna política RLS -una columna nueva de una tabla ya cubierta hereda
@@ -327,3 +359,200 @@ en local hace que Google conteste `invalid_grant` y la conexión quede vencida.
    tarjeta del perfil de nuevo" en vez de un botón dedicado -no se armó un
    tercer patrón de UI para un camino de entrada que no estaba en el pedido
    original del hotfix-.
+
+## 9. La carga automática (opt-in, Sprint 17, tarea 17.3)
+
+Todo lo de arriba (§1 a §8) describe el circuito de la 17.2: el barrido
+REGISTRA, y una persona decide, correo por correo, qué entra al historial.
+Después de usar eso en producción, el pedido del usuario fue puntual:
+*"cuando un correo se lee SIN NINGUNA duda, que se cargue solo; solo lo
+dudoso queda a revisión manual"*. Esta sección documenta esa segunda pasada
+-la que corre SOLO para las conexiones que la persona encendió a mano- y
+remite a `docs/minimizacion-datos.md` §10.7 para el cambio de contrato de
+privacidad que trae (el barrido, con el interruptor prendido, SÍ le manda a
+Gemini el cuerpo del correo y los bytes del adjunto, sin que nadie los mire
+antes).
+
+### 9.1 El circuito, paso a paso
+
+```
+barrido de la etiqueta (§1, sin cambios)
+        │
+        ▼
+gmail_messages (registrado, pendiente_revision)
+        │
+        ▼
+¿la conexión tiene auto_ingest_enabled = true?  ──── no ──→ fin (17.2 de siempre)
+        │ sí
+        ▼
+lib/gmail/auto-carga.ts — hasta LIMITE_AUTO_POR_PASADA = 3 correos (§9.4)
+        │
+        ├─ documento: baja el adjunto (descargarAdjunto) ─┐
+        │                                                  │
+        └─ turno: usa el cuerpo que ya tiene en memoria ───┤
+                                                             ▼
+                                          Gemini (SCHEMA_..._CON_PACIENTE /
+                                          analizarMensajeTurno de la 16.4)
+                                                             │
+                                                             ▼
+                                    lib/gmail/auto-ingesta.ts — LA COMPUERTA
+                                    (evaluarDocumentoParaAutoCarga /
+                                     evaluarTurnoParaAutoCarga)
+                                                             │
+                              ┌──────────────────────────────┴───────────────────────┐
+                              ▼ sinDudas = true                                       ▼ algún motivo
+                    ingresar_documento_automatico /                    anotarMotivoDeRevision(frase)
+                    ingresar_turno_automatico (RPC,                    → correo sigue pendiente,
+                     4 guardas, `docs/modelo-permisos.md` §7.5)          con el motivo escrito
+                              │
+                              ▼
+                    documents / appointments
+                    auto_ingest_source = 'gmail'
+```
+
+Antes de gastar una llamada a Gemini, `intentarDocumento`
+(`lib/gmail/auto-carga.ts`) ya cotejó la huella del archivo y la marca de
+"posible duplicado" con las mismas funciones del §2.4 -si el archivo ya está,
+ni se lo manda al modelo-, y si el correo trae más de un adjunto apto, corta
+ahí mismo con el motivo `varios_adjuntos` sin bajar ni leer nada: cuál de los
+dos importar es una decisión, no algo que la compuerta pueda inferir.
+
+### 9.2 La definición ESTRICTA de "sin dudas"
+
+**La compuerta se abre solo si la lista de motivos está vacía.** No hay
+puntajes ni umbrales ni "dos de tres": un solo motivo, cualquiera, manda el
+correo a la bandeja de siempre. Cada motivo es la frase exacta que la persona
+lee en `auto_review_reason` (`TEXTO_MOTIVO`, `lib/gmail/auto-ingesta.ts`):
+
+**Comunes a documentos y turnos:**
+
+| Motivo | Lo que dice la bandeja |
+|---|---|
+| `nombre_no_coincide` | "el nombre que figura no es el del perfil elegido" |
+| `sin_nombre_de_paciente` | "no dice a nombre de quién viene" |
+
+**Solo adjuntos:**
+
+| Motivo | Lo que dice la bandeja |
+|---|---|
+| `lectura_fallida` | "no pudimos leer el archivo automáticamente" |
+| `fecha_no_confiable` | "no pudimos leer con seguridad la fecha" |
+| `categoria_indeterminada` | "no pudimos identificar qué tipo de estudio es" |
+| `sin_datos_de_contexto` | "no dice de qué institución ni de qué especialidad es" |
+| `duplicado_exacto` | "ya tenías cargado un archivo idéntico" |
+| `posible_duplicado` | "puede estar repetido con otro correo" |
+| `varios_adjuntos` | "traía más de un archivo y hay que elegir cuál" |
+
+**Solo turnos:**
+
+| Motivo | Lo que dice la bandeja |
+|---|---|
+| `aviso_del_analizador` | "faltaban datos del turno" |
+| `varios_mensajes` | "el correo traía más de un turno" |
+| `contradiccion` | "los datos del correo se contradicen entre sí" |
+| `turno_vencido` | "la fecha del turno ya pasó" |
+
+Si un correo queda afuera por varios motivos a la vez, la bandeja los lista
+TODOS, no solo el primero: mostrar uno solo le haría creer a la persona que
+arreglando eso alcanza para que la próxima vez entre solo. Para turnos, el
+motivo `aviso_del_analizador` no reimplementa ninguna lista propia: son
+literalmente los avisos que ya genera `generarAvisos` (Sprint 16, tarea 16.4)
+sobre los campos finales y fusionados -año inferido, hora vacía, discrepancia
+de día, orden de nombre dudoso, especialidad inferida-, para no tener dos
+definiciones de "dudoso" que se puedan separar con el tiempo.
+
+### 9.3 El correo sin nombre de paciente (decisión declarada)
+
+Un correo que no dice a nombre de quién viene **es una duda**, no una
+ausencia neutra. El caso real que decide esto: la casilla del usuario recibe
+también los estudios de su madre. Ahí la falta de nombre es exactamente la
+situación en la que nadie puede saber de quién es el estudio, así que "sin
+ninguna duda" tiene que exigir una confirmación POSITIVA de titularidad, no
+la mera ausencia de algo que la contradiga. El costo se acepta con los ojos
+abiertos: los correos de clínicas que no imprimen el nombre del paciente
+nunca se van a cargar solos, y siguen yendo a revisión manual como hasta hoy.
+
+### 9.4 `LIMITE_AUTO_POR_PASADA` = 3, y por qué
+
+Cada correo que la pasada automática intenta cargar puede costar una
+descarga de hasta 25 MB, una llamada a Gemini de hasta 30 s con un reintento,
+y una subida a Storage -tres cosas que el registro de metadatos del §3
+(`LIMITE_MENSAJES_POR_PASADA = 15`) nunca paga-. Tres es lo que entra con
+holgura en el presupuesto de la misma función serverless del plan gratuito
+que ya corre el barrido, y cubre de sobra un día normal: una familia no
+recibe tres estudios en la misma media hora. El resto de los correos nuevos
+de esa pasada se registran igual -eso es barato y es lo que evita perder un
+correo- pero quedan en la bandeja para revisar a mano, exactamente como
+antes de esta función, hasta que les toque turno en una pasada siguiente.
+
+### 9.5 "Cargados automáticamente" y el Deshacer
+
+La bandeja de `/perfil/gmail` suma una sección **"Cargados automáticamente"**,
+arriba de "correos que ya revisaste" y sin plegar -es lo único de esa
+pantalla que la aplicación hizo sin que nadie lo tocara en el momento, así
+que esconderla detrás de un `<details>` sería pedirle a la persona que
+busque lo que nunca pidió-. Cada ítem tiene un botón **Deshacer**.
+
+Deshacer hace dos escrituras, en este orden y por dos vías distintas
+(`deshacerCargaAutomatica`, `app/(app)/(con-nav)/perfil/gmail/actions.ts`):
+
+1. **Borra el documento o el turno con la SESIÓN de la persona.** Pasa por
+   las políticas de siempre -`documents_delete_administrador` /
+   `appointments_delete_administrador`, `can_manage`, `docs/modelo-permisos.md`
+   §6-, no por `service_role`: si la cuenta ya no administra ese perfil, el
+   `DELETE` no borra ninguna fila y la pantalla lo dice en vez de fingir que
+   funcionó. El borrado dispara el mismo trigger de purga de Storage que
+   cualquier otro borrado de documento.
+2. **Devuelve el correo a `pendiente_revision`**, con `service_role`
+   (`revertirCargaAutomatica`), limpiando `auto_ingested_at` y dejando en
+   `auto_review_reason` la frase *"Lo habíamos cargado solo y lo deshiciste.
+   Queda acá para que decidas vos."*.
+
+Si el paso 2 fallara después del 1, el correo queda `ingresado` con el
+puntero en `NULL` -mismo estado ya conocido de la fila "Modos de falla" del
+§4-, y la bandeja ya sabe mostrar "Volver a la lista" para ese caso. Ningún
+orden dentro del Deshacer deja algo peor que eso.
+
+### 9.6 La marca inmutable de origen
+
+`documents.auto_ingest_source` y `appointments.auto_ingest_source` valen
+`'gmail'` cuando la fila la creó la carga automática, y `NULL` en cualquier
+otro camino -subida a mano, Web Share Target, "Revisar este estudio" de la
+bandeja-. La pantalla del estudio y la tarjeta del turno la muestran como
+*"Cargado desde Gmail automáticamente"*.
+
+Es inmutable para las sesiones de usuario por trigger
+(`sellar_auto_ingest_source`, mismo patrón que el que sella
+`created_by_profile_id`): al insertar, se fuerza a `NULL` -nadie puede
+declarar que su carga a mano "entró sola"-, y al actualizar se conserva el
+valor anterior -nadie puede borrar la marca de lo que sí entró solo-. La
+única forma de escribirla es `service_role`, o sea las dos RPC del §9.1.
+Detalle completo del puente con la matriz de permisos en
+`docs/modelo-permisos.md` §7.5.
+
+### 9.7 Deudas y límites declarados
+
+1. **Un correo con dos o más adjuntos aptos siempre va a revisión**
+   (`varios_adjuntos`). Cuál de los dos es el estudio -o si son dos estudios
+   distintos- es una decisión que la persona tiene que tomar mirando los dos;
+   la compuerta no adivina.
+2. **Los correos que exceden `LIMITE_AUTO_POR_PASADA` (§9.4) en una pasada
+   quedan para carga manual**, con sus metadatos ya registrados: entran a la
+   tanda automática recién en una pasada siguiente, si para entonces la
+   cuenta sigue teniendo lugar en el cupo de esa corrida.
+3. **La huella (§2.4) solo detecta archivos BYTE A BYTE idénticos.** Un PDF
+   que la clínica regenera -mismo contenido, otros bytes en los metadatos del
+   motor que lo armó- no matchea y no se reconoce como duplicado; hereda el
+   mismo límite ya declarado para el camino manual, no es un límite nuevo de
+   la carga automática.
+4. **Un error de Gemini, de la descarga o de la RPC deja el correo pendiente
+   con un motivo genérico** ("no pudimos leerlo automáticamente") en vez de
+   con el detalle real: el error se registra en el log del servidor
+   (`[gmail-auto]`) pero no se le pide a la persona que lo interprete. No hay
+   reintento inmediato: el correo espera a la próxima pasada regular, igual
+   que cualquier otro pendiente.
+5. **El selector de perfil de destino solo ofrece los que la cuenta
+   ADMINISTRA** (`can_manage`), no todos los que puede cargar
+   (`can_upload OR can_manage`): es la lectura literal del encargo y lo que
+   garantiza que "Deshacer" funcione siempre. Ver
+   `docs/modelo-permisos.md` §7.5.

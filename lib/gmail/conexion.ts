@@ -22,9 +22,19 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 
 import type { Database } from "@/types/database.types"
 
-/** Columnas que `authenticated` tiene permitido leer. Espeja el GRANT de la migración. */
+/**
+ * Columnas que `authenticated` tiene permitido leer. Espeja los dos GRANT por
+ * columna: el de `20260818130000` §2 y el de `20260818160000` §1.
+ *
+ * **Va en UN literal de una sola pieza y no partido en varias líneas con `+`.**
+ * `supabase-js` infiere el tipo de la fila parseando ESTE string en tiempo de
+ * compilación: una concatenación lo convierte en `string` a secas y el
+ * resultado degrada a `GenericStringError`, con lo que cada acceso a una
+ * columna deja de compilar. Se pagó la lección al agregar las tres columnas de
+ * la auto-carga.
+ */
 const COLUMNAS_VISIBLES =
-  "user_id, email, status, label_id, label_name, connected_at, last_ok_at, expired_at"
+  "user_id, email, status, label_id, label_name, connected_at, last_ok_at, expired_at, auto_ingest_enabled, auto_ingest_profile_id, auto_ingest_set_at"
 
 export type EstadoGmail = "conectada" | "vencida"
 
@@ -38,6 +48,12 @@ export interface ConexionGmail {
   conectadaEl: string
   ultimoOk: string | null
   vencidaEl: string | null
+  /** Carga automática encendida (Sprint 17). `false` por defecto y para toda conexión anterior. */
+  autoCargaActiva: boolean
+  /** Perfil al que van los estudios y turnos que entren solos. `null` si nunca se eligió. */
+  autoCargaPerfilId: string | null
+  /** Desde cuándo está encendida. `null` mientras esté apagada. */
+  autoCargaDesde: string | null
 }
 
 /**
@@ -72,6 +88,9 @@ export async function obtenerConexionGmail(
     conectadaEl: data.connected_at,
     ultimoOk: data.last_ok_at,
     vencidaEl: data.expired_at,
+    autoCargaActiva: data.auto_ingest_enabled,
+    autoCargaPerfilId: data.auto_ingest_profile_id,
+    autoCargaDesde: data.auto_ingest_set_at,
   }
 }
 

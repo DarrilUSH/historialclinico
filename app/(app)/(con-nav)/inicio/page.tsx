@@ -69,7 +69,7 @@ import { ProximoTurno } from "@/components/inicio/proximo-turno"
 import { CLASE_TARJETA_BASE, CLASE_TARJETA_INTERACTIVA } from "@/components/base/tarjeta"
 import { BannerAlertasSignos } from "@/components/signos/banner-alerta"
 import { requerirSesion } from "@/lib/auth/guardas"
-import { contarCorreosPendientes } from "@/lib/gmail/mensajes"
+import { contarAutoCargadosRecientes, contarCorreosPendientes } from "@/lib/gmail/mensajes"
 import { obtenerTomasDeHoy } from "@/lib/medicacion/tomas-de-hoy"
 import { cn } from "@/lib/utils"
 import { obtenerPerfilActivo, type PermisosPerfilActivo } from "@/lib/perfil-activo"
@@ -108,13 +108,19 @@ export default async function PaginaInicio() {
     ? await obtenerAlertasSinVer(supabase, perfil.id)
     : []
 
-  // Contador de la card de Gmail (Sprint 17, tarea 17.2): cuántos correos
-  // llegaron a la etiqueta y todavía nadie miró. Es de la CUENTA, no del
-  // perfil activo -como la card misma-, así que no lleva gate de permiso; y
-  // es un `count` con `head: true`, sin traer una sola fila. Si la cuenta
-  // nunca conectó Gmail, la consulta devuelve 0 y la card queda exactamente
-  // como estaba.
-  const correosGmailPendientes = await contarCorreosPendientes(supabase)
+  // Contadores de la card de Gmail (Sprint 17, tareas 17.2 y 17.3): cuántos
+  // correos llegaron a la etiqueta y todavía nadie miró, más cuántos
+  // estudios y turnos entraron SOLOS -sin que nadie los revisara- en los
+  // últimos días. Los dos son de la CUENTA, no del perfil activo -como la
+  // card misma-, así que ninguno lleva gate de permiso; y los dos son un
+  // `count` con `head: true`, sin traer una sola fila. Van en el mismo
+  // `Promise.all` (no uno atrás del otro) porque son consultas
+  // independientes entre sí. Si la cuenta nunca conectó Gmail, las dos
+  // devuelven 0 y la card queda exactamente como estaba.
+  const [correosGmailPendientes, autoCargadosRecientes] = await Promise.all([
+    contarCorreosPendientes(supabase),
+    contarAutoCargadosRecientes(supabase),
+  ])
 
   return (
     <div className="flex w-full flex-1 flex-col items-center justify-center gap-8 px-4 py-12 text-center chica:gap-5 chica:py-6">
@@ -337,13 +343,7 @@ export default async function PaginaInicio() {
           href="/perfil/gmail"
           Icono={MailIcon}
           titulo="Tu Gmail"
-          descripcion={
-            correosGmailPendientes > 0
-              ? correosGmailPendientes === 1
-                ? "1 correo esperando que lo revises"
-                : `${correosGmailPendientes} correos esperando que los revises`
-              : "Traer turnos y estudios desde tu correo"
-          }
+          descripcion={textoCardGmail(correosGmailPendientes, autoCargadosRecientes)}
           insignia={correosGmailPendientes > 0 ? correosGmailPendientes : null}
         />
       </div>
@@ -404,6 +404,29 @@ function textoResumenTomas(totalHoy: number, pendientes: number): string {
     return "Todas las tomas de hoy están registradas"
   }
   return `${pendientes} ${pendientes === 1 ? "toma pendiente" : "tomas pendientes"} hoy`
+}
+
+/**
+ * Bajada de la card de Gmail (Sprint 17, tarea 17.3): combina dos novedades
+ * de naturaleza distinta y hay que evitar que se confundan entre sí -por eso
+ * ninguna comparte redacción con la otra-: los correos pendientes son algo
+ * que la persona TIENE que mirar ("esperando que los revises"), los
+ * auto-cargados son un aviso de algo que la app YA resolvió sola ("entraron
+ * solos"), sin pedirle nada. Si no hay ninguna de las dos, se conserva el
+ * texto genérico de siempre -no hay novedad que anunciar-.
+ */
+function textoCardGmail(pendientes: number, autoCargados: number): string {
+  const partes: string[] = []
+  if (pendientes > 0) {
+    partes.push(pendientes === 1 ? "1 correo esperando que lo revises" : `${pendientes} correos esperando que los revises`)
+  }
+  if (autoCargados > 0) {
+    partes.push(autoCargados === 1 ? "1 estudio o turno entró solo" : `${autoCargados} estudios y turnos entraron solos`)
+  }
+  if (partes.length === 0) {
+    return "Traer turnos y estudios desde tu correo"
+  }
+  return partes.join(" · ")
 }
 
 /**

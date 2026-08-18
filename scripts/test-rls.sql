@@ -73,6 +73,26 @@ delete from auth.users       where id    in (:u_a, :u_b);
 delete from auth.users where id in (
     'f2300aaa-1111-4111-8111-111111111111',
     'f2300bbb-2222-4222-8222-222222222222');
+
+-- El BLOQUE 25 (Sprint 17, tarea 17.3) crea tres cuentas -dos con conexión de
+-- Gmail- y dos perfiles gestionados, uno de los cuales llega a tener un
+-- documento auto-cargado. Se barre ACÁ, antes del delete de
+-- storage_purge_queue de abajo: si una corrida anterior se cortó a mitad del
+-- bloque, borrar el perfil gestionado en cascada encola una purga nueva de
+-- Storage, y esta ubicación asegura que esa purga fantasma también se limpie
+-- en la misma pasada -si fuera después del delete de storage_purge_queue,
+-- quedaría un residuo que ningún caso vuelve a barrer-.
+delete from public.profiles where id in (
+    'f2400d00-2222-4222-8222-222222222222',
+    'f2400e00-2222-4222-8222-222222222222');
+delete from auth.users where id in (
+    'f2400a00-1111-4111-8111-111111111111',
+    'f2400b00-1111-4111-8111-111111111111',
+    'f2400c00-1111-4111-8111-111111111111');
+delete from vault.secrets where name in (
+    'gmail_refresh_token_f2400a00-1111-4111-8111-111111111111',
+    'gmail_refresh_token_f2400b00-1111-4111-8111-111111111111');
+
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 
 -- El BLOQUE 15 crea usuarios y perfiles propios.
@@ -6630,6 +6650,11 @@ end $$;
 do $$
 declare v text;
 begin
+    -- `20260818160000_gmail_auto_ingesta.sql` §1 sumó tres columnas de ESTADO
+    -- más (auto_ingest_enabled, auto_ingest_profile_id, auto_ingest_set_at) al
+    -- GRANT por columna de authenticated -mismo criterio que las ocho de
+    -- acá-, así que la lista "exactamente las de estado" creció con ellas. El
+    -- BLOQUE 25 prueba esas tres columnas en detalle.
     select coalesce(string_agg(distinct column_name, ',' order by column_name), '(ninguna)')
       into v
       from information_schema.column_privileges
@@ -6637,7 +6662,8 @@ begin
        and grantee = 'authenticated';
     perform pruebas_rls.registrar('23. Gmail',
         'Las columnas concedidas a authenticated son exactamente las de estado',
-        'connected_at,email,expired_at,label_id,label_name,last_ok_at,status,user_id', v);
+        'auto_ingest_enabled,auto_ingest_profile_id,auto_ingest_set_at,connected_at,email,expired_at,label_id,label_name,last_ok_at,status,user_id',
+        v);
 end $$;
 
 do $$
@@ -7236,6 +7262,1132 @@ end $$;
 
 
 -- =============================================================================
+-- BLOQUE 25 — Carga automática desde Gmail: el interruptor, las RPC y la marca
+-- inmutable (Sprint 17, tarea 17.3)
+-- -----------------------------------------------------------------------------
+-- `20260818160000_gmail_auto_ingesta.sql` agrega el camino de "esto entró
+-- solo": un interruptor por cuenta en `gmail_connections` (apagado por
+-- defecto), dos RPC `service_role` que crean el documento o el turno con sus
+-- propias cuatro guardas, y una marca `auto_ingest_source` inmutable para que
+-- la persona siempre sepa cómo entró algo a su historial. Este bloque prueba
+-- las cuatro guardas por separado -sobre todo la re-verificación de autoridad
+-- en cada carga, que es el corazón del diseño-, el CHECK+trigger que evita
+-- que un interruptor prendido bloquee el borrado de un perfil, y que la marca
+-- de origen no se pueda ni inventar ni borrar desde una sesión de usuario.
+--
+-- Tres cuentas nuevas, prefijo f2400 (para no chocar con f2200/f2300 de los
+-- BLOQUE 23/24):
+--   f2400a00 "Ana"      — conecta Gmail, enciende la auto-carga.
+--   f2400b00 "Beto"     — conecta Gmail por separado; su perfil es el que Ana
+--                         NO administra, y su cuenta es la que prueba los
+--                         cruces (correo ajeno, deshacer sin permiso).
+--   f2400c00 "Respaldo" — sin Gmail, cuya única función es ser un SEGUNDO
+--                         administrador del perfil gestionado para que el
+--                         caso 18 (revocar el can_manage de Ana) sea legal:
+--                         si Ana fuera la única administradora, el trigger de
+--                         no orfandad (D4, 20260812210000 §4) abortaría el
+--                         UPDATE que el caso necesita hacer.
+-- Los tres perfiles PROPIOS se reinsertan con id fijo (mismo patrón que el
+-- BLOQUE 20): el trigger de alta les crea uno con id aleatorio, que se
+-- descarta, para poder referenciar los ids directamente sin subconsultas.
+-- =============================================================================
+\echo ''
+\echo '### BLOQUE 25 — auto-ingesta de Gmail: el interruptor, las RPC y la marca'
+
+insert into auth.users (id, email, instance_id, aud, role, encrypted_password,
+                        email_confirmed_at, created_at, updated_at)
+values
+    ('f2400a00-1111-4111-8111-111111111111', 'ana.autoingesta@ejemplo.com.ar',
+     '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+     'x', now(), now(), now()),
+    ('f2400b00-1111-4111-8111-111111111111', 'beto.autoingesta@ejemplo.com.ar',
+     '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+     'x', now(), now(), now()),
+    ('f2400c00-1111-4111-8111-111111111111', 'respaldo.autoingesta@ejemplo.com.ar',
+     '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+     'x', now(), now(), now());
+
+delete from public.profiles
+ where user_id in ('f2400a00-1111-4111-8111-111111111111',
+                   'f2400b00-1111-4111-8111-111111111111',
+                   'f2400c00-1111-4111-8111-111111111111')
+   and id not in ('f2400a00-2222-4222-8222-222222222222',
+                  'f2400b00-2222-4222-8222-222222222222',
+                  'f2400c00-2222-4222-8222-222222222222');
+
+insert into public.profiles (id, user_id, full_name, role) values
+    ('f2400a00-2222-4222-8222-222222222222', 'f2400a00-1111-4111-8111-111111111111', 'Ana Bloque25',      'family_member'),
+    ('f2400b00-2222-4222-8222-222222222222', 'f2400b00-1111-4111-8111-111111111111', 'Beto Bloque25',     'family_member'),
+    ('f2400c00-2222-4222-8222-222222222222', 'f2400c00-1111-4111-8111-111111111111', 'Respaldo Bloque25', 'family_member');
+
+-- El perfil GESTIONADO que Ana administra, con Respaldo como segundo
+-- administrador (ver el encabezado: lo necesita el caso 18).
+insert into public.profiles (id, user_id, full_name, role, created_by_profile_id) values
+    ('f2400d00-2222-4222-8222-222222222222', null, 'Perfil gestionado Bloque25', 'elder',
+     'f2400a00-2222-4222-8222-222222222222');
+
+insert into public.family_permissions (owner_profile_id, granted_profile_id, can_view, can_upload, can_manage) values
+    ('f2400d00-2222-4222-8222-222222222222', 'f2400a00-2222-4222-8222-222222222222', true, true, true),
+    ('f2400d00-2222-4222-8222-222222222222', 'f2400c00-2222-4222-8222-222222222222', true, true, true);
+
+-- Las dos conexiones de Gmail, por el único camino que existe.
+begin;
+set local role service_role;
+
+do $$
+begin
+    perform public.guardar_conexion_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid,
+        'ana.autoingesta@gmail.com', 'ANA-AUTOINGESTA-REFRESH', 'Label_2500', 'historialmedico',
+        'https://www.googleapis.com/auth/gmail.readonly');
+    perform public.guardar_conexion_gmail(
+        'f2400b00-1111-4111-8111-111111111111'::uuid,
+        'beto.autoingesta@gmail.com', 'BETO-AUTOINGESTA-REFRESH', 'Label_2600', 'historialmedico',
+        'https://www.googleapis.com/auth/gmail.readonly');
+end $$;
+
+commit;
+
+
+-- -----------------------------------------------------------------------------
+-- Privilegios y RLS del interruptor (§1 gmail_connections de la migración)
+-- -----------------------------------------------------------------------------
+begin;
+select set_config('request.jwt.claims',
+    '{"sub":"f2400a00-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+-- También cubre el caso "default OFF en una conexión recién guardada": es
+-- justo lo que estos valores tienen que ser en este punto del bloque.
+do $$
+declare v text; e boolean; p uuid; s timestamptz;
+begin
+    begin
+        select auto_ingest_enabled, auto_ingest_profile_id, auto_ingest_set_at
+          into e, p, s
+          from public.gmail_connections
+         where user_id = 'f2400a00-1111-4111-8111-111111111111';
+        v := 'enabled=' || e::text || '/perfil=' || coalesce(p::text, 'null') || '/set_at=' ||
+             case when s is null then 'null' else 'con fecha' end;
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ana lee las tres columnas del interruptor de SU PROPIA conexión (nace apagado)',
+        'enabled=false/perfil=null/set_at=null', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    select count(*) into c from public.gmail_connections
+     where user_id = 'f2400b00-1111-4111-8111-111111111111';
+    v := c || ' fila(s)';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ana pide el interruptor de la conexión de Beto (RLS por fila)', '0 fila(s)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        update public.gmail_connections set auto_ingest_enabled = true
+         where user_id = 'f2400a00-1111-4111-8111-111111111111';
+        v := 'actualizada';
+    exception when insufficient_privilege then v := 'rechazada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ana intenta prender el interruptor con un UPDATE directo (sigue sin política)',
+        'rechazada (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.configurar_auto_ingesta_gmail(
+            'f2400a00-1111-4111-8111-111111111111'::uuid, true,
+            'f2400d00-2222-4222-8222-222222222222'::uuid);
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ana ejecuta configurar_auto_ingesta_gmail', 'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text; r jsonb;
+begin
+    begin
+        select public.ingresar_documento_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400100-0000-4000-8000-000000000001'::uuid,
+            'x/2026/x.pdf', 'application/pdf', 1000, repeat('a1', 32),
+            'Intento', 'other', current_date, null, null) into r;
+        v := 'ejecutada: ' || coalesce(r::text, 'nulo');
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ana ejecuta ingresar_documento_automatico', 'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text; r jsonb;
+begin
+    begin
+        select public.ingresar_turno_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400200-0000-4000-8000-000000000001'::uuid,
+            'Cardiología', null, now() + interval '5 days',
+            null, null, null, null, null) into r;
+        v := 'ejecutada: ' || coalesce(r::text, 'nulo');
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ana ejecuta ingresar_turno_automatico', 'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text; r boolean;
+begin
+    begin
+        select public.cuenta_administra_perfil(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400a00-2222-4222-8222-222222222222'::uuid) into r;
+        v := 'ejecutada: ' || coalesce(r::text, 'nulo');
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ana ejecuta cuenta_administra_perfil SOBRE SÍ MISMA', 'denegada (42501)', v);
+end $$;
+
+commit;
+
+
+begin;
+set local role anon;
+
+do $$
+declare v text;
+begin
+    begin
+        perform auto_ingest_enabled from public.gmail_connections limit 1;
+        v := 'leyó';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'anon lee la columna auto_ingest_enabled', 'denegado (42501)', v);
+end $$;
+
+commit;
+
+-- Las dos capas leídas del catálogo, como en el BLOQUE 23: privilegio de
+-- ejecución y privilegio por columna son candados independientes.
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(p.proname, ',' order by p.proname), '(ninguna)') into v
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in ('configurar_auto_ingesta_gmail', 'cuenta_administra_perfil',
+                         'ingresar_documento_automatico', 'ingresar_turno_automatico')
+       and (has_function_privilege('authenticated', p.oid, 'EXECUTE')
+            or has_function_privilege('anon', p.oid, 'EXECUTE'));
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ni anon ni authenticated pueden ejecutar ninguna de las cuatro funciones nuevas',
+        '(ninguna)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(p.proname, ',' order by p.proname), '(ninguna)') into v
+      from pg_proc p
+      join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in ('configurar_auto_ingesta_gmail', 'cuenta_administra_perfil',
+                         'ingresar_documento_automatico', 'ingresar_turno_automatico')
+       and has_function_privilege('service_role', p.oid, 'EXECUTE');
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'service_role sí puede ejecutar las cuatro',
+        'configurar_auto_ingesta_gmail,cuenta_administra_perfil,ingresar_documento_automatico,ingresar_turno_automatico',
+        v);
+end $$;
+
+do $$
+declare v text;
+begin
+    select coalesce(string_agg(distinct column_name, ',' order by column_name), '(ninguna)')
+      into v
+      from information_schema.column_privileges
+     where table_schema = 'public' and table_name = 'gmail_connections'
+       and grantee = 'authenticated';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Las tres columnas del interruptor se sumaron al GRANT por columna de authenticated',
+        'auto_ingest_enabled,auto_ingest_profile_id,auto_ingest_set_at,connected_at,email,expired_at,label_id,label_name,last_ok_at,status,user_id',
+        v);
+end $$;
+
+
+-- -----------------------------------------------------------------------------
+-- El interruptor: configurar_auto_ingesta_gmail (§5.1 de la migración)
+-- -----------------------------------------------------------------------------
+begin;
+set local role service_role;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.configurar_auto_ingesta_gmail(
+            'f2400a00-1111-4111-8111-111111111111'::uuid, true, null);
+        v := 'encendido';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Encender sin elegir perfil de destino', 'rechazado (22023)', v);
+end $$;
+
+do $$
+declare v text; e boolean;
+begin
+    begin
+        perform public.configurar_auto_ingesta_gmail(
+            'f2400a00-1111-4111-8111-111111111111'::uuid, true,
+            'f2400b00-2222-4222-8222-222222222222'::uuid);
+        v := 'encendido';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: Ana apunta la auto-carga al perfil PROPIO de Beto, que no administra',
+        'rechazado (42501)', v);
+
+    select auto_ingest_enabled into e from public.gmail_connections
+     where user_id = 'f2400a00-1111-4111-8111-111111111111';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Y la fila queda intacta: sigue apagada', 'false', e::text);
+end $$;
+
+do $$
+declare v text; e boolean; p uuid; s timestamptz;
+begin
+    perform public.configurar_auto_ingesta_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid, true,
+        'f2400d00-2222-4222-8222-222222222222'::uuid);
+    select auto_ingest_enabled, auto_ingest_profile_id, auto_ingest_set_at
+      into e, p, s
+      from public.gmail_connections
+     where user_id = 'f2400a00-1111-4111-8111-111111111111';
+    v := 'enabled=' || e::text || '/perfil=' ||
+         case when p = 'f2400d00-2222-4222-8222-222222222222' then 'gestionado' else 'otro' end ||
+         '/set_at=' || case when s is null then 'null' else 'con fecha' end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ana enciende apuntando al perfil gestionado que administra',
+        'enabled=true/perfil=gestionado/set_at=con fecha', v);
+end $$;
+
+do $$
+declare v text; e boolean; p uuid; s timestamptz;
+begin
+    perform public.configurar_auto_ingesta_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid, false, null);
+    select auto_ingest_enabled, auto_ingest_profile_id, auto_ingest_set_at
+      into e, p, s
+      from public.gmail_connections
+     where user_id = 'f2400a00-1111-4111-8111-111111111111';
+    v := 'enabled=' || e::text || '/perfil=' ||
+         case when p = 'f2400d00-2222-4222-8222-222222222222' then 'gestionado' else coalesce(p::text, 'null') end ||
+         '/set_at=' || case when s is null then 'null' else 'con fecha' end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Apagar limpia la fecha pero conserva el perfil elegido',
+        'enabled=false/perfil=gestionado/set_at=null', v);
+end $$;
+
+-- Re-encender: el resto del bloque necesita el interruptor prendido.
+do $$
+begin
+    perform public.configurar_auto_ingesta_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid, true,
+        'f2400d00-2222-4222-8222-222222222222'::uuid);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.configurar_auto_ingesta_gmail(
+            'f2400f00-6666-4666-8666-666666666666'::uuid, true,
+            'f2400d00-2222-4222-8222-222222222222'::uuid);
+        v := 'encendido';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Encender para una cuenta SIN casilla de Gmail conectada', 'rechazado (42501)', v);
+end $$;
+
+-- El CHECK + trigger: borrar el perfil de destino con el interruptor
+-- ENCENDIDO no puede fallar (usa un perfil descartable aparte, para no tocar
+-- el perfil gestionado real que el resto del bloque necesita).
+insert into public.profiles (id, user_id, full_name, role, created_by_profile_id) values
+    ('f2400e00-2222-4222-8222-222222222222', null, 'Perfil descartable Bloque25', 'elder',
+     'f2400a00-2222-4222-8222-222222222222');
+
+insert into public.family_permissions (owner_profile_id, granted_profile_id, can_view, can_upload, can_manage) values
+    ('f2400e00-2222-4222-8222-222222222222', 'f2400a00-2222-4222-8222-222222222222', true, true, true);
+
+do $$
+begin
+    perform public.configurar_auto_ingesta_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid, true,
+        'f2400e00-2222-4222-8222-222222222222'::uuid);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        delete from public.profiles where id = 'f2400e00-2222-4222-8222-222222222222';
+        v := 'sin error';
+    exception when others then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: borrar el perfil de destino con el interruptor ENCENDIDO no tira error',
+        'sin error', v);
+end $$;
+
+do $$
+declare v text; e boolean; p uuid; s timestamptz;
+begin
+    select auto_ingest_enabled, auto_ingest_profile_id, auto_ingest_set_at
+      into e, p, s
+      from public.gmail_connections
+     where user_id = 'f2400a00-1111-4111-8111-111111111111';
+    v := 'enabled=' || e::text || '/perfil=' || coalesce(p::text, 'null') || '/set_at=' ||
+         case when s is null then 'null' else 'con fecha' end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'El ON DELETE SET NULL + el trigger apagan el interruptor solos',
+        'enabled=false/perfil=null/set_at=null', v);
+end $$;
+
+-- Re-encender apuntando al perfil gestionado real: los tests de las RPC de
+-- carga que siguen lo necesitan prendido.
+do $$
+begin
+    perform public.configurar_auto_ingesta_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid, true,
+        'f2400d00-2222-4222-8222-222222222222'::uuid);
+end $$;
+
+commit;
+
+
+-- -----------------------------------------------------------------------------
+-- ingresar_documento_automatico (§5.2 de la migración)
+-- -----------------------------------------------------------------------------
+begin;
+set local role service_role;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email, from_name,
+    subject, message_date, kind, looks_like_appointment, attachments, status)
+values (
+    'f2400100-0000-4000-8000-000000000001', 'f2400a00-1111-4111-8111-111111111111',
+    'msg-doc-feliz', 'ana.autoingesta@gmail.com', 'resultados@lab-austral.com.ar',
+    'Laboratorio Austral', 'Resultado de laboratorio', now(), 'documento', false,
+    '[{"attachmentId":"ATT_1","filename":"resultado.pdf","mimeType":"application/pdf","size":24000,"apto":true,"motivo":null}]'::jsonb,
+    'pendiente_revision');
+
+do $$
+declare v text; r jsonb; d public.documents%rowtype; m public.gmail_messages%rowtype;
+begin
+    select public.ingresar_documento_automatico(
+        'f2400a00-1111-4111-8111-111111111111'::uuid,
+        'f2400100-0000-4000-8000-000000000001'::uuid,
+        'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-feliz.pdf',
+        'application/pdf', 51200, repeat('a1', 32),
+        'Análisis de sangre — Laboratorio Austral', 'laboratory', current_date - 1,
+        'Resumen generado por IA', 'texto OCR de prueba') into r;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Camino feliz: crea el documento y devuelve "creado"',
+        'creado', coalesce(r->>'estado', 'nulo'));
+
+    select * into d from public.documents
+     where storage_path = 'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-feliz.pdf';
+    v := 'source=' || coalesce(d.auto_ingest_source, 'null') ||
+         '/confirmed=' || case when d.confirmed_at is null then 'null' else 'con fecha' end ||
+         '/creador=' || coalesce(d.created_by_profile_id::text, 'null');
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'El documento nace marcado, confirmado y sin creador humano',
+        'source=gmail/confirmed=con fecha/creador=null', v);
+
+    select * into m from public.gmail_messages where id = 'f2400100-0000-4000-8000-000000000001';
+    v := 'status=' || m.status || '/documento=' ||
+         case when m.document_id = d.id then 'coincide' else 'no coincide' end ||
+         '/auto_ingested_at=' || case when m.auto_ingested_at is null then 'null' else 'con fecha' end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'El correo queda ingresado, apuntando al documento y con su marca de tiempo',
+        'status=ingresado/documento=coincide/auto_ingested_at=con fecha', v);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+do $$
+begin
+    perform public.configurar_auto_ingesta_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid, false, null);
+end $$;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email,
+    subject, message_date, kind, attachments, status)
+values (
+    'f2400100-0000-4000-8000-000000000002', 'f2400a00-1111-4111-8111-111111111111',
+    'msg-doc-apagado', 'ana.autoingesta@gmail.com', 'resultados@lab-austral.com.ar',
+    'Otro resultado', now(), 'documento',
+    '[{"attachmentId":"ATT_2","filename":"otro.pdf","mimeType":"application/pdf","size":10000,"apto":true,"motivo":null}]'::jsonb,
+    'pendiente_revision');
+
+do $$
+declare v text; r jsonb; c integer;
+begin
+    begin
+        select public.ingresar_documento_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400100-0000-4000-8000-000000000002'::uuid,
+            'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-apagado.pdf',
+            'application/pdf', 10000, repeat('b2', 32),
+            'Otro resultado', 'laboratory', current_date, null, null) into r;
+        v := coalesce(r->>'estado', 'nulo');
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: opt-in apagado — rechaza aunque todo lo demás esté bien',
+        'rechazado (42501)', v);
+
+    select count(*) into c from public.documents
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Y no se creó ningún documento nuevo', '1', c::text);
+end $$;
+
+-- Re-encender: el resto de esta sección necesita el interruptor prendido.
+do $$
+begin
+    perform public.configurar_auto_ingesta_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid, true,
+        'f2400d00-2222-4222-8222-222222222222'::uuid);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+do $$
+declare v text; r jsonb; c integer;
+begin
+    select public.ingresar_documento_automatico(
+        'f2400a00-1111-4111-8111-111111111111'::uuid,
+        'f2400100-0000-4000-8000-000000000001'::uuid,
+        'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-feliz-replay.pdf',
+        'application/pdf', 51200, repeat('a1', 32),
+        'Análisis de sangre — Laboratorio Austral', 'laboratory', current_date - 1,
+        null, null) into r;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: replay del mismo correo ya resuelto', 'ya_resuelto', coalesce(r->>'estado', 'nulo'));
+
+    select count(*) into c from public.documents
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Sigue habiendo UN solo documento', '1', c::text);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email,
+    subject, message_date, kind, attachments, status)
+values (
+    'f2400100-0000-4000-8000-000000000003', 'f2400a00-1111-4111-8111-111111111111',
+    'msg-doc-huella-dup', 'ana.autoingesta@gmail.com', 'resultados@lab-austral.com.ar',
+    'RV: Resultado de laboratorio', now(), 'documento',
+    '[{"attachmentId":"ATT_3","filename":"resultado.pdf","mimeType":"application/pdf","size":24000,"apto":true,"motivo":null}]'::jsonb,
+    'pendiente_revision');
+
+do $$
+declare v text; r jsonb; c integer;
+begin
+    select public.ingresar_documento_automatico(
+        'f2400a00-1111-4111-8111-111111111111'::uuid,
+        'f2400100-0000-4000-8000-000000000003'::uuid,
+        'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-huella-dup.pdf',
+        'application/pdf', 51200, repeat('a1', 32),
+        'Reenvío del mismo análisis', 'laboratory', current_date, null, null) into r;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: mismo contenido (misma huella) por otro correo', 'duplicado', coalesce(r->>'estado', 'nulo'));
+
+    select count(*) into c from public.documents
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'No se crea un segundo documento', '1', c::text);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email,
+    subject, message_date, kind, attachments, status)
+values (
+    'f2400100-0000-4000-8000-000000000009', 'f2400b00-1111-4111-8111-111111111111',
+    'msg-doc-de-beto', 'beto.autoingesta@gmail.com', 'resultados@otrolab.com.ar',
+    'Resultado de Beto', now(), 'documento',
+    '[{"attachmentId":"ATT_9","filename":"beto.pdf","mimeType":"application/pdf","size":9000,"apto":true,"motivo":null}]'::jsonb,
+    'pendiente_revision');
+
+do $$
+declare v text; r jsonb; c integer;
+begin
+    begin
+        select public.ingresar_documento_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400100-0000-4000-8000-000000000009'::uuid,
+            'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-de-beto.pdf',
+            'application/pdf', 9000, repeat('c3', 32),
+            'Resultado de Beto', 'laboratory', current_date, null, null) into r;
+        v := coalesce(r->>'estado', 'nulo');
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: Ana pasa el p_correo de Beto (correo de otra cuenta)', 'rechazado (42501)', v);
+
+    select count(*) into c from public.documents
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'No se creó nada a partir del correo ajeno', '1', c::text);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email,
+    subject, message_date, kind, attachments, status)
+values
+    ('f2400100-0000-4000-8000-000000000004', 'f2400a00-1111-4111-8111-111111111111',
+     'msg-doc-fecha-futura', 'ana.autoingesta@gmail.com', 'clinica@x.com.ar',
+     'Orden', now(), 'documento',
+     '[{"attachmentId":"ATT_4","filename":"orden.pdf","mimeType":"application/pdf","size":5000,"apto":true,"motivo":null}]'::jsonb,
+     'pendiente_revision'),
+    ('f2400100-0000-4000-8000-000000000005', 'f2400a00-1111-4111-8111-111111111111',
+     'msg-doc-titulo-vacio', 'ana.autoingesta@gmail.com', 'clinica@x.com.ar',
+     'Orden', now(), 'documento',
+     '[{"attachmentId":"ATT_5","filename":"orden.pdf","mimeType":"application/pdf","size":5000,"apto":true,"motivo":null}]'::jsonb,
+     'pendiente_revision'),
+    ('f2400100-0000-4000-8000-000000000006', 'f2400a00-1111-4111-8111-111111111111',
+     'msg-doc-categoria-mala', 'ana.autoingesta@gmail.com', 'clinica@x.com.ar',
+     'Orden', now(), 'documento',
+     '[{"attachmentId":"ATT_6","filename":"orden.pdf","mimeType":"application/pdf","size":5000,"apto":true,"motivo":null}]'::jsonb,
+     'pendiente_revision'),
+    ('f2400100-0000-4000-8000-000000000007', 'f2400a00-1111-4111-8111-111111111111',
+     'msg-doc-huella-mala', 'ana.autoingesta@gmail.com', 'clinica@x.com.ar',
+     'Orden', now(), 'documento',
+     '[{"attachmentId":"ATT_7","filename":"orden.pdf","mimeType":"application/pdf","size":5000,"apto":true,"motivo":null}]'::jsonb,
+     'pendiente_revision');
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.ingresar_documento_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400100-0000-4000-8000-000000000004'::uuid,
+            'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-fecha-futura.pdf',
+            'application/pdf', 5000, repeat('c3', 32),
+            'Orden con fecha futura', 'laboratory', current_date + 30, null, null);
+        v := 'aceptó una fecha futura';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail', 'Fecha futura', 'rechazado (22023)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.ingresar_documento_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400100-0000-4000-8000-000000000005'::uuid,
+            'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-titulo-vacio.pdf',
+            'application/pdf', 5000, repeat('d4', 32),
+            '   ', 'laboratory', current_date, null, null);
+        v := 'aceptó un título vacío';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail', 'Título vacío', 'rechazado (22023)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.ingresar_documento_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400100-0000-4000-8000-000000000006'::uuid,
+            'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-categoria-mala.pdf',
+            'application/pdf', 5000, repeat('e5', 32),
+            'Orden con categoría inventada', 'radiografia', current_date, null, null);
+        v := 'aceptó una categoría inválida';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail', 'Categoría inválida', 'rechazado (22023)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.ingresar_documento_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400100-0000-4000-8000-000000000007'::uuid,
+            'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-huella-mala.pdf',
+            'application/pdf', 5000, 'no-es-un-hash-sha256',
+            'Orden con huella trucha', 'laboratory', current_date, null, null);
+        v := 'aceptó una huella con forma inválida';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Huella con forma inválida (no 64 hex)', 'rechazado (22023)', v);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email,
+    subject, message_date, kind, attachments, status)
+values (
+    'f2400100-0000-4000-8000-000000000008', 'f2400a00-1111-4111-8111-111111111111',
+    'msg-doc-permiso-revocado', 'ana.autoingesta@gmail.com', 'clinica@x.com.ar',
+    'Orden', now(), 'documento',
+    '[{"attachmentId":"ATT_8","filename":"orden.pdf","mimeType":"application/pdf","size":5000,"apto":true,"motivo":null}]'::jsonb,
+    'pendiente_revision');
+
+-- Se le baja el can_manage a Ana. Respaldo (f2400c00) sigue administrando, así
+-- que el trigger de no orfandad (D4) deja pasar el UPDATE.
+update public.family_permissions set can_manage = false
+ where owner_profile_id = 'f2400d00-2222-4222-8222-222222222222'
+   and granted_profile_id = 'f2400a00-2222-4222-8222-222222222222';
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        perform public.ingresar_documento_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400100-0000-4000-8000-000000000008'::uuid,
+            'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-permiso-revocado.pdf',
+            'application/pdf', 5000, repeat('f6', 32),
+            'Orden con permiso ya revocado', 'laboratory', current_date, null, null);
+        v := 'creó el documento igual';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'EL CASO: el can_manage se revocó DESPUÉS de encender — se re-verifica en cada carga',
+        'rechazado (42501)', v);
+
+    select count(*) into c from public.documents
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'La fila queda intacta: sigue habiendo un solo documento', '1', c::text);
+end $$;
+
+-- Se restaura: turnos y "deshacer" más abajo necesitan que Ana vuelva a
+-- administrar el perfil gestionado.
+update public.family_permissions set can_manage = true
+ where owner_profile_id = 'f2400d00-2222-4222-8222-222222222222'
+   and granted_profile_id = 'f2400a00-2222-4222-8222-222222222222';
+
+commit;
+
+
+-- -----------------------------------------------------------------------------
+-- ingresar_turno_automatico (§5.3 de la migración)
+-- -----------------------------------------------------------------------------
+begin;
+set local role service_role;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email, from_name,
+    subject, message_date, kind, looks_like_appointment, attachments, status)
+values (
+    'f2400200-0000-4000-8000-000000000001', 'f2400a00-1111-4111-8111-111111111111',
+    'msg-turno-feliz', 'ana.autoingesta@gmail.com', 'turnos@sanjorge.com.ar',
+    'Clínica San Jorge', 'Turno asignado', now(), 'turno', true, '[]'::jsonb,
+    'pendiente_revision');
+
+do $$
+declare v text; r jsonb; a public.appointments%rowtype; m public.gmail_messages%rowtype;
+begin
+    select public.ingresar_turno_automatico(
+        'f2400a00-1111-4111-8111-111111111111'::uuid,
+        'f2400200-0000-4000-8000-000000000001'::uuid,
+        'Cardiología', 'Dr. Pérez', timestamptz '2026-09-15 10:00:00-03',
+        'Clínica San Jorge', 'Av. Siempre Viva 123', 'Ushuaia',
+        'Tierra del Fuego, Antártida e Islas del Atlántico Sur',
+        'Traer estudios previos') into r;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Camino feliz de turno: crea la cita y devuelve "creado"',
+        'creado', coalesce(r->>'estado', 'nulo'));
+
+    select * into a from public.appointments
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222'
+       and specialty = 'Cardiología'
+       and appointment_date = timestamptz '2026-09-15 10:00:00-03';
+    v := 'source=' || coalesce(a.auto_ingest_source, 'null') ||
+         '/status=' || a.status::text ||
+         '/creador=' || coalesce(a.created_by_profile_id::text, 'null');
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'El turno nace marcado, pendiente y sin creador humano',
+        'source=gmail/status=pending/creador=null', v);
+
+    select * into m from public.gmail_messages where id = 'f2400200-0000-4000-8000-000000000001';
+    v := 'status=' || m.status || '/turno=' ||
+         case when m.appointment_id = a.id then 'coincide' else 'no coincide' end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'El correo queda ingresado y apunta al turno que produjo',
+        'status=ingresado/turno=coincide', v);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+do $$
+begin
+    perform public.configurar_auto_ingesta_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid, false, null);
+end $$;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email, from_name,
+    subject, message_date, kind, looks_like_appointment, attachments, status)
+values (
+    'f2400200-0000-4000-8000-000000000002', 'f2400a00-1111-4111-8111-111111111111',
+    'msg-turno-apagado', 'ana.autoingesta@gmail.com', 'turnos@sanjorge.com.ar',
+    'Clínica San Jorge', 'Otro turno', now(), 'turno', true, '[]'::jsonb,
+    'pendiente_revision');
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.ingresar_turno_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400200-0000-4000-8000-000000000002'::uuid,
+            'Dermatología', null, timestamptz '2026-09-20 09:00:00-03',
+            null, null, null, null, null);
+        v := 'creó el turno igual';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: opt-in apagado, también para turnos', 'rechazado (42501)', v);
+end $$;
+
+do $$
+begin
+    perform public.configurar_auto_ingesta_gmail(
+        'f2400a00-1111-4111-8111-111111111111'::uuid, true,
+        'f2400d00-2222-4222-8222-222222222222'::uuid);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+do $$
+declare v text; r jsonb; c integer;
+begin
+    select public.ingresar_turno_automatico(
+        'f2400a00-1111-4111-8111-111111111111'::uuid,
+        'f2400200-0000-4000-8000-000000000001'::uuid,
+        'Cardiología', 'Dr. Pérez', timestamptz '2026-09-15 10:00:00-03',
+        'Clínica San Jorge', 'Av. Siempre Viva 123', 'Ushuaia',
+        'Tierra del Fuego, Antártida e Islas del Atlántico Sur', null) into r;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: replay del mismo correo de turno ya resuelto', 'ya_resuelto', coalesce(r->>'estado', 'nulo'));
+
+    select count(*) into c from public.appointments
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Sigue habiendo UN solo turno', '1', c::text);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email, from_name,
+    subject, message_date, kind, looks_like_appointment, attachments, status)
+values (
+    'f2400200-0000-4000-8000-000000000003', 'f2400a00-1111-4111-8111-111111111111',
+    'msg-turno-duplicado', 'ana.autoingesta@gmail.com', 'turnos@sanjorge.com.ar',
+    'Clínica San Jorge', 'Recordatorio del mismo turno', now(), 'turno', true, '[]'::jsonb,
+    'pendiente_revision');
+
+do $$
+declare v text; r jsonb; c integer;
+begin
+    -- Especialidad en minúsculas a propósito: el dedup compara sin distinguir
+    -- mayúsculas (lower(a.specialty) = lower(v_especialidad)).
+    select public.ingresar_turno_automatico(
+        'f2400a00-1111-4111-8111-111111111111'::uuid,
+        'f2400200-0000-4000-8000-000000000003'::uuid,
+        'cardiología', null, timestamptz '2026-09-15 10:00:00-03',
+        null, null, null, null, 'Recordatorio de la misma clínica') into r;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Dedup: mismo perfil, misma fecha/hora, misma especialidad', 'duplicado', coalesce(r->>'estado', 'nulo'));
+
+    select count(*) into c from public.appointments
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'No se crea un segundo turno', '1', c::text);
+end $$;
+
+commit;
+
+
+begin;
+set local role service_role;
+
+insert into public.gmail_messages (
+    id, user_id, gmail_message_id, connection_email, from_email,
+    subject, message_date, kind, looks_like_appointment, attachments, status)
+values (
+    'f2400200-0000-4000-8000-000000000004', 'f2400a00-1111-4111-8111-111111111111',
+    'msg-turno-especialidad-vacia', 'ana.autoingesta@gmail.com', 'turnos@x.com.ar',
+    'Turno sin especialidad', now(), 'turno', true, '[]'::jsonb,
+    'pendiente_revision');
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.ingresar_turno_automatico(
+            'f2400a00-1111-4111-8111-111111111111'::uuid,
+            'f2400200-0000-4000-8000-000000000004'::uuid,
+            '   ', null, timestamptz '2026-09-25 11:00:00-03',
+            null, null, null, null, null);
+        v := 'aceptó una especialidad vacía';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail', 'Especialidad vacía', 'rechazado (22023)', v);
+end $$;
+
+commit;
+
+
+-- -----------------------------------------------------------------------------
+-- La marca inmutable (§3 de la migración): sellar_auto_ingest_source
+-- -----------------------------------------------------------------------------
+begin;
+select set_config('request.jwt.claims',
+    '{"sub":"f2400a00-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare d public.documents%rowtype;
+begin
+    insert into public.documents (profile_id, title, category, document_date, storage_path, auto_ingest_source)
+    values ('f2400a00-2222-4222-8222-222222222222', 'Carga a mano de Ana', 'other', current_date,
+            'f2400a00-2222-4222-8222-222222222222/2026/carga-a-mano.pdf', 'gmail')
+    returning * into d;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: Ana inserta un documento propio declarando auto_ingest_source=''gmail''',
+        '(nulo)', coalesce(d.auto_ingest_source, '(nulo)'));
+end $$;
+
+do $$
+declare v text;
+begin
+    update public.documents set auto_ingest_source = null
+     where storage_path = 'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-feliz.pdf';
+    select auto_ingest_source into v from public.documents
+     where storage_path = 'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-feliz.pdf';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: Ana (can_manage) intenta borrar la marca con un UPDATE a NULL',
+        'gmail', coalesce(v, '(nulo)'));
+end $$;
+
+do $$
+declare a public.appointments%rowtype;
+begin
+    insert into public.appointments (profile_id, specialty, appointment_date, auto_ingest_source, status)
+    values ('f2400a00-2222-4222-8222-222222222222', 'Dermatología',
+            timestamptz '2026-10-01 09:00:00-03', 'gmail', 'pending')
+    returning * into a;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: Ana inserta un turno propio declarando auto_ingest_source=''gmail''',
+        '(nulo)', coalesce(a.auto_ingest_source, '(nulo)'));
+end $$;
+
+do $$
+declare v text;
+begin
+    update public.appointments set auto_ingest_source = null
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222'
+       and specialty = 'Cardiología'
+       and appointment_date = timestamptz '2026-09-15 10:00:00-03';
+    select auto_ingest_source into v from public.appointments
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222'
+       and specialty = 'Cardiología'
+       and appointment_date = timestamptz '2026-09-15 10:00:00-03';
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'HOSTIL: Ana intenta borrar la marca del turno auto-cargado con un UPDATE a NULL',
+        'gmail', coalesce(v, '(nulo)'));
+end $$;
+
+commit;
+
+
+-- -----------------------------------------------------------------------------
+-- Deshacer: las políticas existentes de siempre, con sesión de usuario
+-- -----------------------------------------------------------------------------
+-- El orden importa: primero se prueba que Beto NO puede (para que el intento
+-- sea contra la fila real, no contra una que ya no existe), y recién después
+-- Ana la borra de verdad.
+begin;
+select set_config('request.jwt.claims',
+    '{"sub":"f2400b00-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v integer;
+begin
+    delete from public.documents
+     where storage_path = 'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-feliz.pdf';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Beto (NO administra el perfil gestionado) intenta deshacer el documento',
+        '0 filas', v || ' filas');
+end $$;
+
+do $$
+declare v integer;
+begin
+    delete from public.appointments
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222'
+       and specialty = 'Cardiología'
+       and appointment_date = timestamptz '2026-09-15 10:00:00-03';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Beto (NO administra el perfil gestionado) intenta deshacer el turno',
+        '0 filas', v || ' filas');
+end $$;
+
+commit;
+
+
+begin;
+select set_config('request.jwt.claims',
+    '{"sub":"f2400a00-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v integer;
+begin
+    delete from public.documents
+     where storage_path = 'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-feliz.pdf';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Ana (administra el perfil gestionado) SÍ puede deshacer el documento',
+        '1 filas', v || ' filas');
+end $$;
+
+do $$
+declare v integer;
+begin
+    delete from public.appointments
+     where profile_id = 'f2400d00-2222-4222-8222-222222222222'
+       and specialty = 'Cardiología'
+       and appointment_date = timestamptz '2026-09-15 10:00:00-03';
+    get diagnostics v = row_count;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'Y también el turno', '1 filas', v || ' filas');
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('25. Auto-ingesta Gmail',
+       'Al borrar el documento se encoló la purga en storage_purge_queue', '1', count(*)::text)
+  from public.storage_purge_queue
+ where storage_path = 'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-feliz.pdf';
+
+
+-- -----------------------------------------------------------------------------
+-- El CHECK gmail_messages_auto_ingesta_coherente (§2 de la migración)
+-- -----------------------------------------------------------------------------
+do $$
+declare v text;
+begin
+    begin
+        update public.gmail_messages set status = 'descartado'
+         where id = 'f2400100-0000-4000-8000-000000000001';
+        v := 'aceptó auto_ingested_at con status distinto de ingresado';
+    exception when check_violation then v := 'rechazado (23514)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'gmail_messages_auto_ingesta_coherente: auto_ingested_at exige status=ingresado',
+        'rechazado (23514)', v);
+end $$;
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
@@ -7349,6 +8501,22 @@ delete from auth.users where id in (
 delete from vault.secrets where name in (
     'gmail_refresh_token_f2200aaa-1111-4111-8111-111111111111',
     'gmail_refresh_token_f2200bbb-2222-4222-8222-222222222222');
+-- Cuentas del BLOQUE 25 (Sprint 17, tarea 17.3): el perfil gestionado
+-- descartable del caso 12 ya se borró dentro del bloque -es parte de lo que
+-- prueba-, se repite acá igual por las dudas. El perfil gestionado principal
+-- (f2400d00) va primero, después las tres cuentas -el CASCADE se lleva sus
+-- conexiones de Gmail y el trigger AFTER DELETE el secreto del Vault-, y por
+-- las dudas también los secretos por nombre.
+delete from public.profiles where id in (
+    'f2400d00-2222-4222-8222-222222222222',
+    'f2400e00-2222-4222-8222-222222222222');
+delete from auth.users where id in (
+    'f2400a00-1111-4111-8111-111111111111',
+    'f2400b00-1111-4111-8111-111111111111',
+    'f2400c00-1111-4111-8111-111111111111');
+delete from vault.secrets where name in (
+    'gmail_refresh_token_f2400a00-1111-4111-8111-111111111111',
+    'gmail_refresh_token_f2400b00-1111-4111-8111-111111111111');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 
 drop schema pruebas_rls cascade;

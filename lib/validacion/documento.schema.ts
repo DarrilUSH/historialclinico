@@ -21,7 +21,10 @@
  */
 
 import { z } from 'zod'
-import type { DocumentoMedicoExtraido } from '@/lib/gemini/schemas'
+import type {
+  DocumentoMedicoConPacienteExtraido,
+  DocumentoMedicoExtraido,
+} from '@/lib/gemini/schemas'
 
 /**
  * Valida que una string sea una fecha válida en formato YYYY-MM-DD.
@@ -218,4 +221,52 @@ export function validarExtraccion(
     ok: false,
     errores,
   }
+}
+
+/**
+ * Espejo Zod de `SCHEMA_DOCUMENTO_MEDICO_CON_PACIENTE` — **solo para el camino
+ * automático** (auto-carga sin dudas, Sprint 17).
+ *
+ * Se deriva con `.extend()` del schema de siempre en vez de copiarlo: las
+ * validaciones de fecha, resumen, categoría y métricas son literalmente las
+ * mismas objetos Zod, así que no pueden divergir. `.extend()` sobre un schema
+ * `.strict()` conserva el `.strict()`: una respuesta con un campo de más sigue
+ * siendo rechazada.
+ *
+ * `paciente` es `.optional()` por el mismo motivo que en el tipo TypeScript: si
+ * el modelo lo omite, la compuerta lo trata como duda y el correo va a revisión
+ * humana. Nunca se persiste.
+ */
+export const schemaExtraccionDocumentoConPaciente = schemaExtraccionDocumento.extend({
+  paciente: z
+    .string({ message: 'El nombre del paciente debe ser texto' })
+    .trim()
+    .max(150, 'El nombre del paciente es demasiado largo (máx. 150 caracteres)')
+    .optional(),
+})
+
+/**
+ * Valida la respuesta cruda de Gemini del camino automático.
+ *
+ * Mismo contrato que `validarExtraccion`: `{ ok: true, datos }` o
+ * `{ ok: false, errores }` con mensajes en español que describen la
+ * ESTRUCTURA, nunca el contenido recibido — así son seguros de loguear
+ * (`docs/minimizacion-datos.md` §6). En particular, un error de este validador
+ * jamás incluye el nombre del paciente.
+ */
+export function validarExtraccionConPaciente(
+  data: unknown,
+): { ok: true; datos: DocumentoMedicoConPacienteExtraido } | { ok: false; errores: string[] } {
+  const resultado = schemaExtraccionDocumentoConPaciente.safeParse(data)
+
+  if (resultado.success) {
+    return { ok: true, datos: resultado.data as DocumentoMedicoConPacienteExtraido }
+  }
+
+  const errores = resultado.error.issues.map((err) => {
+    const path = err.path.length > 0 ? `${err.path.join('.')}` : '(raíz)'
+    return `[${path}] ${err.message}`
+  })
+
+  return { ok: false, errores }
 }

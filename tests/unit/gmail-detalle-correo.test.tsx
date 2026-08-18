@@ -124,6 +124,9 @@ describe("DialogoDetalleProcesado", () => {
 })
 
 const CORREO_PENDIENTE: CorreoParaBandeja = {
+  // Sprint 17: la carga automática está apagada en este fixture, así que nadie
+  // evaluó nada y no hay motivo que explicar.
+  motivoRevision: null,
   id: "correo-2",
   asunto: ASUNTO_LARGO,
   remitente: "Laboratorio Central",

@@ -45,7 +45,12 @@ import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 
 import { esErrorDeGuarda, requerirPermiso, requerirSesion } from "@/lib/auth/guardas"
-import type { EstadoBusquedaGmail, EstadoCorreoGmail } from "@/lib/gmail/acciones"
+import type {
+  EstadoAutoCargaGmail,
+  EstadoBusquedaGmail,
+  EstadoCorreoGmail,
+} from "@/lib/gmail/acciones"
+import { configurarAutoIngesta, revertirCargaAutomatica } from "@/lib/gmail/auto-ingesta-admin"
 import { ingerirAdjuntoDeGmail, ErrorAdjuntoGmail } from "@/lib/gmail/adjunto"
 import { barrerConexion, fraseDeResultado } from "@/lib/gmail/barrido"
 import type { EstadoGmailAccion } from "@/lib/gmail/conexion"
@@ -427,6 +432,160 @@ export async function aprenderRemitente(
       error: mensajeDeError(error, "No pudimos crear la regla en tu Gmail. Probá de nuevo."),
       mensaje: null,
     }
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  CARGA AUTOMÁTICA (Sprint 17) — el interruptor y el Deshacer
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * "Carga automática: solo cuando la IA no tiene ninguna duda."
+ *
+ * El interruptor y el selector de perfil viajan en el MISMO formulario, así que
+ * esta única acción resuelve los tres casos: prender con un destino, cambiar el
+ * destino, y apagar.
+ *
+ * ## La guarda no está acá, y es a propósito
+ *
+ * Esta acción verifica la SESIÓN (de quién es la casilla) y nada más. Que el
+ * perfil elegido sea uno que la cuenta administra lo decide
+ * `configurar_auto_ingesta_gmail` **en la base**, con
+ * `cuenta_administra_perfil`. Comprobarlo también acá sería tener dos
+ * definiciones de la misma autorización que pueden separarse con el tiempo —y
+ * la de acá sería la fácil de olvidar—. El mensaje de rechazo de la RPC ya
+ * viene en castellano y mostrable.
+ */
+export async function guardarAutoCargaGmail(
+  _estadoPrevio: EstadoAutoCargaGmail,
+  formData: FormData,
+): Promise<EstadoAutoCargaGmail> {
+  const activar = formData.get("activar") === "1"
+  const perfilId = idDelFormulario(formData, "perfilId")
+
+  if (activar && !perfilId) {
+    return {
+      error: "Elegí a quién le vamos a sumar los estudios antes de prender la carga automática.",
+      mensaje: null,
+    }
+  }
+
+  try {
+    const { usuario } = await requerirSesion({ siNoHaySesion: "lanzar" })
+    await configurarAutoIngesta({ userId: usuario.id, activar, perfilId })
+  } catch (error) {
+    console.error(
+      "[gmail] no se pudo configurar la carga automática:",
+      error instanceof Error ? error.message : error,
+    )
+    return {
+      error: mensajeDeError(
+        error,
+        "No pudimos guardar esa preferencia. Probá de nuevo en un rato.",
+      ),
+      mensaje: null,
+    }
+  }
+
+  revalidatePath("/perfil/gmail")
+  revalidatePath("/inicio")
+
+  return {
+    error: null,
+    mensaje: activar
+      ? "Listo. Los correos que se lean sin ninguna duda van a entrar solos, y los vas a ver acá abajo."
+      : "Apagamos la carga automática. Todo vuelve a esperar tu revisión.",
+  }
+}
+
+/**
+ * "Deshacer": saca del historial algo que entró SOLO y devuelve el correo a la
+ * lista de pendientes.
+ *
+ * ## Los dos pasos, y por qué el primero va con la sesión de la persona
+ *
+ * 1. **Borrar el documento (o el turno) con el cliente del USUARIO.** Pasa por
+ *    `documents_delete_administrador` / `appointments_delete_administrador`,
+ *    las políticas de siempre: si por lo que sea la cuenta ya no administra ese
+ *    perfil, el borrado no afecta ninguna fila y esta acción lo dice en vez de
+ *    fingir que salió. Borrar con `service_role` habría sido más simple y
+ *    habría convertido esas políticas en decoración. El `DELETE` dispara además
+ *    el trigger `documents_encolar_purga_storage`, así que el archivo entra en
+ *    la cola de purga como en cualquier otro borrado.
+ * 2. **Devolver el correo a pendientes**, con `service_role`
+ *    (`revertirCargaAutomatica`), que es el único camino de escritura de
+ *    `gmail_messages` desde que existe la 17.2.
+ *
+ * Si el paso 2 fallara después del 1, el estudio ya no está y el correo queda
+ * marcado `ingresado` con el puntero en NULL por el `ON DELETE SET NULL` —que
+ * es exactamente el estado que la bandeja ya sabe mostrar con "Volver a la
+ * lista"—. Ningún orden deja algo peor que eso.
+ */
+export async function deshacerCargaAutomatica(
+  _estadoPrevio: EstadoCorreoGmail,
+  formData: FormData,
+): Promise<EstadoCorreoGmail> {
+  const correoId = idDelFormulario(formData, "correoId")
+  const documentoId = idDelFormulario(formData, "documentoId")
+  const turnoId = idDelFormulario(formData, "turnoId")
+
+  if (!correoId) return { error: SIN_CORREO, mensaje: null }
+
+  try {
+    const { usuario, supabase } = await requerirSesion({ siNoHaySesion: "lanzar" })
+
+    if (documentoId) {
+      const { data: borrados, error } = await supabase
+        .from("documents")
+        .delete()
+        .eq("id", documentoId)
+        .select("id")
+
+      if (error) throw error
+      if (!borrados || borrados.length === 0) {
+        return {
+          error:
+            "No pudimos sacar ese estudio: hace falta permiso de administración sobre ese perfil.",
+          mensaje: null,
+        }
+      }
+    } else if (turnoId) {
+      const { data: borrados, error } = await supabase
+        .from("appointments")
+        .delete()
+        .eq("id", turnoId)
+        .select("id")
+
+      if (error) throw error
+      if (!borrados || borrados.length === 0) {
+        return {
+          error:
+            "No pudimos sacar ese turno: hace falta permiso de administración sobre ese perfil.",
+          mensaje: null,
+        }
+      }
+    }
+
+    await revertirCargaAutomatica(usuario.id, correoId)
+  } catch (error) {
+    console.error(
+      `[gmail] no se pudo deshacer la carga automática del correo ${correoId}:`,
+      error instanceof Error ? error.message : error,
+    )
+    return {
+      error: mensajeDeError(error, "No pudimos deshacerlo. Probá de nuevo en un rato."),
+      mensaje: null,
+    }
+  }
+
+  revalidatePath("/perfil/gmail")
+  revalidatePath("/estudios")
+  revalidatePath("/turnos")
+  revalidatePath("/inicio")
+
+  return {
+    error: null,
+    mensaje: "Listo, lo sacamos del historial. El correo volvió a la lista para que decidas vos.",
   }
 }
 

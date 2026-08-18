@@ -57,7 +57,7 @@
 
 import Link from "next/link"
 
-import { MapPinIcon, PencilIcon, StethoscopeIcon, UserRoundIcon } from "lucide-react"
+import { MapPinIcon, PencilIcon, SparklesIcon, StethoscopeIcon, UserRoundIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
 import { BadgeEstadoTurno } from "@/components/turnos/badge-estado-turno"
@@ -83,6 +83,8 @@ export interface TurnoParaTarjeta {
   latitude?: number | null
   longitude?: number | null
   preparation_notes?: string | null
+  /** Sprint 17, tarea 17.3. `'gmail'` = entró SOLO por la ingesta automática, sin que nadie lo mirara antes; `null`/`undefined` = lo cargó una persona. `undefined` en consultas que todavía no la seleccionan, mismo criterio que `latitude`/`longitude` de arriba. */
+  auto_ingest_source?: string | null
 }
 
 export interface TarjetaTurnoProps {
@@ -178,6 +180,19 @@ export function TarjetaTurno({ turno, puedeEditar, ahora = new Date() }: Tarjeta
           )}
         </div>
       </div>
+
+      {/* Marca de procedencia (Sprint 17, tarea 17.3): mismo compromiso que
+          en el detalle del estudio -que la persona siempre pueda saber cómo
+          entró un turno a su historial, aunque nadie lo haya revisado antes
+          de verlo acá-. Va fuera del bloque de fecha/datos que se tacha si
+          el turno está cancelado: la procedencia no cambia con el estado del
+          turno. Discreta a propósito, mismo criterio que `estudios/[id]`. */}
+      {turno.auto_ingest_source === "gmail" && (
+        <p className="flex items-center gap-1.5 text-sm text-muted-foreground chica:gap-1 chica:text-xs">
+          <SparklesIcon className="size-3.5 shrink-0 chica:size-3" aria-hidden="true" />
+          Cargado desde Gmail automáticamente
+        </p>
+      )}
 
       {/* Botones de logística + Editar */}
       <div className="space-y-2">

@@ -121,6 +121,9 @@ function documentoDe(parcial: Partial<Documento>): Documento {
     ai_confidence: 0.92,
     confirmed_at: "2026-08-02T10:00:00.000Z",
     content_sha256: null,
+    // Sprint 17: NULL = lo cargó una persona. La ficha no lo mira, pero la
+    // fila del fixture tiene que ser una fila COMPLETA de `documents`.
+    auto_ingest_source: null,
     created_at: "2026-08-01T10:00:00.000Z",
     updated_at: "2026-08-01T10:00:00.000Z",
     created_by_profile_id: "660e8400-e29b-41d4-a716-446655440001",

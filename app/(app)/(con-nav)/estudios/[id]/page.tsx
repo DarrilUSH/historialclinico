@@ -108,7 +108,7 @@ export default async function PaginaDetalleEstudio({
   const { data: documento } = await supabase
     .from("documents")
     .select(
-      "id, title, category, document_date, institution, specialty, doctor_name, mime_type, file_size_bytes, ai_summary",
+      "id, title, category, document_date, institution, specialty, doctor_name, mime_type, file_size_bytes, ai_summary, auto_ingest_source",
     )
     .eq("id", id)
     .eq("profile_id", activo.perfil.id)
@@ -154,6 +154,19 @@ export default async function PaginaDetalleEstudio({
         <p className="text-base text-muted-foreground">
           {formatearFechaLarga(documento.document_date)}
         </p>
+
+        {/* Marca de procedencia (Sprint 17, tarea 17.3): existe para que la
+            persona SIEMPRE pueda saber cómo entró un estudio a su historial,
+            aunque nadie lo haya revisado antes de verlo acá. Discreta a
+            propósito -no pasó nada malo, es información de origen, no una
+            alerta-, así que va sin color de advertencia y del mismo tamaño
+            que la fecha secundaria de arriba. */}
+        {documento.auto_ingest_source === "gmail" && (
+          <p className="flex items-center gap-1.5 text-sm text-muted-foreground chica:gap-1 chica:text-xs">
+            <SparklesIcon className="size-3.5 shrink-0 chica:size-3" aria-hidden="true" />
+            Cargado desde Gmail automáticamente
+          </p>
+        )}
       </div>
 
       <VisorDocumento

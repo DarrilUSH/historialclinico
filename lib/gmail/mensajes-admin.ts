@@ -90,11 +90,24 @@ export interface MensajeParaRegistrar {
  * "Buscar ahora" al mismo tiempo) pueden intentar registrar el mismo mensaje.
  * El UNIQUE `(user_id, gmail_message_id)` lo resuelve en la base y acá se
  * ignora en silencio, que es exactamente lo correcto: el registro ya está.
+ *
+ * ## Por qué devuelve el id de la fila (auto-carga, Sprint 17)
+ *
+ * La pasada automática necesita saber SOBRE QUÉ FILA operar, y el id solo lo
+ * conoce la base. Devolverlo desde acá tiene además una propiedad que resulta
+ * ser justo la que hace falta: con `ignoreDuplicates`, un conflicto no
+ * devuelve ninguna fila, así que **`null` significa "este correo ya estaba
+ * registrado"**. La pasada automática lo usa como su primera defensa contra el
+ * replay: si dos pasadas simultáneas ven el mismo mensaje, solo una obtiene el
+ * id y solo esa intenta cargarlo. (La segunda defensa está en la RPC, que
+ * bloquea la fila y contesta `ya_resuelto`.)
  */
-export async function registrarMensajeProcesado(datos: MensajeParaRegistrar): Promise<void> {
+export async function registrarMensajeProcesado(
+  datos: MensajeParaRegistrar,
+): Promise<string | null> {
   const resuelto = datos.clase === "nada"
 
-  const { error } = await clienteAdmin()
+  const { data, error } = await clienteAdmin()
     .from("gmail_messages")
     .upsert(
       {
@@ -113,10 +126,14 @@ export async function registrarMensajeProcesado(datos: MensajeParaRegistrar): Pr
       },
       { onConflict: "user_id,gmail_message_id", ignoreDuplicates: true },
     )
+    .select("id")
+    .maybeSingle()
 
   if (error) {
     throw new Error(`No se pudo registrar el correo ${datos.gmailMessageId}: ${error.message}`)
   }
+
+  return data?.id ?? null
 }
 
 /**

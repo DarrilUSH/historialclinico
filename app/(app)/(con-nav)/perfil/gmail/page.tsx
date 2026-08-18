@@ -53,20 +53,24 @@ import { ArrowLeftIcon, MailIcon } from "lucide-react"
 
 import {
   BandejaGmail,
+  type CorreoAutoCargadoParaBandeja,
   type CorreoParaBandeja,
   type CorreoProcesadoParaBandeja,
 } from "@/components/gmail/bandeja-gmail"
+import { PanelAutoCarga } from "@/components/gmail/panel-auto-carga"
 import { PanelConexionGmail } from "@/components/gmail/panel-conexion-gmail"
 import { formatearBytes } from "@/lib/archivos/validacion"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { esResultadoConexion, obtenerConexionGmail } from "@/lib/gmail/conexion"
 import { emparejarPorNombreYTamano } from "@/lib/gmail/deteccion-duplicados"
 import {
+  listarCorreosAutoCargados,
   listarCorreosPendientes,
   listarCorreosResueltos,
   listarFiltrosAprendidos,
   type CorreoDeGmail,
 } from "@/lib/gmail/mensajes"
+import { listarPerfilesAdministrados } from "@/lib/perfiles/administrados"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 export const metadata: Metadata = {
@@ -163,6 +167,7 @@ function aPendiente(
   horaPorCorreoId: Map<string, string>,
 ): CorreoParaBandeja {
   return {
+    motivoRevision: correo.motivoRevision,
     id: correo.id,
     asunto: correo.asunto ?? "(sin asunto)",
     remitente: correo.remitenteNombre ?? correo.remitenteEmail,
@@ -219,6 +224,39 @@ function aProcesado(correo: CorreoDeGmail): CorreoProcesadoParaBandeja {
   }
 }
 
+/**
+ * Un correo que entró SOLO → la tarjeta de la sección "Cargados
+ * automáticamente".
+ *
+ * `titulo` sale de lo que se creó (el título del estudio, o la especialidad y
+ * la fecha del turno). Si eso ya no existe -alguien borró el estudio desde
+ * `/estudios`, y el `ON DELETE SET NULL` dejó el puntero en nada- se cae al
+ * asunto del correo: la fila sigue teniendo que aparecer, con su Deshacer, para
+ * que el correo pueda volver a la lista.
+ */
+function aAutoCargado(
+  correo: CorreoDeGmail,
+  titulosDocumento: Map<string, { titulo: string; perfilId: string }>,
+  titulosTurno: Map<string, { titulo: string; perfilId: string }>,
+  nombrePorPerfilId: Map<string, string>,
+): CorreoAutoCargadoParaBandeja {
+  const documento = correo.documentId ? titulosDocumento.get(correo.documentId) : undefined
+  const turno = correo.appointmentId ? titulosTurno.get(correo.appointmentId) : undefined
+  const creado = documento ?? turno
+
+  return {
+    id: correo.id,
+    asunto: correo.asunto ?? "(sin asunto)",
+    remitente: correo.remitenteNombre ?? correo.remitenteEmail,
+    cargadoElTexto: formatear(correo.autoCargadoEl, FORMATO_SELLO) ?? "hace un rato",
+    tipo: turno ? "turno" : "estudio",
+    titulo: creado?.titulo ?? (correo.asunto ?? "(sin asunto)"),
+    documentoId: documento ? correo.documentId : null,
+    turnoId: turno ? correo.appointmentId : null,
+    perfilNombre: creado ? (nombrePorPerfilId.get(creado.perfilId) ?? null) : null,
+  }
+}
+
 export default async function PaginaGmail({
   searchParams,
 }: {
@@ -226,14 +264,53 @@ export default async function PaginaGmail({
 }) {
   const { usuario, supabase } = await requerirSesion({ desde: "/perfil/gmail" })
 
-  const [conexion, parametros, pendientes, procesados, filtros, activo] = await Promise.all([
-    obtenerConexionGmail(supabase, usuario.id),
-    searchParams,
-    listarCorreosPendientes(supabase),
-    listarCorreosResueltos(supabase),
-    listarFiltrosAprendidos(supabase),
-    obtenerPerfilActivo(),
+  const [conexion, parametros, pendientes, procesados, autoCargados, filtros, activo, perfiles] =
+    await Promise.all([
+      obtenerConexionGmail(supabase, usuario.id),
+      searchParams,
+      listarCorreosPendientes(supabase),
+      listarCorreosResueltos(supabase),
+      listarCorreosAutoCargados(supabase),
+      listarFiltrosAprendidos(supabase),
+      obtenerPerfilActivo(),
+      listarPerfilesAdministrados(supabase, usuario.id),
+    ])
+
+  // Qué se creó en cada carga automática. Dos consultas acotadas a los ids que
+  // ya tenemos, con el cliente del USUARIO: si por lo que sea perdió el acceso
+  // a ese perfil, RLS filtra la fila y la tarjeta cae al asunto del correo, sin
+  // filtrar ni un dato.
+  const idsDocumento = autoCargados.map((correo) => correo.documentId).filter((id): id is string => id !== null)
+  const idsTurno = autoCargados.map((correo) => correo.appointmentId).filter((id): id is string => id !== null)
+
+  const [documentosCreados, turnosCreados] = await Promise.all([
+    idsDocumento.length > 0
+      ? supabase.from("documents").select("id, title, profile_id").in("id", idsDocumento)
+      : Promise.resolve({ data: null }),
+    idsTurno.length > 0
+      ? supabase
+          .from("appointments")
+          .select("id, specialty, appointment_date, profile_id")
+          .in("id", idsTurno)
+      : Promise.resolve({ data: null }),
   ])
+
+  const titulosDocumento = new Map(
+    (documentosCreados.data ?? []).map((fila) => [
+      fila.id,
+      { titulo: fila.title, perfilId: fila.profile_id },
+    ]),
+  )
+  const titulosTurno = new Map(
+    (turnosCreados.data ?? []).map((fila) => [
+      fila.id,
+      {
+        titulo: `${fila.specialty} — ${formatear(fila.appointment_date, FORMATO_SELLO) ?? "sin fecha"}`,
+        perfilId: fila.profile_id,
+      },
+    ]),
+  )
+  const nombrePorPerfilId = new Map(perfiles.map((perfil) => [perfil.id, perfil.nombre]))
 
   const resultado = esResultadoConexion(parametros.resultado) ? parametros.resultado : null
   const remitentesConFiltro = new Set(filtros.map((filtro) => filtro.remitente))
@@ -297,12 +374,46 @@ export default async function PaginaGmail({
         SÍ se muestra: los correos que ya habían llegado siguen esperando y hay
         que poder revisarlos aunque el permiso haya caducado.
       */}
+      {/*
+        El interruptor de carga automática solo aparece con la conexión VIVA:
+        con el permiso vencido no hay barrido, así que prender o apagar una
+        función que no puede correr sería prometer algo que no va a pasar. Los
+        correos que ya entraron solos siguen listándose abajo igual.
+      */}
+      {conexion !== null && conexion.estado === "conectada" && (
+        <PanelAutoCarga
+          /*
+            La `key` lleva la configuración GUARDADA. Cuando la Server Action
+            confirma un cambio y `revalidatePath` refresca esta pantalla, la
+            key cambia y el panel se monta de nuevo: el checkbox y el
+            `defaultValue` del `<select>` -los dos no controlados- se
+            inicializan con lo que quedó guardado en vez de quedar mostrando lo
+            que la persona había tipeado antes. Sin esto, después de guardar el
+            interruptor se veía apagado y el selector volvía a "Elegí un
+            perfil…" aunque el texto de al lado dijera "está prendida"
+            (encontrado en el Galaxy real, Sprint 17).
+          */
+          key={`${conexion.autoCargaActiva}-${conexion.autoCargaPerfilId ?? "sin-perfil"}`}
+          activa={conexion.autoCargaActiva}
+          perfilElegidoId={conexion.autoCargaPerfilId}
+          desdeTexto={formatear(conexion.autoCargaDesde, FORMATO_FECHA)}
+          perfiles={perfiles.map((perfil) => ({
+            id: perfil.id,
+            nombre: perfil.nombre,
+            esPropio: perfil.esPropio,
+          }))}
+        />
+      )}
+
       {conexion !== null && (
         <BandejaGmail
           pendientes={pendientes.map((correo) =>
             aPendiente(correo, remitentesConFiltro, emparejados, horaPorCorreoId),
           )}
           procesados={procesados.map(aProcesado)}
+          autoCargados={autoCargados.map((correo) =>
+            aAutoCargado(correo, titulosDocumento, titulosTurno, nombrePorPerfilId),
+          )}
           filtros={filtros.map((filtro) => ({
             id: filtro.id,
             remitente: filtro.remitente,

@@ -569,7 +569,12 @@ es una puerta de privacidad antes que un ahorro de cuota: un barrido que le
 mandara a un tercero el texto de todo lo que cae en la etiqueta estaría
 sacando de la casilla correos que quizás no tienen nada que ver con un turno.
 Y aun dando positivo, el texto **solo sale cuando la persona abre ese ítem**:
-el barrido automático nunca llama a Gemini.
+**con la carga automática apagada**, el barrido en sí mismo nunca llama a
+Gemini —ni por el cuerpo de un aviso de turno ni por los bytes de un
+adjunto—. Esa frase deja de ser cierta en cuanto la persona prende el
+interruptor del §10.7: ahí el barrido SÍ le manda contenido a Gemini sin que
+nadie lo revise antes. Se declara con esas palabras, sin matices, en la
+sección siguiente.
 
 **Los filtros creados quedan a la vista y se pueden borrar.** `gmail_filters`
 existe para eso: la app crea reglas en la casilla de la persona a pedido suyo,
@@ -589,6 +594,164 @@ Verificación: `scripts/test-rls.sql` BLOQUE 24 (21 casos) y
 `tests/unit/gmail-barrido.test.ts` —que además comprueba, sobre el objeto que
 se persiste, que no aparezca ni una palabra del cuerpo del correo—.
 
+### 10.7 La carga automática (opt-in, Sprint 17, tarea 17.3)
+
+Este es el cambio de contrato de privacidad más importante del sprint, y hay
+que decirlo sin suavizarlo: **con el interruptor encendido, el barrido
+automático manda a Gemini el cuerpo del correo y los bytes del adjunto, sin
+que ninguna persona los mire antes.** Todo el resto de este documento describe
+un sistema que minimiza lo que sale hacia un tercero; esta sección describe la
+única puerta por la que, a pedido explícito del usuario y solo si él mismo la
+abrió, esa regla se corre.
+
+**El pedido fue textual, después de usar la 17.2 en producción:** *"cuando un
+correo se lee SIN NINGUNA duda, que se cargue solo; solo lo dudoso queda a
+revisión manual"*. El diseño completo —las cuatro guardas de la base, la
+compuerta "sin dudas" y las dos RPC nuevas— está en el encabezado de
+`supabase/migrations/20260818160000_gmail_auto_ingesta.sql`; acá se declara
+solo la parte que le corresponde a este documento: qué viaja hacia Gemini y
+qué no.
+
+**Es opt-in por cuenta, apagado por defecto, y con destino elegido a mano.**
+Ninguna conexión existente antes de esta migración queda encendida: la
+columna nace `auto_ingest_enabled = false` para todas. Prenderlo es un gesto
+explícito desde `/perfil/gmail`, y el mismo formulario exige elegir el perfil
+de destino en el momento de prender —no hay forma de "prender y decidir
+después"—. Apagarlo devuelve el circuito a ser exactamente el de la 17.2:
+metadatos nada más, sin Gemini y sin bytes.
+
+#### Con el interruptor apagado, nada cambia
+
+Es el estado de toda conexión existente y el default de cualquier conexión
+nueva. El barrido sigue haciendo exactamente lo que declara el §10.6: registra
+metadatos del correo, no baja adjuntos, no llama a Gemini. `lib/gmail/auto-carga.ts`
+ni siquiera se ejecuta —la función devuelve el resultado vacío en la primera
+línea, sin una consulta de más, apenas confirma que la cuenta no tiene destino
+de auto-carga.
+
+#### Con el interruptor encendido, qué sale y hacia dónde
+
+Para cada correo nuevo que el barrido acaba de registrar (hasta
+`LIMITE_AUTO_POR_PASADA = 3` por pasada, ver `docs/gmail-ingesta.md` §9.4), la
+pasada automática:
+
+1. Baja el adjunto de Gmail (o usa el cuerpo que ya tiene en memoria, si es un
+   aviso de turno).
+2. Se lo manda a Gemini: el adjunto entero para un documento, el asunto más el
+   cuerpo para un turno.
+3. Con lo que Gemini contestó, le pregunta a la compuerta puramente en memoria
+   (`lib/gmail/auto-ingesta.ts`) si hay algún motivo de duda.
+4. Si no hay ninguno, carga el documento o el turno por la RPC del camino
+   automático. Si hay al menos uno, descarta lo que Gemini contestó y deja el
+   correo pendiente con el motivo escrito.
+
+Ni el adjunto ni el cuerpo del correo se persisten en ningún punto de este
+circuito —siguen rigiendo el §4.4 y el §10.2 de este documento—, y lo mismo
+vale para todo lo que Gemini devuelve: si el correo termina yendo a revisión,
+lo único que sobrevive es la frase de `docs/gmail-ingesta.md` §9.2 ("no dice a
+nombre de quién viene"), nunca la respuesta cruda del modelo.
+
+#### El campo `paciente`: un schema y un prompt derivados, exclusivos del camino automático
+
+Leer un documento para el camino automático usa `SCHEMA_DOCUMENTO_MEDICO_CON_PACIENTE`
+y `PROMPT_DOCUMENTO_MEDICO_CON_PACIENTE` (`lib/gemini/schemas.ts`,
+`lib/gemini/prompt-documento.ts`), no `SCHEMA_DOCUMENTO_MEDICO` /
+`PROMPT_DOCUMENTO_MEDICO` de siempre. **Las tres puertas humanas —subida a
+mano, Web Share Target, "Revisar este estudio"— siguen usando el schema y el
+prompt de siempre, sin el campo `paciente`: su contrato de privacidad no
+cambió en nada.**
+
+Son DERIVADOS y no un campo agregado al schema de siempre a propósito: las
+ocho reglas de extracción tienen que ser literalmente las mismas en los dos
+caminos, y la forma de garantizarlo es que un camino se construya sobre el
+otro (`...SCHEMA_DOCUMENTO_MEDICO.properties`, prompt concatenado) en vez de
+mantener dos copias que se van a separar con el tiempo.
+
+El campo que se agrega, `paciente`, le pide a Gemini el nombre y apellido tal
+como figura impreso en el documento —"Paciente:", "Apellido y Nombre:", la
+carátula del laboratorio—, copiado literal y sin completar nada si no
+aparece. Ese nombre:
+
+1. Se compara **en memoria**, dentro de la misma pasada del barrido, contra
+   `profiles.full_name` del perfil de destino elegido en el interruptor
+   (`coincideNombreDePaciente`, `docs/gmail-ingesta.md` §9.1).
+2. Alimenta un único booleano en la compuerta (`sinDudas` / el motivo
+   `nombre_no_coincide` o `sin_nombre_de_paciente`).
+3. **Se descarta ahí mismo.** No se persiste en ninguna tabla, no se escribe
+   en ningún `console.*` —ni siquiera cuando la validación de Zod falla, en
+   cuyo caso lo que se registra son los mensajes de Zod (que describen la
+   estructura, no el contenido, mismo criterio que el §6)—, y no vuelve al
+   navegador: este circuito entero corre en `pg_cron` → Route Handler, sin
+   ninguna respuesta hacia un cliente.
+
+La garantía de que el nombre no puede terminar guardado por descuido no es
+disciplina de quien escribió el código: **es que no hay dónde ponerlo.**
+`DocumentoAutomaticoParaIngresar` (`lib/gmail/auto-ingesta-admin.ts`), el tipo
+que junta todo lo que se manda a la RPC que crea el documento, no tiene un
+parámetro `paciente`. Es la misma técnica de "el tipo es la lista blanca" que
+`ContextoClinico` (§1, regla 2): agregar el nombre ahí exigiría tocar el tipo,
+y tocar el tipo es una decisión visible, no un `...spread` que lo cuela.
+
+#### En turnos, no hay ningún campo de paciente — y es deliberadamente más protector
+
+El camino de los turnos **no agregó ningún campo nuevo al schema de
+extracción**. `SCHEMA_ANALISIS_MENSAJE_TURNO` sigue siendo exactamente el que
+describe el §9: sin un solo campo para nombre ni DNI del paciente. En vez de
+preguntarle a Gemini a nombre de quién viene el aviso, `nombreApareceEnTexto`
+(`lib/gmail/coincidencia-nombre.ts`) busca, **fuera de cualquier llamada al
+modelo**, si los tokens del nombre del perfil de destino aparecen contiguos
+dentro del asunto y el cuerpo del correo tal como el barrido los tiene en
+memoria.
+
+Es más protector que el camino de los documentos por una razón concreta: en
+documentos, el riesgo es que el MODELO invente o corrompa un nombre en el
+campo `paciente` antes de que se lo compare y descarte. En turnos, ese riesgo
+directamente no existe, porque nunca se le pide al modelo que produzca un
+nombre: la comparación es una búsqueda de texto determinística, en el
+servidor, contra una cadena que la aplicación ya conocía de antes
+(`profiles.full_name`). Nada que Gemini devuelva puede hacer que esa búsqueda
+mienta.
+
+#### Qué queda guardado de nuevo
+
+| Columna | Tabla | Qué es |
+|---|---|---|
+| `auto_ingest_enabled`, `auto_ingest_profile_id`, `auto_ingest_set_at` | `gmail_connections` | El interruptor, a quién apunta y desde cuándo. Las tres nacen vacías/`false` para toda conexión existente. |
+| `auto_ingested_at` | `gmail_messages` | Cuándo ese correo entró SOLO. `NULL` = lo trajo una persona, o no entró. |
+| `auto_review_reason` | `gmail_messages` | Por qué NO se cargó solo, en una frase ya armada para la bandeja ("Quedó para que lo mires vos: …"). |
+| `auto_ingest_source` | `documents`, `appointments` | La marca inmutable de origen (`'gmail'` o `NULL`). Sellada por trigger para las sesiones de usuario: nadie puede fingir que algo entró solo, ni borrar la marca de lo que sí entró solo. Detalle completo en `docs/modelo-permisos.md` §7.5. |
+
+Ninguna de estas columnas guarda el nombre del paciente, el cuerpo del correo
+ni la respuesta cruda de Gemini: son metadatos de trazabilidad —qué pasó y
+cuándo—, no el contenido que se leyó para decidirlo.
+
+#### Cómo se verifica
+
+`tests/unit/gmail-coincidencia-nombre.test.ts` prueba el cotejo de
+titularidad en los dos sentidos —lo que TIENE que coincidir y, sobre todo, lo
+que NO puede coincidir—, con el caso real del encargo (la casilla que recibe
+los estudios de la madre) en su propio `describe`. `tests/unit/gmail-auto-ingesta.test.ts`
+prueba la compuerta motivo por motivo: cada uno de los que lista
+`docs/gmail-ingesta.md` §9.2 tiene su caso propio, para que aflojar cualquiera
+ponga un test en rojo con el nombre de lo que se aflojó. `tests/unit/gmail-auto-carga.test.ts`
+prueba el circuito completo contra un Gmail de mentira (`node:http`, mismo
+patrón que la 17.1/17.2): correo perfecto que entra solo, cada tipo de duda,
+duplicado que ni siquiera llama a Gemini, e interruptor apagado que no toca
+nada.
+
+Las cuatro guardas de la base están declaradas en el propio encabezado SQL de
+`20260818160000_gmail_auto_ingesta.sql`, y `scripts/test-rls.sql` BLOQUE 25
+(55 casos) las prueba una por una: las cuatro guardas con su versión HOSTIL
+—perfil que Ana no administra, opt-in apagado, replay del mismo correo,
+huella y turno duplicados, correo de otra cuenta, `can_manage` revocado
+DESPUÉS de encender el interruptor—, que ni `anon` ni `authenticated` pueden
+ejecutar ninguna de las funciones nuevas, que `auto_ingest_source` no se
+puede ni inventar ni borrar desde una sesión de usuario, el CHECK+trigger
+del §1 (borrar el perfil de destino con el interruptor encendido no rompe
+nada), y el Deshacer completo -Beto, que no administra el perfil, no puede
+deshacer nada; Ana sí, y el borrado encola la purga de Storage como
+cualquier otro borrado-.
+
 ---
 
 ## 11. Referencias
@@ -607,3 +770,12 @@ se persiste, que no aparezca ni una palabra del cuerpo del correo—.
 - `supabase/migrations/20260818140000_gmail_mensajes.sql` — el registro de correos y los filtros: qué guarda cada columna y por qué.
 - `lib/gmail/heuristica-turno.ts` — la puerta que decide si el cuerpo de un correo puede salir hacia Gemini (§10.6).
 - `scripts/test-rls.sql` BLOQUE 24 — RLS, dedup y baja de cuenta de la bandeja de Gmail.
+- `supabase/migrations/20260818160000_gmail_auto_ingesta.sql` — el interruptor, la marca de origen y las tres RPC de la carga automática (§10.7); su encabezado tiene el razonamiento completo de las cuatro guardas.
+- `lib/gmail/auto-ingesta.ts` — la compuerta "sin dudas", pura y probada motivo por motivo (§10.7).
+- `lib/gmail/coincidencia-nombre.ts` — el cotejo de titularidad para documentos y turnos (§10.7).
+- `lib/gmail/auto-carga.ts` — la pasada automática dentro del barrido: baja el adjunto, llama a Gemini, decide y carga (§10.7).
+- `lib/gmail/auto-ingesta-admin.ts`, `lib/gmail/pendientes-admin.ts`, `lib/documentos/ingesta-automatica.ts` — la persistencia del camino automático con `service_role` (§10.7).
+- `lib/gemini/schemas.ts` (`SCHEMA_DOCUMENTO_MEDICO_CON_PACIENTE`), `lib/gemini/prompt-documento.ts` (`PROMPT_DOCUMENTO_MEDICO_CON_PACIENTE`) — el schema y el prompt derivados, exclusivos del camino automático (§10.7).
+- `docs/modelo-permisos.md` §7.5 — el puente entre la carga automática y la matriz de permisos: por qué el destino exige `can_manage`, por qué no se tocó `confirmar_documento_recien_subido`, y la autoridad re-verificada en cada carga.
+- `docs/gmail-ingesta.md` §9 — el circuito completo de la carga automática, la lista de motivos de revisión y las deudas declaradas.
+- `scripts/test-rls.sql` BLOQUE 25 (55 casos) — las cuatro guardas de las RPC con su versión hostil, la inmutabilidad de `auto_ingest_source` y el Deshacer completo (§10.7).

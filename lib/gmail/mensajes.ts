@@ -22,13 +22,23 @@ import type { ClaseMensajeGmail, EstadoMensajeGmail } from "@/lib/gmail/mensajes
 import type { Database, Json } from "@/types/database.types"
 
 const COLUMNAS =
-  "id, gmail_message_id, from_email, from_name, subject, message_date, kind, status, looks_like_appointment, attachments, document_id, appointment_id, detected_at, resolved_at"
+  "id, gmail_message_id, from_email, from_name, subject, message_date, kind, status, looks_like_appointment, attachments, document_id, appointment_id, detected_at, resolved_at, auto_ingested_at, auto_review_reason"
 
 /** Cuántos correos ya resueltos se muestran. Es historia reciente, no un archivo. */
 const LIMITE_RESUELTOS = 20
 
 /** Tope de pendientes que se listan de una vez. Con la tanda de 15 por pasada, es holgado. */
 const LIMITE_PENDIENTES = 60
+
+/** Tope de la sección "Cargados automáticamente". Es lo reciente, no un archivo. */
+const LIMITE_AUTO_CARGADOS = 20
+
+/**
+ * Ventana del contador de auto-cargados de `/inicio`. Una semana: cubre de
+ * sobra el tiempo que alguien puede pasar sin abrir la app y sigue siendo una
+ * novedad y no una estadística.
+ */
+const DIAS_AUTO_CARGA_RECIENTE = 7
 
 export interface CorreoDeGmail {
   id: string
@@ -45,6 +55,10 @@ export interface CorreoDeGmail {
   appointmentId: string | null
   detectadoEl: string
   resueltoEl: string | null
+  /** Cuándo entró SOLO al historial (Sprint 17). `null` = lo trajo una persona. */
+  autoCargadoEl: string | null
+  /** Por qué NO se cargó solo, ya en castellano. `null` si no se evaluó o si sí se cargó. */
+  motivoRevision: string | null
 }
 
 interface FilaCruda {
@@ -62,6 +76,8 @@ interface FilaCruda {
   appointment_id: string | null
   detected_at: string
   resolved_at: string | null
+  auto_ingested_at: string | null
+  auto_review_reason: string | null
 }
 
 function aCorreo(fila: FilaCruda): CorreoDeGmail {
@@ -80,6 +96,8 @@ function aCorreo(fila: FilaCruda): CorreoDeGmail {
     appointmentId: fila.appointment_id,
     detectadoEl: fila.detected_at,
     resueltoEl: fila.resolved_at,
+    autoCargadoEl: fila.auto_ingested_at,
+    motivoRevision: fila.auto_review_reason,
   }
 }
 
@@ -121,6 +139,61 @@ export async function listarCorreosResueltos(
     return []
   }
   return (data ?? []).map((fila) => aCorreo(fila as FilaCruda))
+}
+
+/**
+ * Los correos que entraron SOLOS al historial (Sprint 17), del más reciente al
+ * más viejo.
+ *
+ * Es una lista aparte de `listarCorreosResueltos` a propósito, aunque los dos
+ * lean la misma tabla: lo que entró solo NO va plegado dentro de "correos que
+ * ya revisaste" —porque la persona no los revisó— sino en su propia sección
+ * visible, con el botón de deshacer al lado. Esconder detrás de un `<details>`
+ * lo único que la app hizo por su cuenta sería exactamente al revés de lo que
+ * corresponde.
+ */
+export async function listarCorreosAutoCargados(
+  supabase: SupabaseClient<Database>,
+): Promise<CorreoDeGmail[]> {
+  const { data, error } = await supabase
+    .from("gmail_messages")
+    .select(COLUMNAS)
+    .not("auto_ingested_at", "is", null)
+    .order("auto_ingested_at", { ascending: false })
+    .limit(LIMITE_AUTO_CARGADOS)
+
+  if (error) {
+    console.error("[gmail] no se pudieron leer los correos cargados solos:", error.message)
+    return []
+  }
+  return (data ?? []).map((fila) => aCorreo(fila as FilaCruda))
+}
+
+/**
+ * Cuántos estudios y turnos entraron solos en los últimos días. Lo usa la card
+ * de `/inicio`.
+ *
+ * La ventana existe porque el contador responde a "¿qué pasó mientras no
+ * miraba?", no a "¿cuántos entraron solos desde siempre": un número que solo
+ * crece dejaría de ser una novedad a la semana de prender el interruptor.
+ */
+export async function contarAutoCargadosRecientes(
+  supabase: SupabaseClient<Database>,
+  dias = DIAS_AUTO_CARGA_RECIENTE,
+): Promise<number> {
+  const desde = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString()
+
+  const { count, error } = await supabase
+    .from("gmail_messages")
+    .select("id", { count: "exact", head: true })
+    .not("auto_ingested_at", "is", null)
+    .gte("auto_ingested_at", desde)
+
+  if (error) {
+    console.error("[gmail] no se pudieron contar los correos cargados solos:", error.message)
+    return 0
+  }
+  return count ?? 0
 }
 
 /**

@@ -54,6 +54,13 @@ import "server-only"
  */
 
 import {
+  cargarSolosLosQueNoTienenDudas,
+  RESULTADO_AUTO_VACIO,
+  type CorreoRecienRegistrado,
+  type OpcionesAutoCarga,
+  type ResultadoAutoCarga,
+} from "@/lib/gmail/auto-carga"
+import {
   ErrorConexionGmailVencida,
   marcarConexionVencida,
   obtenerAccessTokenGmail,
@@ -118,6 +125,12 @@ export interface ResultadoBarrido {
   vencida: boolean
   /** `true` si quedaron correos nuevos sin procesar por el límite de la tanda. */
   hayMas: boolean
+  /**
+   * Lo que hizo la carga automática en esta pasada (Sprint 17). Todo en cero
+   * cuando el interruptor está apagado, que es el default y el caso de
+   * cualquier conexión que no lo haya prendido a mano.
+   */
+  auto: ResultadoAutoCarga
 }
 
 const RESULTADO_VACIO: ResultadoBarrido = {
@@ -128,6 +141,7 @@ const RESULTADO_VACIO: ResultadoBarrido = {
   errores: 0,
   vencida: false,
   hayMas: false,
+  auto: RESULTADO_AUTO_VACIO,
 }
 
 /**
@@ -137,8 +151,25 @@ const RESULTADO_VACIO: ResultadoBarrido = {
 export interface DependenciasBarrido {
   obtenerAccessToken: (userId: string) => Promise<string>
   yaProcesados: (userId: string, ids: string[]) => Promise<Set<string>>
-  registrar: (datos: MensajeParaRegistrar) => Promise<void>
+  /**
+   * Registra el correo y devuelve el id de la fila, o `null` si ya estaba
+   * registrado (`ignoreDuplicates` no devolvió ninguna fila). Ese `null` es lo
+   * que impide que dos pasadas simultáneas intenten cargar solo el mismo
+   * correo — ver `lib/gmail/mensajes-admin.ts#registrarMensajeProcesado`.
+   */
+  registrar: (datos: MensajeParaRegistrar) => Promise<string | null>
   marcarVencida: (userId: string) => Promise<void>
+  /**
+   * La pasada automática (Sprint 17). Por defecto la real; los tests la
+   * sustituyen o la dejan como está según lo que quieran verificar. Recibe
+   * solo los correos que ESTA pasada registró de nuevo.
+   */
+  autoCargar: (
+    userId: string,
+    correos: readonly CorreoRecienRegistrado[],
+    accessToken: string,
+    opciones: OpcionesAutoCarga,
+  ) => Promise<ResultadoAutoCarga>
 }
 
 const DEPENDENCIAS_REALES: DependenciasBarrido = {
@@ -146,6 +177,7 @@ const DEPENDENCIAS_REALES: DependenciasBarrido = {
   yaProcesados: idsYaProcesados,
   registrar: registrarMensajeProcesado,
   marcarVencida: marcarConexionVencida,
+  autoCargar: cargarSolosLosQueNoTienenDudas,
 }
 
 export interface OpcionesBarrido {
@@ -155,6 +187,8 @@ export interface OpcionesBarrido {
   limite?: number
   /** Persistencia y token. Por defecto, los módulos reales. */
   dependencias?: Partial<DependenciasBarrido>
+  /** Opciones de la pasada automática (Sprint 17): sus propias dependencias y el "hoy". */
+  auto?: OpcionesAutoCarga
 }
 
 /** ¿Este error significa "el permiso ya no vale"? */
@@ -264,6 +298,16 @@ export async function barrerConexion(
 
   resultado.hayMas = nuevos.hayMas
 
+  /**
+   * Los correos que ESTA pasada registró de verdad (no los que ya estaban), en
+   * el orden en que llegaron. Es la entrada de la pasada automática: se junta
+   * primero y se procesa después, para que la parte barata y crítica del
+   * barrido -no perder ningún correo- termine ENTERA antes de empezar la parte
+   * cara. Si la auto-carga se cae a la mitad, todo lo que se registró ya está
+   * a salvo en la bandeja.
+   */
+  const recienRegistrados: CorreoRecienRegistrado[] = []
+
   for (const id of nuevos.ids) {
     try {
       const crudo = await obtenerMensajeCompleto(accessToken, id, opciones.bases)
@@ -283,7 +327,7 @@ export async function barrerConexion(
       const pareceTurno = pareceAvisoDeTurno(mensaje.cuerpoTexto)
       const clase = clasificarMensaje(tieneAdjuntoApto, pareceTurno)
 
-      await deps.registrar({
+      const correoId = await deps.registrar({
         userId: conexion.userId,
         gmailMessageId: mensaje.id,
         connectionEmail: conexion.email,
@@ -300,6 +344,12 @@ export async function barrerConexion(
       if (clase === "documento") resultado.documentos += 1
       else if (clase === "turno") resultado.turnos += 1
       else resultado.descartados += 1
+
+      // `correoId === null` = otra pasada lo registró primero: esa se ocupa.
+      // Los de clase `nada` nacen ya descartados y no tienen nada que cargar.
+      if (correoId !== null && clase !== "nada") {
+        recienRegistrados.push({ correoId, mensaje, clase })
+      }
     } catch (error) {
       if (esPermisoVencido(error)) {
         // El permiso murió a mitad de la pasada: se marca la conexión y se
@@ -319,6 +369,33 @@ export async function barrerConexion(
         error instanceof Error ? error.message : error,
       )
     }
+  }
+
+  // ── La pasada automática (Sprint 17)
+  //
+  // Va acá, al final y fuera del bucle, y todo lo que puede salir mal adentro
+  // ya está contenido: si la cuenta no tiene el interruptor encendido devuelve
+  // vacío en una consulta, y si algo explota deja el correo pendiente. Aun así
+  // se envuelve en su propio `try`: una falla inesperada de la parte NUEVA no
+  // puede convertir en fallida una pasada que ya registró todo lo que tenía
+  // que registrar.
+  try {
+    resultado.auto = await deps.autoCargar(
+      conexion.userId,
+      recienRegistrados,
+      accessToken,
+      // Las URLs de Gmail son las MISMAS que las del barrido -es la misma
+      // casilla y el mismo token-, así que se heredan salvo que se pidan
+      // distintas. Sin esto, un test que apunta el barrido a su servidor local
+      // tendría que acordarse de apuntar también la pasada automática, y
+      // olvidarse haría que el test hablara con Google de verdad.
+      { bases: opciones.bases, ...opciones.auto },
+    )
+  } catch (error) {
+    console.error(
+      `${PREFIJO} la carga automática de ${conexion.userId} falló entera (los correos quedan en la bandeja):`,
+      error instanceof Error ? error.message : error,
+    )
   }
 
   return resultado
@@ -348,6 +425,7 @@ export async function barrerConexiones(
 ): Promise<ResumenBarridoGeneral> {
   const total: ResumenBarridoGeneral = {
     ...RESULTADO_VACIO,
+    auto: { ...RESULTADO_AUTO_VACIO },
     conexiones: conexiones.length,
     vencidas: 0,
     conexionesConFallo: 0,
@@ -362,6 +440,12 @@ export async function barrerConexiones(
       total.descartados += parcial.descartados
       total.errores += parcial.errores
       total.hayMas = total.hayMas || parcial.hayMas
+      total.auto.intentados += parcial.auto.intentados
+      total.auto.cargados += parcial.auto.cargados
+      total.auto.documentos += parcial.auto.documentos
+      total.auto.turnos += parcial.auto.turnos
+      total.auto.aRevision += parcial.auto.aRevision
+      total.auto.errores += parcial.auto.errores
       if (parcial.vencida) {
         total.vencidas += 1
         total.vencida = true
@@ -392,9 +476,17 @@ export function fraseDeResultado(resultado: ResultadoBarrido): string {
     return "Se venció el permiso para leer tu Gmail. Volvé a conectarlo y probamos de nuevo."
   }
 
-  const paraRevisar = resultado.documentos + resultado.turnos
+  // Lo que entró SOLO no es "para revisar": ya está en el historial. Se cuenta
+  // aparte y se dice primero, porque es la novedad más importante de la frase
+  // -algo cambió en el historial sin que la persona hiciera nada, y tiene que
+  // enterarse en la primera línea, no en una sección plegada más abajo-.
+  const cargadosSolos = frasePartesAutoCarga(resultado.auto)
+  const paraRevisar = resultado.documentos + resultado.turnos - resultado.auto.cargados
 
-  if (paraRevisar === 0) {
+  if (paraRevisar <= 0) {
+    if (cargadosSolos) {
+      return `${cargadosSolos} Ya está todo en el historial.`
+    }
     if (resultado.nuevos > 0) {
       return resultado.nuevos === 1
         ? "Miramos 1 correo nuevo y no había nada para sumar al historial."
@@ -405,18 +497,46 @@ export function fraseDeResultado(resultado: ResultadoBarrido): string {
       : "No llegó nada nuevo a la etiqueta. Ya estabas al día."
   }
 
+  const documentosPendientes = resultado.documentos - resultado.auto.documentos
+  const turnosPendientes = resultado.turnos - resultado.auto.turnos
+
   const partes: string[] = []
-  if (resultado.documentos > 0) {
-    partes.push(resultado.documentos === 1 ? "1 estudio" : `${resultado.documentos} estudios`)
+  if (documentosPendientes > 0) {
+    partes.push(documentosPendientes === 1 ? "1 estudio" : `${documentosPendientes} estudios`)
   }
-  if (resultado.turnos > 0) {
-    partes.push(resultado.turnos === 1 ? "1 turno" : `${resultado.turnos} turnos`)
+  if (turnosPendientes > 0) {
+    partes.push(turnosPendientes === 1 ? "1 turno" : `${turnosPendientes} turnos`)
   }
 
-  const encabezado =
-    paraRevisar === 1 ? "1 correo nuevo" : `${paraRevisar} correos nuevos`
+  const encabezado = paraRevisar === 1 ? "1 correo nuevo" : `${paraRevisar} correos nuevos`
   const detalle = partes.join(" y ")
   const cola = resultado.hayMas ? " Todavía quedan más: tocá otra vez para seguir." : ""
+  const cabeza = cargadosSolos ? `${cargadosSolos} ` : ""
 
-  return `${encabezado}: ${detalle} para revisar.${cola}`
+  return `${cabeza}${encabezado}: ${detalle} para revisar.${cola}`
+}
+
+/**
+ * "Cargamos 1 estudio solo." — la parte de la frase que cuenta lo que entró
+ * sin que nadie lo mirara. `null` si no entró nada solo (el caso de siempre:
+ * el interruptor está apagado).
+ *
+ * Se dice "solo"/"solos" con todas las letras, y no "automáticamente", porque
+ * es la palabra que deja claro que la app actuó por su cuenta. Un texto que
+ * dijera "1 estudio nuevo" sin más haría que la persona creyera que ella lo
+ * cargó y no se enterara de que la función está funcionando.
+ */
+function frasePartesAutoCarga(auto: ResultadoAutoCarga): string | null {
+  if (auto.cargados === 0) return null
+
+  const partes: string[] = []
+  if (auto.documentos > 0) {
+    partes.push(auto.documentos === 1 ? "1 estudio" : `${auto.documentos} estudios`)
+  }
+  if (auto.turnos > 0) {
+    partes.push(auto.turnos === 1 ? "1 turno" : `${auto.turnos} turnos`)
+  }
+
+  const detalle = partes.join(" y ")
+  return auto.cargados === 1 ? `Cargamos ${detalle} solo.` : `Cargamos ${detalle} solos.`
 }

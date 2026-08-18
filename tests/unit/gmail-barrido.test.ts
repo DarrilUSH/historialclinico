@@ -36,6 +36,7 @@ import type { AddressInfo } from "node:net"
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 
 import { ingerirAdjuntoDeGmail } from "@/lib/gmail/adjunto"
+import { RESULTADO_AUTO_VACIO, type CorreoRecienRegistrado } from "@/lib/gmail/auto-carga"
 import {
   LIMITE_MENSAJES_POR_PASADA,
   barrerConexion,
@@ -233,6 +234,8 @@ function bases() {
 function persistenciaFalsa(yaRegistrados: string[] = []) {
   const registrados = new Map<string, MensajeParaRegistrar>()
   const vencidas: string[] = []
+  /** Los correos que la pasada le pasó a la carga automática (Sprint 17). */
+  const ofrecidosAAutoCarga: CorreoRecienRegistrado[] = []
   for (const id of yaRegistrados) {
     registrados.set(id, { gmailMessageId: id } as MensajeParaRegistrar)
   }
@@ -240,15 +243,26 @@ function persistenciaFalsa(yaRegistrados: string[] = []) {
   return {
     registrados,
     vencidas,
+    ofrecidosAAutoCarga,
     dependencias: {
       obtenerAccessToken: async () => "ya29.token-de-prueba",
       yaProcesados: async (_userId: string, ids: string[]) =>
         new Set(ids.filter((id) => registrados.has(id))),
       registrar: async (datos: MensajeParaRegistrar) => {
+        const nuevo = !registrados.has(datos.gmailMessageId)
         registrados.set(datos.gmailMessageId, datos)
+        // Espeja el `ignoreDuplicates` real: si el correo ya estaba, el upsert
+        // no devuelve ninguna fila y quien llama recibe `null`.
+        return nuevo ? `fila-${datos.gmailMessageId}` : null
       },
       marcarVencida: async (userId: string) => {
         vencidas.push(userId)
+      },
+      // Interruptor APAGADO: el default del producto y el de todos los tests
+      // de la 17.2, que tienen que seguir describiendo el mismo circuito.
+      autoCargar: async (_userId: string, correos: readonly CorreoRecienRegistrado[]) => {
+        ofrecidosAAutoCarga.push(...correos)
+        return { ...RESULTADO_AUTO_VACIO }
       },
     },
   }
@@ -405,7 +419,19 @@ describe("barrido de punta a punta contra el Gmail de mentira", () => {
       errores: 1,
       vencida: false,
       hayMas: false,
+      auto: RESULTADO_AUTO_VACIO,
     })
+
+    // Con el interruptor apagado, la pasada automática no cargó nada — pero
+    // igual se le ofrecieron los tres correos aprovechables (2 estudios + 1
+    // turno). El descartado y el que falló NO: no hay nada que cargar de
+    // ellos.
+    expect(falsa.ofrecidosAAutoCarga).toHaveLength(3)
+    expect(falsa.ofrecidosAAutoCarga.map((correo) => correo.clase).sort()).toEqual([
+      "documento",
+      "documento",
+      "turno",
+    ])
 
     // El que falló NO quedó registrado: la próxima pasada lo reintenta.
     expect(falsa.registrados.has("m-roto")).toBe(false)
@@ -927,6 +953,7 @@ describe("fraseDeResultado", () => {
     errores: 0,
     vencida: false,
     hayMas: false,
+    auto: RESULTADO_AUTO_VACIO,
   }
 
   it("el caso del encargo, con el plural bien puesto", () => {
@@ -965,5 +992,48 @@ describe("fraseDeResultado", () => {
     expect(fraseDeResultado({ ...vacio, errores: 2 })).toBe(
       "No pudimos leer los correos nuevos. Probá de nuevo en un rato.",
     )
+  })
+
+  /* --- Auto-carga (Sprint 17) --- */
+
+  it("lo que entró solo se dice PRIMERO y con la palabra «solo»", () => {
+    expect(
+      fraseDeResultado({
+        ...vacio,
+        nuevos: 1,
+        documentos: 1,
+        auto: { ...RESULTADO_AUTO_VACIO, intentados: 1, cargados: 1, documentos: 1 },
+      }),
+    ).toBe("Cargamos 1 estudio solo. Ya está todo en el historial.")
+  })
+
+  it("no cuenta dos veces: lo cargado solo no queda además «para revisar»", () => {
+    expect(
+      fraseDeResultado({
+        ...vacio,
+        nuevos: 3,
+        documentos: 2,
+        turnos: 1,
+        auto: { ...RESULTADO_AUTO_VACIO, intentados: 3, cargados: 1, documentos: 1, aRevision: 2 },
+      }),
+    ).toBe("Cargamos 1 estudio solo. 2 correos nuevos: 1 estudio y 1 turno para revisar.")
+  })
+
+  it("varios cargados solos van en plural", () => {
+    expect(
+      fraseDeResultado({
+        ...vacio,
+        nuevos: 2,
+        documentos: 1,
+        turnos: 1,
+        auto: {
+          ...RESULTADO_AUTO_VACIO,
+          intentados: 2,
+          cargados: 2,
+          documentos: 1,
+          turnos: 1,
+        },
+      }),
+    ).toBe("Cargamos 1 estudio y 1 turno solos. Ya está todo en el historial.")
   })
 })

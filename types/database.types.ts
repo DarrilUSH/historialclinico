@@ -141,6 +141,7 @@ export type Database = {
       appointments: {
         Row: {
           appointment_date: string
+          auto_ingest_source: string | null
           created_at: string
           created_by_profile_id: string | null
           doctor_id: string | null
@@ -160,6 +161,7 @@ export type Database = {
         }
         Insert: {
           appointment_date: string
+          auto_ingest_source?: string | null
           created_at?: string
           created_by_profile_id?: string | null
           doctor_id?: string | null
@@ -179,6 +181,7 @@ export type Database = {
         }
         Update: {
           appointment_date?: string
+          auto_ingest_source?: string | null
           created_at?: string
           created_by_profile_id?: string | null
           doctor_id?: string | null
@@ -368,6 +371,7 @@ export type Database = {
         Row: {
           ai_confidence: number | null
           ai_summary: string | null
+          auto_ingest_source: string | null
           category: Database["public"]["Enums"]["doc_category"]
           confirmed_at: string | null
           content_sha256: string | null
@@ -390,6 +394,7 @@ export type Database = {
         Insert: {
           ai_confidence?: number | null
           ai_summary?: string | null
+          auto_ingest_source?: string | null
           category?: Database["public"]["Enums"]["doc_category"]
           confirmed_at?: string | null
           content_sha256?: string | null
@@ -412,6 +417,7 @@ export type Database = {
         Update: {
           ai_confidence?: number | null
           ai_summary?: string | null
+          auto_ingest_source?: string | null
           category?: Database["public"]["Enums"]["doc_category"]
           confirmed_at?: string | null
           content_sha256?: string | null
@@ -505,6 +511,9 @@ export type Database = {
       }
       gmail_connections: {
         Row: {
+          auto_ingest_enabled: boolean
+          auto_ingest_profile_id: string | null
+          auto_ingest_set_at: string | null
           connected_at: string
           email: string
           expired_at: string | null
@@ -517,6 +526,9 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          auto_ingest_enabled?: boolean
+          auto_ingest_profile_id?: string | null
+          auto_ingest_set_at?: string | null
           connected_at?: string
           email: string
           expired_at?: string | null
@@ -529,6 +541,9 @@ export type Database = {
           user_id: string
         }
         Update: {
+          auto_ingest_enabled?: boolean
+          auto_ingest_profile_id?: string | null
+          auto_ingest_set_at?: string | null
           connected_at?: string
           email?: string
           expired_at?: string | null
@@ -540,7 +555,15 @@ export type Database = {
           token_secret_id?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "gmail_connections_auto_ingest_profile_id_fkey"
+            columns: ["auto_ingest_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       gmail_filters: {
         Row: {
@@ -576,6 +599,8 @@ export type Database = {
         Row: {
           appointment_id: string | null
           attachments: Json
+          auto_ingested_at: string | null
+          auto_review_reason: string | null
           connection_email: string
           detected_at: string
           document_id: string | null
@@ -594,6 +619,8 @@ export type Database = {
         Insert: {
           appointment_id?: string | null
           attachments?: Json
+          auto_ingested_at?: string | null
+          auto_review_reason?: string | null
           connection_email: string
           detected_at?: string
           document_id?: string | null
@@ -612,6 +639,8 @@ export type Database = {
         Update: {
           appointment_id?: string | null
           attachments?: Json
+          auto_ingested_at?: string | null
+          auto_review_reason?: string | null
           connection_email?: string
           detected_at?: string
           document_id?: string | null
@@ -1562,6 +1591,10 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: undefined
       }
+      configurar_auto_ingesta_gmail: {
+        Args: { p_activar: boolean; p_perfil: string; p_usuario: string }
+        Returns: undefined
+      }
       configurar_cron_alertas_medicacion: {
         Args: { p_url: string }
         Returns: undefined
@@ -1586,6 +1619,7 @@ export type Database = {
         Returns: {
           ai_confidence: number | null
           ai_summary: string | null
+          auto_ingest_source: string | null
           category: Database["public"]["Enums"]["doc_category"]
           confirmed_at: string | null
           content_sha256: string | null
@@ -1649,11 +1683,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      cuenta_administra_perfil: {
+        Args: { p_perfil: string; p_usuario: string }
+        Returns: boolean
+      }
       descartar_documento_recien_subido: {
         Args: { doc_id: string }
         Returns: {
           ai_confidence: number | null
           ai_summary: string | null
+          auto_ingest_source: string | null
           category: Database["public"]["Enums"]["doc_category"]
           confirmed_at: string | null
           content_sha256: string | null
@@ -1707,6 +1746,37 @@ export type Database = {
           p_usuario: string
         }
         Returns: undefined
+      }
+      ingresar_documento_automatico: {
+        Args: {
+          p_bytes: number
+          p_categoria: string
+          p_correo: string
+          p_fecha: string
+          p_mime: string
+          p_resumen: string
+          p_sha256: string
+          p_storage_path: string
+          p_texto_ocr: string
+          p_titulo: string
+          p_usuario: string
+        }
+        Returns: Json
+      }
+      ingresar_turno_automatico: {
+        Args: {
+          p_correo: string
+          p_especialidad: string
+          p_fecha_hora: string
+          p_lugar_ciudad: string
+          p_lugar_direccion: string
+          p_lugar_nombre: string
+          p_lugar_provincia: string
+          p_medico: string
+          p_notas: string
+          p_usuario: string
+        }
+        Returns: Json
       }
       leer_refresh_token_gmail: { Args: { p_usuario: string }; Returns: string }
       marcar_conexion_gmail_activa: {

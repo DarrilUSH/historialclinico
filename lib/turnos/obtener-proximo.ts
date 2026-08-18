@@ -21,7 +21,7 @@ export async function obtenerProximoTurno(
   const { data, error } = await supabase
     .from("appointments")
     .select(
-      "id, specialty, doctor_name, appointment_date, location_name, location_address, location_city, location_province, status, latitude, longitude, preparation_notes",
+      "id, specialty, doctor_name, appointment_date, location_name, location_address, location_city, location_province, status, latitude, longitude, preparation_notes, auto_ingest_source",
     )
     .eq("profile_id", perfilId)
     .neq("status", "cancelled")
