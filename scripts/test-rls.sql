@@ -4990,6 +4990,695 @@ select pruebas_rls.registrar('20. perfiles gestionados',
 
 
 -- =============================================================================
+-- BLOQUE 21 — Graduación de perfiles gestionados (Sprint 15, tarea 15.2)
+-- -----------------------------------------------------------------------------
+-- La GRADUACIÓN es la operación de docs/modelo-permisos.md §8.6: un perfil
+-- gestionado recibe su propia cuenta y su titular toma el control. La
+-- implementa `20260817230000_graduacion.sql` extendiendo
+-- `completar_alta_de_cuenta` -o sea, extendiendo el trigger de alta de
+-- `auth.users`- con una rama que VINCULA en vez de crear.
+--
+-- ── CÓMO SE SIMULA LA GRADUACIÓN, Y POR QUÉ ASÍ
+--
+-- Hay que reproducir lo que hace `auth.admin.createUser`, que NO es un único
+-- INSERT con toda la metadata puesta. Medido con triggers de diagnóstico sobre
+-- `auth.users` (ver el encabezado de la migración): el `INSERT` lleva el
+-- `raw_user_meta_data` pero un `raw_app_meta_data` con solo el proveedor, y el
+-- claim `perfil_existente` llega en un `UPDATE` posterior — **dentro de la
+-- misma transacción**. Ese detalle no es cosmético: es lo que hace que para
+-- cuando el claim aparece, el alta normal ya haya corrido y la cuenta ya tenga
+-- un perfil propio en blanco que hay que deshacer.
+--
+-- Por eso los casos de graduación de este bloque van dentro de un `do $$ ... $$`
+-- (un statement = una transacción) que hace el INSERT y el UPDATE juntos. Un
+-- `insert;` y un `update;` sueltos en psql serían DOS transacciones y no
+-- probarían el camino real -de hecho probarían el caso D, que también está acá
+-- y que debe fallar-.
+--
+-- El elenco (tres cuentas base + siete altas de un solo uso):
+--   f2100aaa "Nadia" — CREADORA de los perfiles gestionados. La única que puede graduarlos.
+--   f2100bbb "Bruno" — can_manage sobre el gestionado, pero NO su creador.
+--   f2100ccc "Carla" — tercero sin ningún permiso.
+--   f2100ddd            — la cuenta NUEVA de Tomás: la graduación de verdad (INSERT + UPDATE).
+--   f2100777            — forma "GoTrue futuro": el claim YA viene en el INSERT (gradúa a Ana).
+--   f2100666            — cuenta VIEJA en uso a la que alguien le estampa el claim después.
+--   f2100eee            — segundo intento sobre un perfil YA graduado (debe fallar).
+--   f2100fff            — HOSTIL: se declara `perfil_existente` en `raw_user_meta_data`.
+--   f2100999            — metadata rota: apunta a un perfil que no existe.
+--   f2100888            — metadata rota: el claim no tiene forma de uuid.
+--
+-- Lo que este bloque demuestra, en orden:
+--   · `puede_graduar_perfil()` responde por el CREADOR y por nadie más -ni un
+--     can_manage, ni un tercero, ni sobre un perfil con cuenta-;
+--   · un `perfil_existente` puesto en `raw_user_meta_data` -la metadata que
+--     el propio usuario escribe desde el navegador con la clave anónima- NO
+--     roba nada: esa alta se procesa como cualquier otra y el perfil ajeno
+--     queda intacto. Es el ataque que la migración cierra leyendo el claim de
+--     `raw_app_meta_data`, que solo escribe la Admin API;
+--   · estamparle el claim a una cuenta VIEJA no le borra el perfil ni le roba
+--     el ajeno: se rechaza, ruidosamente. Es el footgun que abre tener que
+--     deshacer el alta automática, y la condición exacta `created_at = now()`
+--     es lo que lo cierra;
+--   · una metadata rota NO deja una cuenta a medio vincular: el alta entera
+--     se deshace y en `auth.users` no queda nada;
+--   · la vinculación feliz deja UN solo perfil -el de siempre, con su
+--     historia-, sin el perfil en blanco que el INSERT había creado, NO firma
+--     ningún consentimiento -lo firma su titular en el gate- y CONSERVA todos
+--     los accesos existentes (decisión de producto del Sprint 15);
+--   · las DOS formas funcionan: la real (claim en un UPDATE) y la que traería
+--     una versión futura de GoTrue (claim ya en el INSERT);
+--   · la autoridad se transfiere SOLA, sin migrar datos: quien creó el perfil
+--     pierde la autoridad de otorgamiento y el nuevo titular la gana, porque
+--     las políticas leen `user_id IS NULL` en tiempo de consulta (§8.6 pto 4);
+--   · graduar dos veces el mismo perfil lo rechaza LA BASE, no la interfaz;
+--   · la nota ② sigue en pie: desde una sesión de usuario `profiles.user_id`
+--     sigue siendo inmutable, tanto para adueñarse como para des-graduar;
+--   · el nuevo titular sella sus dos consentimientos con su propio `user_id`
+--     y no puede firmar a nombre de nadie más;
+--   · y ya como titular pleno revoca el acceso de quien lo administraba, que
+--     es el criterio de aceptación del sprint.
+--
+-- Los ids de los perfiles gestionados los genera `gen_random_uuid()`, así que
+-- se guardan en GUC de sesión (`pruebas_rls.perfil_tomas_id`,
+-- `pruebas_rls.perfil_ana_id`) con `set_config(..., false)` — mismo mecanismo
+-- y mismo motivo que el BLOQUE 20 con Lucas: tienen que sobrevivir al `commit`
+-- de la transacción que los generó.
+-- =============================================================================
+\echo '### BLOQUE 21 — graduación de perfiles gestionados (perfil gestionado → cuenta propia)'
+
+-- Pre-limpieza defensiva (misma lección que los BLOQUES 15, 19 y 20): restos
+-- de una corrida abortada harían chocar los INSERT de abajo contra users_pkey.
+-- Los perfiles que Nadia haya creado se borran ANTES que su cuenta.
+delete from public.profiles where created_by_profile_id = 'f2100000-0000-4000-8000-00000000f101';
+delete from auth.users      where id in (
+    'f2100aaa-1111-4111-8111-111111111111',
+    'f2100bbb-2222-4222-8222-222222222222',
+    'f2100ccc-3333-4333-8333-333333333333',
+    'f2100ddd-4444-4444-8444-444444444444',
+    'f2100eee-5555-4555-8555-555555555555',
+    'f2100fff-6666-4666-8666-666666666666',
+    'f2100999-7777-4777-8777-777777777777',
+    'f2100888-8888-4888-8888-888888888888',
+    'f2100777-9999-4999-8999-999999999999',
+    'f2100666-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+
+insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
+values
+    ('f2100aaa-1111-4111-8111-111111111111', 'usuario21a@test.local', '{}', '{}'),
+    ('f2100bbb-2222-4222-8222-222222222222', 'usuario21b@test.local', '{}', '{}'),
+    ('f2100ccc-3333-4333-8333-333333333333', 'usuario21c@test.local', '{}', '{}');
+
+-- El trigger de alta ya les creó su perfil propio con id aleatorio; se
+-- descartan y se reinsertan con ids fijos (mismo patrón que los BLOQUES 15 y 20).
+delete from public.profiles
+ where user_id in (
+    'f2100aaa-1111-4111-8111-111111111111',
+    'f2100bbb-2222-4222-8222-222222222222',
+    'f2100ccc-3333-4333-8333-333333333333')
+   and id not in (
+    'f2100000-0000-4000-8000-00000000f101',
+    'f2100000-0000-4000-8000-00000000f102',
+    'f2100000-0000-4000-8000-00000000f103');
+
+insert into public.profiles (id, user_id, full_name, role) values
+    ('f2100000-0000-4000-8000-00000000f101', 'f2100aaa-1111-4111-8111-111111111111', 'Nadia Bloque21', 'family_member'),
+    ('f2100000-0000-4000-8000-00000000f102', 'f2100bbb-2222-4222-8222-222222222222', 'Bruno Bloque21',  'family_member'),
+    ('f2100000-0000-4000-8000-00000000f103', 'f2100ccc-3333-4333-8333-333333333333', 'Carla Bloque21',  'family_member');
+
+
+-- ── Nadia crea el perfil gestionado de "Tomás" y le da can_manage a Bruno.
+--    Bruno es la pieza clave del bloque: tiene TODA la autoridad que el modelo
+--    le da a un administrador de perfil gestionado -incluida la de otorgar
+--    accesos, nota ⚑ de §4.4- y aun así no va a poder graduarlo.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare fila public.profiles%rowtype;
+begin
+    select * into fila from public.crear_perfil_gestionado(
+        'Tomás Bloque21', date '2008-03-12', '2026-08-14-v1', '203.0.113.7'::inet);
+    perform set_config('pruebas_rls.perfil_tomas_id', fila.id::text, false);
+
+    -- Segundo gestionado, para probar la forma "GoTrue futuro" (claim ya en
+    -- el INSERT) sin pisar el caso principal.
+    select * into fila from public.crear_perfil_gestionado(
+        'Ana Bloque21', date '2007-11-02', '2026-08-14-v1', null);
+    perform set_config('pruebas_rls.perfil_ana_id', fila.id::text, false);
+end $$;
+
+insert into public.family_permissions (owner_profile_id, granted_profile_id, can_view, can_upload, can_manage)
+values (current_setting('pruebas_rls.perfil_tomas_id')::uuid, 'f2100000-0000-4000-8000-00000000f102', true, true, true);
+
+commit;
+
+
+-- ── ¿QUIÉN PUEDE GRADUAR? La pregunta la contesta la base, no la interfaz.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('21. graduación',
+       'Nadia (CREADORA) puede graduar a Tomás  [CRITERIO DE ACEPTACIÓN]',
+       'true',
+       (select public.puede_graduar_perfil(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text));
+
+-- Sobre su PROPIO perfil, que ya tiene cuenta: no hay nada que graduar.
+select pruebas_rls.registrar('21. graduación',
+       'Nadia NO puede "graduar" su propio perfil, que ya tiene cuenta',
+       'false',
+       (select public.puede_graduar_perfil('f2100000-0000-4000-8000-00000000f101')::text));
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100bbb-2222-4222-8222-222222222222","role":"authenticated"}', true);
+set local role authenticated;
+
+-- Bruno TIENE la autoridad de otorgamiento sobre Tomás (nota ⚑ de §4.4: es
+-- can_manage sobre un gestionado) y aun así no puede graduarlo. Los dos casos
+-- van juntos para que se lea que la diferencia es deliberada y no un descuido.
+select pruebas_rls.registrar('21. graduación',
+       'Bruno (can_manage NO creador) SÍ tiene autoridad de otorgamiento sobre Tomás',
+       'true',
+       (select public.puede_otorgar_permisos(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text));
+
+select pruebas_rls.registrar('21. graduación',
+       'Bruno (can_manage NO creador) NO puede graduar a Tomás  [CASO HOSTIL]',
+       'false',
+       (select public.puede_graduar_perfil(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text));
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100ccc-3333-4333-8333-333333333333","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('21. graduación',
+       'Carla (sin ningún permiso) NO puede graduar a Tomás',
+       'false',
+       (select public.puede_graduar_perfil(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text));
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', '', true);
+set local role anon;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.puede_graduar_perfil(current_setting('pruebas_rls.perfil_tomas_id')::uuid);
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('21. graduación',
+        'anon no puede ejecutar puede_graduar_perfil (sin GRANT EXECUTE)',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+
+-- ── CASO HOSTIL CENTRAL: `perfil_existente` en `raw_user_meta_data`.
+--    Es la metadata que viaja en `options.data` de `signUp`, o sea la que
+--    escribe cualquiera desde el navegador con la clave anónima. Si el trigger
+--    la leyera, este INSERT sería suficiente para adueñarse del historial
+--    médico de Tomás. Se procesa como un alta normal y no toca nada ajeno.
+insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
+values ('f2100fff-6666-4666-8666-666666666666', 'atacante21@test.local',
+        jsonb_build_object('perfil_existente', current_setting('pruebas_rls.perfil_tomas_id'),
+                           'full_name', 'Atacante Bloque21'),
+        '{}');
+
+select pruebas_rls.registrar('21. graduación',
+       'Un perfil_existente en raw_user_meta_data NO roba el perfil ajeno  [CASO HOSTIL]',
+       'sigue gestionado (user_id NULL)',
+       (select case when user_id is null then 'sigue gestionado (user_id NULL)'
+                    else 'ROBADO por ' || user_id::text end
+          from public.profiles
+         where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid));
+
+select pruebas_rls.registrar('21. graduación',
+       'Esa alta hostil se procesó como un alta NORMAL: la cuenta estrenó su propio perfil',
+       'Atacante Bloque21',
+       (select full_name from public.profiles
+         where user_id = 'f2100fff-6666-4666-8666-666666666666'));
+
+select pruebas_rls.registrar('21. graduación',
+       'Y firmó sus dos consentimientos de alta, como cualquier registro público',
+       'privacidad, terminos',
+       (select string_agg(document, ', ' order by document) from public.consents
+         where user_id = 'f2100fff-6666-4666-8666-666666666666'));
+
+
+-- ── FOOTGUN CERRADO: estamparle el claim a una cuenta VIEJA, ya en uso.
+--    Es el riesgo que abre tener que deshacer el alta automática: si la
+--    condición de borrado fuera laxa, esto le borraría a alguien su perfil
+--    real -con su historial médico adentro- para dárselo a otro. La condición
+--    `created_at = now()` -exacta, no una ventana de tiempo- lo cierra: el
+--    perfil de esta cuenta nació en OTRA transacción, no lo alcanza el delete,
+--    y la operación termina rechazada.
+insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
+values ('f2100666-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'vieja21@test.local',
+        '{"full_name":"Cuenta Vieja Bloque21"}', '{}');
+
+do $$
+declare v text;
+begin
+    begin
+        update auth.users
+           set raw_app_meta_data = jsonb_build_object(
+                   'perfil_existente', current_setting('pruebas_rls.perfil_tomas_id'))
+         where id = 'f2100666-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+        v := 'vinculada';
+    exception when insufficient_privilege then v := 'rechazada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('21. graduación',
+        'Estamparle el claim a una cuenta VIEJA es rechazado  [CASO HOSTIL]',
+        'rechazada (42501)', v);
+end $$;
+
+select pruebas_rls.registrar('21. graduación',
+       'La cuenta vieja conserva su perfil propio y Tomás sigue sin dueño',
+       'Cuenta Vieja Bloque21 / Tomás sigue gestionado',
+       (select (select full_name from public.profiles
+                 where user_id = 'f2100666-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+               || ' / ' ||
+               (select case when user_id is null then 'Tomás sigue gestionado' else 'Tomás ROBADO' end
+                  from public.profiles
+                 where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid)));
+
+
+-- ── METADATA ROTA: el alta se DESHACE entera. La regla de oro tiene dos
+--    mitades -no dejar una cuenta sin poder entrar, y no robar un perfil
+--    ajeno- y abortar el alta es lo único que satisface las dos: no queda
+--    nadie afuera de su cuenta porque no llega a haber cuenta. Se reproduce
+--    la forma real: INSERT y UPDATE en la MISMA transacción (el `do` block).
+do $$
+declare v text;
+begin
+    begin
+        insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
+        values ('f2100888-8888-4888-8888-888888888888', 'rota21b@test.local', '{}', '{}');
+        update auth.users set raw_app_meta_data = '{"perfil_existente":"no-soy-un-uuid"}'
+         where id = 'f2100888-8888-4888-8888-888888888888';
+        v := 'creada';
+    exception when sqlstate '22023' then v := 'rechazada (22023)';
+             when others           then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('21. graduación',
+        'Un perfil_existente que no tiene forma de uuid aborta el alta',
+        'rechazada (22023)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
+        values ('f2100999-7777-4777-8777-777777777777', 'rota21a@test.local', '{}', '{}');
+        update auth.users
+           set raw_app_meta_data = '{"perfil_existente":"f2100aaa-0000-4000-8000-00000000dead"}'
+         where id = 'f2100999-7777-4777-8777-777777777777';
+        v := 'creada';
+    exception when insufficient_privilege then v := 'rechazada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('21. graduación',
+        'Un perfil_existente que apunta a un perfil inexistente aborta el alta',
+        'rechazada (42501)', v);
+end $$;
+
+select pruebas_rls.registrar('21. graduación',
+       'Ninguna de las dos altas rotas dejó una cuenta a medio vincular en auth.users',
+       '0 cuentas',
+       (select count(*)::text || ' cuentas' from auth.users
+         where id in ('f2100888-8888-4888-8888-888888888888',
+                      'f2100999-7777-4777-8777-777777777777')));
+
+
+-- ── LA GRADUACIÓN DE VERDAD, con la forma REAL de `auth.admin.createUser`:
+--    INSERT sin el claim (que dispara el alta normal y le estrena a la cuenta
+--    un perfil propio en blanco) + UPDATE que agrega el claim, todo en la
+--    MISMA transacción. Ver "CÓMO SE SIMULA LA GRADUACIÓN" en el encabezado
+--    del bloque.
+do $$
+begin
+    insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
+    values ('f2100ddd-4444-4444-8444-444444444444', 'tomas21@test.local',
+            '{"full_name":"Tomás Bloque21"}', '{"provider":"email"}');
+
+    -- Comprobación intermedia, DENTRO de la transacción: el alta normal ya
+    -- corrió y dejó el perfil en blanco. Es el estado que el trigger de
+    -- graduación tiene que deshacer, y dejarlo asentado es lo que hace que el
+    -- caso siguiente signifique algo.
+    perform pruebas_rls.registrar('21. graduación',
+        'Antes del claim, el INSERT ya le estrenó a la cuenta un perfil propio en blanco',
+        '1 perfiles en blanco / 2 consents',
+        (select count(*) from public.profiles
+          where user_id = 'f2100ddd-4444-4444-8444-444444444444')::text
+        || ' perfiles en blanco / ' ||
+        (select count(*) from public.consents
+          where user_id = 'f2100ddd-4444-4444-8444-444444444444')::text || ' consents');
+
+    update auth.users
+       set raw_app_meta_data = raw_app_meta_data
+           || jsonb_build_object('perfil_existente', current_setting('pruebas_rls.perfil_tomas_id'))
+     where id = 'f2100ddd-4444-4444-8444-444444444444';
+end $$;
+
+select pruebas_rls.registrar('21. graduación',
+       'El perfil gestionado queda VINCULADO a la cuenta nueva  [CRITERIO DE ACEPTACIÓN]',
+       'vinculado a la cuenta nueva',
+       (select case when user_id = 'f2100ddd-4444-4444-8444-444444444444'
+                    then 'vinculado a la cuenta nueva'
+                    when user_id is null then 'sigue sin cuenta'
+                    else 'vinculado a otra cuenta' end
+          from public.profiles
+         where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid));
+
+-- Vincular, no crear: la cuenta graduada tiene UN perfil y es el que ya
+-- existía, con su historia. Si el trigger hubiera caído al camino normal
+-- habría dos filas (o una nueva y en blanco).
+select pruebas_rls.registrar('21. graduación',
+       'La cuenta graduada NO estrenó un perfil nuevo: tiene el de siempre',
+       '1 perfiles / es el mismo',
+       (select count(*)::text || ' perfiles / ' ||
+               case when bool_and(p.id = current_setting('pruebas_rls.perfil_tomas_id')::uuid)
+                    then 'es el mismo' else 'es otro' end
+          from public.profiles p
+         where p.user_id = 'f2100ddd-4444-4444-8444-444444444444'));
+
+-- El perfil sigue siendo EL MISMO objeto: su fecha de nacimiento y la huella
+-- de quién lo creó sobreviven a la graduación.
+select pruebas_rls.registrar('21. graduación',
+       'El perfil conserva sus datos y la huella de quién lo creó (created_by_profile_id)',
+       '2008-03-12 / creado por Nadia',
+       (select date_of_birth::text || ' / ' ||
+               case when created_by_profile_id = 'f2100000-0000-4000-8000-00000000f101'
+                    then 'creado por Nadia' else 'otro creador' end
+          from public.profiles
+         where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid));
+
+-- El punto legal de la tarea: la cuenta graduada NACE SIN CONSENTIMIENTOS.
+-- Hasta la graduación regía el del representante, que habla de él y no se
+-- transfiere; los suyos los firma el titular en el gate /aceptar-terminos.
+select pruebas_rls.registrar('21. graduación',
+       'La cuenta graduada nace SIN consentimientos: los firma su titular en el gate',
+       '0 consents',
+       (select count(*)::text || ' consents' from public.consents
+         where user_id = 'f2100ddd-4444-4444-8444-444444444444'));
+
+-- Decisión de producto cerrada con el usuario: los accesos SE MANTIENEN.
+select pruebas_rls.registrar('21. graduación',
+       'Los accesos existentes SE MANTIENEN tras graduar (Nadia y Bruno siguen)  [CRITERIO DE ACEPTACIÓN]',
+       '2 accesos',
+       (select count(*)::text || ' accesos' from public.family_permissions
+         where owner_profile_id = current_setting('pruebas_rls.perfil_tomas_id')::uuid
+           and granted_profile_id in ('f2100000-0000-4000-8000-00000000f101',
+                                      'f2100000-0000-4000-8000-00000000f102')));
+
+-- Idempotencia: el backfill de 20260814140000 §3 recorre TODAS las cuentas y
+-- volvería a pasar por esta. No puede duplicar el perfil, ni inventar el
+-- consentimiento que su titular todavía no dio, ni fallar.
+do $$
+begin
+    perform public.completar_alta_de_cuenta('f2100ddd-4444-4444-8444-444444444444');
+    perform public.completar_alta_de_cuenta('f2100ddd-4444-4444-8444-444444444444');
+end $$;
+
+select pruebas_rls.registrar('21. graduación',
+       'Volver a completar el alta de la cuenta graduada no duplica ni inventa nada',
+       '1 perfiles / 0 consents',
+       (select (select count(*) from public.profiles where user_id = 'f2100ddd-4444-4444-8444-444444444444')::text
+               || ' perfiles / ' ||
+               (select count(*) from public.consents where user_id = 'f2100ddd-4444-4444-8444-444444444444')::text
+               || ' consents'));
+
+
+-- ── LA OTRA FORMA: el claim YA viene en el INSERT. Hoy GoTrue no lo hace
+--    (medido), pero si una versión futura lo hiciera, la graduación tiene que
+--    seguir funcionando -y por ese camino ni siquiera hace falta deshacer
+--    nada, porque el alta normal nunca llega a correr-. Es lo que evita que
+--    esta implementación vuelva a depender de un detalle interno ajeno.
+insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
+values ('f2100777-9999-4999-8999-999999999999', 'ana21@test.local',
+        '{"full_name":"Ana Bloque21"}',
+        jsonb_build_object('perfil_existente', current_setting('pruebas_rls.perfil_ana_id')));
+
+select pruebas_rls.registrar('21. graduación',
+       'Con el claim ya en el INSERT también vincula, y sin perfil en blanco de por medio',
+       'vinculado / 1 perfiles / 0 consents',
+       (select case when p.user_id = 'f2100777-9999-4999-8999-999999999999'
+                    then 'vinculado' else 'NO vinculado' end
+          from public.profiles p
+         where p.id = current_setting('pruebas_rls.perfil_ana_id')::uuid)
+       || ' / ' ||
+       (select count(*) from public.profiles
+         where user_id = 'f2100777-9999-4999-8999-999999999999')::text || ' perfiles / ' ||
+       (select count(*) from public.consents
+         where user_id = 'f2100777-9999-4999-8999-999999999999')::text || ' consents');
+
+
+-- ── GRADUAR UN PERFIL YA GRADUADO: lo rechaza LA BASE, no la interfaz.
+do $$
+declare v text;
+begin
+    begin
+        insert into auth.users (id, email, raw_user_meta_data, raw_app_meta_data)
+        values ('f2100eee-5555-4555-8555-555555555555', 'segundo21@test.local', '{}',
+                '{"provider":"email"}');
+        update auth.users
+           set raw_app_meta_data = raw_app_meta_data
+               || jsonb_build_object('perfil_existente', current_setting('pruebas_rls.perfil_tomas_id'))
+         where id = 'f2100eee-5555-4555-8555-555555555555';
+        v := 'creada';
+    exception when insufficient_privilege then v := 'rechazada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('21. graduación',
+        'Graduar un perfil YA graduado es rechazado por la base  [CASO HOSTIL]',
+        'rechazada (42501)', v);
+end $$;
+
+select pruebas_rls.registrar('21. graduación',
+       'Ese segundo intento no dejó cuenta ni le cambió el dueño al perfil',
+       '0 cuentas / dueño intacto',
+       (select (select count(*) from auth.users where id = 'f2100eee-5555-4555-8555-555555555555')::text
+               || ' cuentas / ' ||
+               (select case when user_id = 'f2100ddd-4444-4444-8444-444444444444'
+                            then 'dueño intacto' else 'dueño CAMBIADO' end
+                  from public.profiles
+                 where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid)));
+
+-- Y `puede_graduar_perfil` deja de decir que sí, incluso para su creadora.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('21. graduación',
+       'Ni siquiera Nadia puede volver a graduar a Tomás una vez graduado',
+       'false',
+       (select public.puede_graduar_perfil(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text));
+
+commit;
+
+
+-- ── LA AUTORIDAD SE TRANSFIERE SOLA (§8.6 punto 4). No se migró un solo dato:
+--    las políticas leen `user_id IS NULL` en tiempo de consulta, así que
+--    dejar de ser NULL les cambia la respuesta en la consulta siguiente.
+select pruebas_rls.registrar('21. graduación',
+       'El perfil dejó de ser gestionado para toda la base (es_perfil_gestionado)',
+       'false',
+       (select public.es_perfil_gestionado(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text));
+
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('21. graduación',
+       'Nadia PERDIÓ la autoridad de otorgamiento sobre Tomás (la nota ⚑ dejó de aplicar)',
+       'false',
+       (select public.puede_otorgar_permisos(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text));
+
+-- Lo que NO perdió: sigue pudiendo administrar el contenido, porque su fila
+-- de can_manage sigue viva. Es exactamente la decisión de producto.
+select pruebas_rls.registrar('21. graduación',
+       'Nadia conserva la administración del contenido (su can_manage sigue vivo)',
+       'true',
+       (select public.puede_administrar_perfil(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text));
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100ddd-4444-4444-8444-444444444444","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('21. graduación',
+       'Tomás es ahora el TITULAR de su perfil y tiene la autoridad de otorgamiento',
+       'titular=true / otorga=true',
+       (select 'titular=' || public.es_titular(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text
+               || ' / otorga=' || public.puede_otorgar_permisos(current_setting('pruebas_rls.perfil_tomas_id')::uuid)::text));
+
+select pruebas_rls.registrar('21. graduación',
+       'Tomás ve su propio perfil en el selector', '1 filas',
+       count(*) || ' filas')
+  from public.profiles where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid;
+
+commit;
+
+
+-- ── LA NOTA ② SIGUE EN PIE: desde una sesión de usuario, `profiles.user_id`
+--    es inmutable. Ni para adueñarse de un perfil ajeno, ni para
+--    "des-graduar" al que uno mismo graduó.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100ddd-4444-4444-8444-444444444444","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        update public.profiles set user_id = 'f2100ccc-3333-4333-8333-333333333333'
+         where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid;
+        v := 'cambió la titularidad';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('21. graduación',
+        'El titular NO puede regalar su perfil a otra cuenta desde la aplicación (nota ②)',
+        'rechazado (42501)', v);
+end $$;
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        update public.profiles set user_id = null
+         where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid;
+        v := 'des-graduado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('21. graduación',
+        'Nadia (can_manage) NO puede DES-graduar a Tomás desde la aplicación (nota ②)',
+        'rechazado (42501)', v);
+end $$;
+
+commit;
+
+
+-- ── EL GATE DE LEGALES: el nuevo titular firma SUS documentos, con su propio
+--    user_id. Es literalmente lo que hace `registrarLegalesDeAlta`
+--    (`lib/legales.ts`) con el cliente del USUARIO, bajo consents_insert_propio.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100ddd-4444-4444-8444-444444444444","role":"authenticated"}', true);
+set local role authenticated;
+
+insert into public.consents (user_id, document, version, ip)
+select 'f2100ddd-4444-4444-8444-444444444444', d.documento, '2026-08-14-v1', '203.0.113.9'::inet
+  from (values ('privacidad'), ('terminos')) as d (documento);
+
+-- Y no puede firmar a nombre de otra cuenta: un consentimiento que se puede
+-- firmar por un tercero no es un consentimiento.
+do $$
+declare v text;
+begin
+    begin
+        insert into public.consents (user_id, document, version)
+        values ('f2100aaa-1111-4111-8111-111111111111', 'privacidad', '2026-08-14-v1');
+        v := 'firmado por otro';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('21. graduación',
+        'Tomás NO puede firmar el consentimiento a nombre de otra cuenta',
+        'denegado (42501)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('21. graduación',
+       'El gate selló los DOS consentimientos del nuevo titular con su propio user_id  [CRITERIO DE ACEPTACIÓN]',
+       'privacidad, terminos / 2026-08-14-v1',
+       (select string_agg(document, ', ' order by document) || ' / ' || min(version)
+          from public.consents
+         where user_id = 'f2100ddd-4444-4444-8444-444444444444'));
+
+
+-- ── EL CRITERIO DE ACEPTACIÓN DEL SPRINT: ya como titular, Tomás revoca el
+--    acceso de quien lo administraba. El trigger de no orfandad (D4) no lo
+--    impide y está bien: solo protege perfiles GESTIONADOS, y este ya no lo
+--    es -su titular siempre puede entrar, así que no puede quedar huérfano
+--    (§8.2)-.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100ddd-4444-4444-8444-444444444444","role":"authenticated"}', true);
+set local role authenticated;
+
+delete from public.family_permissions
+ where owner_profile_id = current_setting('pruebas_rls.perfil_tomas_id')::uuid
+   and granted_profile_id = 'f2100000-0000-4000-8000-00000000f101';
+
+commit;
+
+select pruebas_rls.registrar('21. graduación',
+       'El nuevo titular revoca el acceso de quien lo administraba  [CRITERIO DE ACEPTACIÓN]',
+       '0 accesos de Nadia',
+       (select count(*)::text || ' accesos de Nadia' from public.family_permissions
+         where owner_profile_id = current_setting('pruebas_rls.perfil_tomas_id')::uuid
+           and granted_profile_id = 'f2100000-0000-4000-8000-00000000f101'));
+
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('21. graduación',
+       'Revocada, Nadia ya no ve el perfil de Tomás', '0 filas',
+       count(*) || ' filas')
+  from public.profiles where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid;
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2100bbb-2222-4222-8222-222222222222","role":"authenticated"}', true);
+set local role authenticated;
+
+select pruebas_rls.registrar('21. graduación',
+       'Bruno, a quien Tomás decidió conservar, sigue viendo el perfil', '1 filas',
+       count(*) || ' filas')
+  from public.profiles where id = current_setting('pruebas_rls.perfil_tomas_id')::uuid;
+
+commit;
+
+
+-- ── Invariantes estructurales de la función nueva (mismo centinela que el
+--    BLOQUE 19 tiene para `completar_alta_de_cuenta`): sin DEFINER no podría
+--    leer `profiles` sin recursar en su propia política, y con el search_path
+--    heredado sería escalable por quien pueda crear objetos en el path.
+select pruebas_rls.registrar('21. graduación',
+       'puede_graduar_perfil es SECURITY DEFINER y fija su search_path',
+       'definer/search_path fijado',
+       (select case when p.prosecdef then 'definer' else 'invoker' end
+               || '/' ||
+               case when coalesce(array_to_string(p.proconfig, ','), '') like 'search_path=%'
+                    then 'search_path fijado' else 'search_path heredado' end
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.proname = 'puede_graduar_perfil'));
+
+
+-- =============================================================================
 -- RESUMEN
 -- =============================================================================
 \echo ''
@@ -5069,6 +5758,26 @@ delete from auth.users       where id in (
     'f2000bbb-2222-4222-8222-222222222222',
     'f2000ccc-3333-4333-8333-333333333333',
     'f2000ddd-4444-4444-8444-444444444444');
+-- Entidades del BLOQUE 21 (Sprint 15, tarea 15.2). El perfil de Tomás se
+-- borra por `created_by_profile_id` -no por su id, generado por
+-- gen_random_uuid()- para no depender de que el GUC de sesión siga vivo acá.
+-- Va PRIMERO por la regla de siempre, aunque en este caso ya no haga falta:
+-- después de la graduación el perfil dejó de ser gestionado y el trigger de
+-- no orfandad ya no lo protege. El orden se mantiene igual porque el bloque
+-- también deja perfiles gestionados si se interrumpe antes de graduar.
+delete from public.profiles
+ where created_by_profile_id = 'f2100000-0000-4000-8000-00000000f101';
+delete from auth.users       where id in (
+    'f2100aaa-1111-4111-8111-111111111111',
+    'f2100bbb-2222-4222-8222-222222222222',
+    'f2100ccc-3333-4333-8333-333333333333',
+    'f2100ddd-4444-4444-8444-444444444444',
+    'f2100eee-5555-4555-8555-555555555555',
+    'f2100fff-6666-4666-8666-666666666666',
+    'f2100999-7777-4777-8777-777777777777',
+    'f2100888-8888-4888-8888-888888888888',
+    'f2100777-9999-4999-8999-999999999999',
+    'f2100666-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
 delete from public.storage_purge_queue where source_table in ('documents', 'insurance_cards', 'profiles');
 
 drop schema pruebas_rls cascade;

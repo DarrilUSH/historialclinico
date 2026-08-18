@@ -1410,6 +1410,7 @@ export type Database = {
         Returns: boolean
       }
       puede_cargar_en_perfil: { Args: { perfil: string }; Returns: boolean }
+      puede_graduar_perfil: { Args: { perfil: string }; Returns: boolean }
       puede_otorgar_permisos: { Args: { perfil: string }; Returns: boolean }
       puede_ver_perfil: { Args: { perfil: string }; Returns: boolean }
       reclamar_alertas_medicacion: {

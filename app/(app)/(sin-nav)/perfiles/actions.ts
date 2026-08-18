@@ -7,6 +7,8 @@
 
 import { redirect } from "next/navigation"
 
+import { RUTA_ACEPTAR_TERMINOS } from "@/lib/auth/rutas"
+import { cuentaAceptoLegalesDeAlta } from "@/lib/legales"
 import { esErrorDeGuarda, fijarPerfilActivo } from "@/lib/perfil-activo"
 
 /**
@@ -34,6 +36,18 @@ export async function elegirPerfil(
   // desde el `<form>`; esta acción no lo necesita, `void` deja explícito que
   // es intencional y no un olvido.
   void _formData
+
+  // Gate de consentimiento (Sprint 15, tarea 15.2). `app/(app)/layout.tsx` ya
+  // manda a `/aceptar-terminos` a quien no firmó, así que en la navegación
+  // normal esta comprobación nunca se activa. Se hace igual porque una Server
+  // Action es un POST a la ruta donde vive y se puede invocar sin haber
+  // renderizado ese layout: sin esto, quedaría un camino por el cual una
+  // cuenta sin consentimiento fija su cookie de perfil activo. Es el otro
+  // extremo del gate y el que tiene dientes: sin cookie de perfil activo,
+  // ninguna pantalla de `(con-nav)` renderiza un solo dato.
+  if (!(await cuentaAceptoLegalesDeAlta())) {
+    redirect(RUTA_ACEPTAR_TERMINOS)
+  }
 
   let permisoValido = true
 

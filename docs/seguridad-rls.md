@@ -148,6 +148,24 @@ La política deja de valer **para siempre** en cuanto existe el primer administr
 
 `profiles_insert_propio_o_gestionado` + `family_permissions_insert_arranque_gestionado` siguen intactas y siguen siendo el camino que prueba el BLOQUE 5 (dos `INSERT` sueltos desde una sesión de usuario). `20260817220000_perfiles_gestionados.sql` agrega un TERCER camino, no un reemplazo: la función `SECURITY DEFINER` `crear_perfil_gestionado(full_name, date_of_birth, legales_version, ip)`, que hace los mismos dos `INSERT` -perfil y fila de arranque- más un tercero (`consents`, `document = 'acceso_familiar_representante'`, cierra la [deuda D6](./modelo-permisos.md#d6-registro-del-consentimiento-en-perfiles-gestionados-aplicada)) en una **única transacción PL/pgSQL**. La UI de `/familia` usa este RPC en vez del camino de dos `INSERT`: con dos llamadas sueltas desde un Server Action, un fallo de red entre la primera y la segunda deja un perfil con `user_id IS NULL` y **cero** filas de `can_manage` -huérfano e invisible incluso para quien lo creó, porque `puede_ver_perfil` exige titularidad o una fila de permiso y ninguna de las dos llegó a existir-. `SECURITY DEFINER` bypassea RLS para las tres escrituras (mismo criterio que `registrar_toma()`), así que la función no depende de -ni relaja- ninguna política de este archivo.
 
+### 2.8 `puede_graduar_perfil()` (Sprint 15, tarea 15.2): la autoridad para cambiar la titularidad
+
+`20260817230000_graduacion.sql` implementa la [transición de gestionado a perfil con cuenta](./modelo-permisos.md#86-transición-de-gestionado-a-perfil-con-cuenta) (§8.6), *"la única operación del modelo que ningún rol puede hacer desde la aplicación"*. La décima función auxiliar es la que decide quién puede pedirla:
+
+| Función | Devuelve | Semántica | Contrato |
+|---|---|---|---|
+| `public.puede_graduar_perfil(perfil)` | `boolean` | El perfil sigue siendo gestionado (`user_id IS NULL`) **y** su `created_by_profile_id` es el perfil actor | §8.6 |
+
+**Es más estricta que `puede_otorgar_permisos`, a propósito.** Sobre un perfil gestionado, la autoridad de otorgamiento alcanza a *cualquier* `can_manage` (nota ⚑). La graduación no: solo el **creador**, que es quien declaró la representación legal al crear el perfil y firmó el consentimiento `acceso_familiar_representante` (§2.7). Administrar el historial de alguien y decidir sobre su identidad no son la misma potestad, y un familiar al que después le dieron `can_manage` para cargar estudios no heredó la segunda. El BLOQUE 21 del arnés lo prueba de forma explícita, con los dos casos juntos: el mismo actor obtiene `puede_otorgar_permisos = true` y `puede_graduar_perfil = false`.
+
+**La escritura NO pasa por RLS y por eso la autorización tiene que ser previa.** La cuenta nueva la crea la Admin API de Supabase con `service_role` (`lib/auth/cuentas-admin.ts`, patrón `storage-admin`), que tiene `BYPASSRLS`. La vinculación en sí la hace el trigger de alta —`completar_alta_de_cuenta`, extendida por esta migración— dentro de la **misma transacción** del `INSERT` en `auth.users`, con la guarda atómica `where id = <claim> and user_id is null`: dos graduaciones simultáneas del mismo perfil no pueden ganar las dos, y un perfil con dueño no se puede tomar. Si la vinculación no se puede hacer, la función levanta excepción y **el alta entera se deshace**: no queda una cuenta a medio vincular (el modo de falla que arregló el hotfix de `20260814140000`) ni se toca un perfil ajeno.
+
+**El claim viaja en `raw_app_meta_data`, nunca en `raw_user_meta_data`.** Es el punto de seguridad de la tarea. `raw_user_meta_data` es lo que escribe el propio usuario desde el navegador (`options.data` de `signUp`, `data` de `updateUser`) con la clave anónima: si el trigger lo leyera de ahí, un `signUp` preparado con el `uuid` de un perfil gestionado ajeno alcanzaría para adueñarse de su historial médico —y el `and user_id is null` no protegería, porque los gestionados son justamente los que tienen `user_id IS NULL`—. `raw_app_meta_data` solo la puebla la Admin API. Un `perfil_existente` que aparezca en la metadata del usuario se **ignora**, y esa alta se procesa como cualquier otra (no se rechaza: negarla le confirmaría al atacante que el `uuid` probado existe, el mismo criterio de no-oráculo de `perfil_id_por_email`).
+
+**Lo que ocurre solo, sin migrar un dato:** al dejar de ser `NULL` el `user_id`, `es_perfil_gestionado` pasa a `false`, las notas ⚑ dejan de aplicar y la autoridad de otorgamiento se transfiere del administrador al nuevo titular (§8.6 punto 4). El trigger `family_permissions_evitar_huerfano` (D4) también deja de tutelar el perfil, que es lo que permite al nuevo titular revocarle el acceso a quien lo administraba: un perfil con cuenta no puede quedar huérfano porque su titular siempre puede entrar (§8.2). Las filas de `family_permissions` existentes **se conservan** —decisión de producto del Sprint 15— y es el titular quien decide cuáles sobreviven.
+
+**La nota ② sigue intacta.** El trigger `profiles_proteger_titularidad` sigue rechazando con `42501` cualquier cambio de `profiles.user_id` hecho desde una sesión de usuario, en los dos sentidos: nadie se adueña de un perfil ajeno y nadie "des-gradúa" al que graduó. La migración no lo esquiva por casualidad: ese trigger es `SECURITY INVOKER` y su guarda es `es_sesion_de_usuario()`, que devuelve `false` cuando la escritura viene de GoTrue —sin JWT y con `current_user` distinto de `authenticated`/`anon`—, que es exactamente la excepción que su propio `COMMENT` anticipa.
+
 ---
 
 ## 3. Matriz implementada: tabla × operación × política
@@ -296,7 +314,7 @@ export PATH="$PATH:/c/Program Files/Docker/Docker/resources/bin"
 # 1. Aplicar las 16 migraciones desde cero
 npx supabase db reset
 
-# 2. Correr la suite de aislamiento de las TABLAS (253 casos)
+# 2. Correr la suite de aislamiento de las TABLAS (353 casos al cierre del Sprint 15)
 docker exec -i supabase_db_historialclinico psql -U postgres -d postgres < scripts/test-rls.sql
 
 # 3. Correr la suite de aislamiento de STORAGE (27 casos, por HTTP)

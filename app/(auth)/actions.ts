@@ -38,11 +38,12 @@ import type { AuthError } from "@supabase/supabase-js"
 
 import { createClient } from "@/lib/supabase/server"
 import { ACCION, registrarAcceso } from "@/lib/auditoria"
+import { esErrorDeGuarda, requerirSesion } from "@/lib/auth/guardas"
 import {
   limpiarCookieTamano,
   sincronizarCookieTamano,
 } from "@/lib/densidad/servidor"
-import { VERSION_LEGALES } from "@/lib/legales"
+import { registrarLegalesDeAlta, VERSION_LEGALES } from "@/lib/legales"
 import {
   PARAM_DESDE,
   RUTA_LOGIN,
@@ -272,6 +273,68 @@ export async function iniciarSesion(
   await sincronizarCookieTamano()
 
   redirect(destino ?? RUTA_POST_LOGIN)
+}
+
+/**
+ * Gate de consentimiento del primer ingreso (Sprint 15, tarea 15.2). Sella
+ * los dos documentos de alta a nombre de la CUENTA que está en sesión y la
+ * deja pasar al selector de perfiles.
+ *
+ * Quien la ejecuta es el titular de un perfil recién GRADUADO: su cuenta la
+ * creó su representante desde la Admin API y nació sin ninguna fila de
+ * `consents`, porque hasta ese momento regía el consentimiento de ese
+ * representante —que habla de él y no se transfiere— (ver el encabezado de
+ * `supabase/migrations/20260817230000_graduacion.sql`).
+ *
+ * El checkbox se revalida acá aunque `<ConsentimientoLegal />` ya lo exija con
+ * `required`: un `formData` se puede alterar, y esta es la única
+ * comprobación que de verdad decide. Mismo criterio, y mismo `name`, que en
+ * `registrarse`.
+ *
+ * A diferencia de `registrarConsentimiento` -que nunca lanza, porque allá la
+ * fila es la constancia de algo que ya ocurrió-, acá un fallo de escritura se
+ * INFORMA y no se deja pasar a nadie: si la fila no entró, la persona no
+ * aceptó, y declarar cumplido el art. 5 de la Ley 25.326 sin la prueba sería
+ * exactamente lo que la tabla `consents` viene a evitar.
+ */
+export async function aceptarTerminos(
+  _estadoPrevio: EstadoAuth,
+  formData: FormData,
+): Promise<EstadoAuth> {
+  if (!esCasillaMarcada(formData.get("aceptaLegales"))) {
+    return {
+      error:
+        "Tenés que aceptar la Política de Privacidad y los Términos y Condiciones para poder entrar.",
+    }
+  }
+
+  let sesion: Awaited<ReturnType<typeof requerirSesion>>
+  try {
+    sesion = await requerirSesion({ siNoHaySesion: "lanzar" })
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message }
+    }
+    throw error
+  }
+
+  const registrado = await registrarLegalesDeAlta(sesion.supabase, sesion.usuario.id)
+
+  if (!registrado) {
+    return {
+      error:
+        "No pudimos guardar tu aceptación. Probá de nuevo en unos minutos; si el problema sigue, escribinos.",
+    }
+  }
+
+  // Ídem `iniciarSesion`: este es el primer momento en que esta cuenta usa
+  // este navegador de verdad, así que su preferencia de letra tiene que
+  // volcarse a la cookie espejo en vez de heredar la del último que entró.
+  await sincronizarCookieTamano()
+
+  // Fuera de cualquier try/catch: `redirect()` funciona lanzando una excepción
+  // interna de Next que un `catch` que la trague deja colgada.
+  redirect(RUTA_POST_LOGIN)
 }
 
 export async function cerrarSesion(): Promise<void> {

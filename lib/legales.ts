@@ -26,6 +26,24 @@ import "server-only"
  * único que sigue viniendo de este archivo para ese flujo es la constante
  * `VERSION_LEGALES`, que `registrarse` manda en `options.data`.
  *
+ * ## La excepción: el primer ingreso de una cuenta GRADUADA
+ *
+ * `cuentaAceptoLegalesDeAlta` y `registrarLegalesDeAlta` (al final de este
+ * archivo, Sprint 15 tarea 15.2) parecen contradecir el párrafo anterior y no
+ * lo hacen. La graduación de un perfil gestionado abre el primer camino de
+ * alta en el que el trigger **deliberadamente NO firma nada**: la cuenta la
+ * crea el representante desde la Admin API y su titular todavía no aceptó
+ * ningún documento -hasta ese momento regía el consentimiento del
+ * representante, que habla de él y no se transfiere-.
+ *
+ * La diferencia con el bug que motivó el hotfix es el requisito, no el
+ * mecanismo: allá había que registrar una aceptación que YA había ocurrido en
+ * un formulario, sin sesión con la cual escribirla; acá la aceptación ocurre
+ * DESPUÉS, en el primer ingreso, con la sesión del propio titular abierta y
+ * los documentos delante. Por eso este par de funciones puede vivir en la
+ * aplicación -y escribir con el cliente del usuario, bajo
+ * `consents_insert_propio`- sin reabrir nada.
+ *
  * ## Lo que sí queda acá: el consentimiento de acceso familiar
  *
  * `registrarConsentimiento` cubre el otorgamiento de acceso familiar
@@ -43,10 +61,13 @@ import "server-only"
  * como una clave de servicio en manos de la aplicación web.)
  */
 
+import { cache } from "react"
+
 import { headers } from "next/headers"
 
 import { normalizarIp } from "@/lib/auditoria"
 import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
+import { createClient } from "@/lib/supabase/server"
 
 /**
  * Versión vigente de los documentos legales. Cambia cuando el TEXTO de
@@ -89,6 +110,19 @@ export type DocumentoLegal =
   | "acceso_familiar"
   | "acceso_familiar_representante"
 
+/**
+ * Los dos documentos que TODA cuenta tiene que haber aceptado para poder usar
+ * la aplicación. Se firman juntos, siempre: no existe "acepté la privacidad
+ * pero no los términos".
+ *
+ * Es la misma lista que insertan `completar_alta_de_cuenta`
+ * (`supabase/migrations/20260814140000_alta_de_cuenta.sql`) en el alta normal
+ * y el gate de `/aceptar-terminos` en el primer ingreso de una cuenta
+ * graduada. Vive acá para que las dos vías la lean del mismo lugar.
+ */
+export const DOCUMENTOS_DE_ALTA = ["privacidad", "terminos"] as const satisfies
+  readonly DocumentoLegal[]
+
 /** IP del cliente actual, o `null` si no hay ninguna cabecera utilizable. Ver `normalizarIp`. */
 async function obtenerIpActual(): Promise<string | null> {
   const encabezados = await headers()
@@ -127,4 +161,156 @@ export async function registrarConsentimiento(
   } catch (error) {
     console.error(`[legales] Fallo al registrar el consentimiento "${documento}":`, error)
   }
+}
+
+/**
+ * ¿La cuenta de esta sesión ya firmó los DOS documentos de alta?
+ *
+ * ## Por qué esto existe (Sprint 15, tarea 15.2)
+ *
+ * Hasta la graduación de perfiles gestionados, la pregunta no tenía sentido:
+ * el único camino de alta era `/registro`, y desde el hotfix de
+ * `20260814140000_alta_de_cuenta.sql` el trigger de la base le escribe las
+ * dos filas de `consents` a toda cuenta nueva, en la misma transacción. Toda
+ * cuenta que existía, había firmado.
+ *
+ * La graduación abre el primer camino de alta que NO firma nada: la cuenta la
+ * crea el representante desde la Admin API, y hasta ese momento lo que regía
+ * era SU consentimiento (`acceso_familiar_representante`, tarea 15.1), que
+ * dice algo sobre él y no se transfiere. El nuevo titular tiene que aceptar
+ * los documentos **él mismo**, y esta función es la pregunta que decide si ya
+ * lo hizo.
+ *
+ * ## Dónde se pregunta
+ *
+ * - `app/(app)/layout.tsx` — la puerta de toda la sección autenticada. Manda
+ *   a `/aceptar-terminos` a quien no firmó, en cada navegación (ese layout es
+ *   dinámico: llama a `cookies()`, así que el Client Router Cache de Next no
+ *   lo saltea).
+ * - `elegirPerfil` (`app/(app)/(sin-nav)/perfiles/actions.ts`) — el otro
+ *   extremo: sin haber firmado no se fija la cookie de perfil activo, y sin
+ *   perfil activo ninguna pantalla de `(con-nav)` renderiza un solo dato.
+ *
+ * **Es un gate de navegación, no una capa de autorización.** La autoridad
+ * sobre los datos sigue siendo RLS, que no lee `consents` ni tiene por qué:
+ * una cuenta graduada es titular de su perfil desde el instante de la
+ * vinculación, y lo que este gate garantiza es que no OPERE la aplicación
+ * antes de aceptar, no que la base le esconda sus propias filas.
+ *
+ * ## Ante un error de la base contesta `true` (deja pasar)
+ *
+ * Es la misma familia de decisión que "auditar nunca rompe el flujo"
+ * (`lib/auditoria.ts`), y por dos motivos concretos:
+ *
+ * 1. **Fallar cerrado no protegería nada y ensuciaría la prueba.** Quien
+ *    quedara del lado de afuera por un hipo de red vería el gate, aceptaría
+ *    otra vez y entraría igual — con una fila de `consents` de más en una
+ *    tabla append-only cuyo valor es probatorio. Cambiar "un render sin gate"
+ *    por "un consentimiento duplicado que nadie dio dos veces" es un mal
+ *    negocio.
+ * 2. **El gate se vuelve a evaluar en la navegación siguiente.** Un fallo
+ *    transitorio se corrige solo; no hay ventana que se quede abierta.
+ *
+ * El error se deja en la consola del servidor con el prefijo estable
+ * `[legales]`, igual que el resto de este archivo.
+ *
+ * Envuelta en `cache()` de React: `app/(app)/layout.tsx` y la pantalla que
+ * cuelga de él corren en el mismo request, y no tiene sentido preguntarle dos
+ * veces a la base (mismo criterio que `obtenerPerfilActivo`).
+ */
+export const cuentaAceptoLegalesDeAlta = cache(async (): Promise<boolean> => {
+  const supabase = await createClient()
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  // Sin sesión no hay cuenta a la que exigirle nada: de la ruta privada ya se
+  // ocupan `proxy.ts` y las guardas.
+  if (!user) {
+    return true
+  }
+
+  const { data, error } = await supabase
+    .from("consents")
+    .select("document")
+    .eq("user_id", user.id)
+    .in("document", [...DOCUMENTOS_DE_ALTA])
+
+  if (error) {
+    console.error(
+      `[legales] No se pudo verificar el consentimiento de alta de la cuenta: ${error.message}`,
+    )
+    return true
+  }
+
+  const firmados = new Set((data ?? []).map((fila) => fila.document))
+  return DOCUMENTOS_DE_ALTA.every((documento) => firmados.has(documento))
+})
+
+/**
+ * Sella los documentos de alta que le falten a `userId`. Es lo que ejecuta el
+ * gate `/aceptar-terminos` cuando el nuevo titular acepta.
+ *
+ * **A diferencia de `registrarConsentimiento`, esta función SÍ informa el
+ * error.** No es una contradicción: es exactamente el caso que el encabezado
+ * de `lib/auditoria.ts` anticipa. Allá la fila es la CONSTANCIA de una acción
+ * que ya ocurrió (el acceso ya se otorgó), así que perderla no puede
+ * bloquear nada. Acá la fila **es** la acción: si no se escribe, la persona
+ * no aceptó, y dejarla entrar igual mientras la pantalla le dice "listo"
+ * sería declarar cumplido el art. 5 de la Ley 25.326 sin ninguna prueba.
+ * Devolver `false` es lo que le permite al formulario decir la verdad y
+ * ofrecer reintentar.
+ *
+ * Escribe con el cliente del USUARIO, nunca con `service_role`: la política
+ * `consents_insert_propio` exige `user_id = auth.uid()`, o sea que quien
+ * decide si las filas entran es RLS. Un consentimiento que la aplicación
+ * puede firmar a nombre de cualquiera no es un consentimiento.
+ *
+ * Inserta solo los documentos FALTANTES. La tabla no tiene constraint única
+ * -firmar una versión nueva del mismo documento es una fila más, legítima
+ * (`20260814130000_consents.sql`)-, así que la deduplicación tiene que
+ * hacerla quien escribe.
+ */
+export async function registrarLegalesDeAlta(
+  supabase: ClienteSupabaseServidor,
+  userId: string,
+): Promise<boolean> {
+  const { data: yaFirmados, error: errorLectura } = await supabase
+    .from("consents")
+    .select("document")
+    .eq("user_id", userId)
+    .in("document", [...DOCUMENTOS_DE_ALTA])
+
+  if (errorLectura) {
+    console.error(
+      `[legales] No se pudieron leer los consentimientos de alta antes de firmarlos: ${errorLectura.message}`,
+    )
+    return false
+  }
+
+  const firmados = new Set((yaFirmados ?? []).map((fila) => fila.document))
+  const faltantes = DOCUMENTOS_DE_ALTA.filter((documento) => !firmados.has(documento))
+
+  if (faltantes.length === 0) {
+    return true
+  }
+
+  const ip = await obtenerIpActual()
+
+  const { error } = await supabase.from("consents").insert(
+    faltantes.map((documento) => ({
+      user_id: userId,
+      document: documento,
+      version: VERSION_LEGALES,
+      ip,
+    })),
+  )
+
+  if (error) {
+    console.error(`[legales] No se pudieron registrar los consentimientos de alta: ${error.message}`)
+    return false
+  }
+
+  return true
 }

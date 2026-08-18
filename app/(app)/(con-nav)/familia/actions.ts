@@ -30,6 +30,7 @@ import { revalidatePath } from "next/cache"
 import { headers } from "next/headers"
 
 import { normalizarIp } from "@/lib/auditoria"
+import { graduarPerfilConCuentaNueva } from "@/lib/auth/cuentas-admin"
 import {
   ErrorPerfilInvalido,
   ErrorPermisoDenegado,
@@ -410,5 +411,213 @@ export async function crearPerfilGestionado(
   return {
     error: null,
     mensaje: `Creaste el perfil de ${perfilCreado.full_name}. Ya aparece en tu selector de perfiles, marcado como gestionado por vos.`,
+  }
+}
+
+/**
+ * Graduación de un perfil gestionado (Sprint 15, tarea 15.2): "Darle su
+ * propia cuenta". El creador del perfil carga un email y una contraseña
+ * inicial, y esa persona pasa a entrar por su cuenta y a administrar sus
+ * propios autorizados.
+ *
+ * Es la operación de `docs/modelo-permisos.md` §8.6 -"la única operación del
+ * modelo que ningún rol puede hacer desde la aplicación"-, así que conviene
+ * ser explícito sobre dónde vive cada garantía, porque NINGUNA vive en esta
+ * función:
+ *
+ *   · **Solo el CREADOR puede graduar** → `puede_graduar_perfil()`, función
+ *     SECURITY DEFINER de `20260817230000_graduacion.sql`, evaluada EN LA
+ *     BASE con la sesión del actor. Es lo primero que se consulta acá y sin
+ *     su `true` no se toca la Admin API.
+ *   · **No se roba un perfil que ya tiene dueño** → el `and user_id is null`
+ *     del UPDATE dentro de `completar_alta_de_cuenta`, que es ATÓMICO: dos
+ *     graduaciones simultáneas del mismo perfil no pueden ganar las dos.
+ *   · **La cuenta y la vinculación son una sola transacción** → el trigger
+ *     `auth_users_crear_perfil_de_cuenta`. Por eso esta función no hace
+ *     ningún `update` de `profiles` después del alta: entre las dos llamadas
+ *     habría una ventana en la que la cuenta existe y el perfil todavía no
+ *     está vinculado.
+ *   · **Un `perfil_existente` forjado desde el navegador no sirve** → el
+ *     claim viaja en `app_metadata`, que solo escribe la Admin API.
+ *
+ * Lo que esta función aporta es la validación del formulario, el mensaje en
+ * español y el ORDEN correcto: verificar antes de crear la cuenta. Esconder
+ * el botón no es ninguna de las cuatro garantías y no cuenta como control.
+ *
+ * **La contraseña inicial es un dato de tránsito.** La elige quien gradúa y
+ * se la pasa en persona a su familiar, que la cambia con el flujo de recupero
+ * que ya existe (`/recuperar`) — la pantalla de bienvenida
+ * (`/aceptar-terminos`) se lo recuerda. No se guarda en ningún lado nuestro,
+ * no se muestra de vuelta y no viaja en el mensaje de éxito.
+ */
+export type EstadoGraduacion = {
+  error: string | null
+  mensaje: string | null
+}
+
+/** Mismo mínimo que `/registro` y `/recuperar/confirmar` (`app/(auth)/actions.ts`). */
+const LARGO_MINIMO_CONTRASENA = 8
+
+export async function graduarPerfilGestionado(
+  _estadoPrevio: EstadoGraduacion,
+  formData: FormData,
+): Promise<EstadoGraduacion> {
+  const perfilId = normalizarTexto(formData.get("perfilId"))
+  const email = normalizarTexto(formData.get("email")).toLowerCase()
+  const password = normalizarTexto(formData.get("password"))
+  const confirmarPassword = normalizarTexto(formData.get("confirmarPassword"))
+  const confirmoGraduacion = esCasillaMarcada(formData.get("confirmoGraduacion"))
+
+  if (!PATRON_UUID.test(perfilId)) {
+    return { error: "El perfil indicado no es válido.", mensaje: null }
+  }
+  if (!PATRON_EMAIL.test(email)) {
+    return { error: "Ingresá un correo electrónico válido.", mensaje: null }
+  }
+  if (password.length < LARGO_MINIMO_CONTRASENA) {
+    return {
+      error: `La contraseña debe tener al menos ${LARGO_MINIMO_CONTRASENA} caracteres.`,
+      mensaje: null,
+    }
+  }
+  if (password !== confirmarPassword) {
+    return { error: "Las contraseñas no coinciden.", mensaje: null }
+  }
+  // La graduación no se deshace, y quien la hace pierde la autoridad de
+  // otorgamiento sobre ese perfil en el instante siguiente (§4.4: las notas ⚑
+  // dejan de aplicar apenas `user_id` deja de ser NULL). Mismo criterio que
+  // los otros checkbox del proyecto: sin marcar por defecto y revalidado acá,
+  // porque un `formData` se puede alterar.
+  if (!confirmoGraduacion) {
+    return {
+      error: "Tenés que confirmar que entendés qué cambia con esta acción para continuar.",
+      mensaje: null,
+    }
+  }
+
+  let sesion: Awaited<ReturnType<typeof requerirSesion>>
+  try {
+    sesion = await requerirSesion({ siNoHaySesion: "lanzar" })
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message, mensaje: null }
+    }
+    throw error
+  }
+
+  const { supabase } = sesion
+
+  // ── AUTORIDAD, verificada en la BASE con la sesión del actor.
+  const { data: puedeGraduar, error: errorAutoridad } = await supabase.rpc(
+    "puede_graduar_perfil",
+    { perfil: perfilId },
+  )
+
+  if (errorAutoridad) {
+    console.error("[familia] No se pudo verificar la autoridad para graduar:", errorAutoridad)
+    return {
+      error: "No pudimos verificar tus permisos. Probá de nuevo en unos minutos.",
+      mensaje: null,
+    }
+  }
+
+  // El nombre viaja a `user_metadata.full_name` de la cuenta nueva y al
+  // mensaje de éxito. Se lee con el cliente del USUARIO -o sea que pasa por
+  // RLS-, así que un perfil que el actor no puede ver devuelve `null` y
+  // termina en el mensaje neutro de abajo.
+  const { data: perfil } = await supabase
+    .from("profiles")
+    .select("full_name, user_id")
+    .eq("id", perfilId)
+    .maybeSingle()
+
+  if (puedeGraduar !== true) {
+    // Los tres mensajes solo los puede leer alguien que YA tiene acceso a
+    // este perfil -si no lo tiene, `perfil` viene en `null` y cae en el
+    // primero-, así que distinguirlos no convierte a esta acción en un
+    // oráculo para averiguar qué perfiles existen (principio 3 de
+    // docs/modelo-permisos.md).
+    if (!perfil) {
+      return { error: "No podés darle su propia cuenta a este perfil.", mensaje: null }
+    }
+    if (perfil.user_id !== null) {
+      return {
+        error: `${perfil.full_name} ya tiene su propia cuenta: entra con su correo y administra sus accesos por su cuenta.`,
+        mensaje: null,
+      }
+    }
+    return {
+      error:
+        "Solo quien creó este perfil puede darle su propia cuenta. Pedíselo a esa persona: administrar el historial de alguien y decidir sobre su identidad no son lo mismo.",
+      mensaje: null,
+    }
+  }
+
+  const nombre = perfil?.full_name ?? "Mi perfil"
+
+  const { fallo } = await graduarPerfilConCuentaNueva({ email, password, nombre, perfilId })
+
+  if (fallo) {
+    return { error: mensajeDeFalloDeGraduacion(fallo, nombre), mensaje: null }
+  }
+
+  // **Acá NO se llama a `revalidatePath`, y no es un olvido.** Es la única
+  // acción del proyecto que no lo hace, así que merece el porqué completo.
+  //
+  // Cualquier `revalidatePath` dentro de una Server Action hace que Next
+  // vuelva a renderizar la ruta ACTUAL junto con el resultado de la acción. Y
+  // la ruta actual es `/familia`, donde `SeccionGraduacion` ya no se
+  // renderiza -`puede_graduar_perfil` pasó a devolver `false` en el mismo
+  // instante-: React desmonta el formulario en el mismo commit en que
+  // llegaría su mensaje, así que el aviso no se ve nunca. Verificado en el
+  // teléfono, dos veces: quien acababa de graduar a su hijo se quedaba sin
+  // saber si había funcionado ni qué tenía que contarle. Un toast tampoco lo
+  // salva: el efecto que lo dispara vive en ese mismo componente y ese estado
+  // no llega a renderizarse.
+  //
+  // Y no hace falta. Las tres pantallas que cambian -`/familia`, `/perfiles`
+  // e `/inicio`- llaman a `cookies()` (vía `obtenerPerfilActivo`), así que son
+  // segmentos DINÁMICOS: el Client Router Cache de Next 16 usa
+  // `staleTimes.dynamic = 0` para ellos y las vuelve a pedir al servidor en
+  // cada navegación, con `revalidatePath` o sin él. El mismo razonamiento que
+  // documenta `app/(app)/(con-nav)/layout.tsx` para la revalidación del
+  // perfil activo.
+  //
+  // Lo que queda en pantalla hasta que la persona navegue es la sección de
+  // accesos como estaba -ofreciéndole un formulario de invitación sobre un
+  // perfil que ya no le pertenece-, y eso es inofensivo: la autoridad de
+  // otorgamiento se evalúa del lado del servidor en cada acción
+  // (`requerirAutoridadDeOtorgamiento`), así que un intento ahí termina en un
+  // mensaje claro en español, no en una escritura indebida.
+
+  return {
+    error: null,
+    mensaje: `Listo: ${nombre} ya puede entrar con ${email} y la contraseña que le pusiste. Contale que la cambie desde "Olvidé mi contraseña" apenas entre. Tus accesos a este historial se mantienen; de ahora en más es esa persona quien decide quién los conserva.`,
+  }
+}
+
+/** Traduce el motivo del fallo del alta administrativa a un mensaje en español. */
+function mensajeDeFalloDeGraduacion(
+  fallo: NonNullable<Awaited<ReturnType<typeof graduarPerfilConCuentaNueva>>["fallo"]>,
+  nombre: string,
+): string {
+  switch (fallo) {
+    case "email_en_uso":
+      // Acá NO aplica la mitigación de enumeración de `invitarFamiliar`: quien
+      // lee este mensaje eligió deliberadamente el correo de un familiar suyo
+      // y necesita saber por qué no funcionó. Un "no se pudo" a secas lo
+      // dejaría probando contraseñas contra un correo que ya es de otra cuenta.
+      return `Ya existe una cuenta con ese correo electrónico. Usá otro para ${nombre}, o -si esa cuenta ya es suya- pedile que inicie sesión con ella y otorgale el acceso desde "Invitar a alguien".`
+    case "email_invalido":
+      return "Ese correo electrónico no es válido. Revisalo e intentá de nuevo."
+    case "contrasena_debil":
+      return `La contraseña es demasiado débil. Usá al menos ${LARGO_MINIMO_CONTRASENA} caracteres.`
+    case "vinculacion_rechazada":
+      // El trigger abortó el alta, así que la cuenta NO quedó creada. En la
+      // práctica significa que el perfil dejó de estar disponible entre la
+      // verificación de autoridad y esta llamada.
+      return `No pudimos darle su propia cuenta a ${nombre}: puede que ya la tenga. Recargá la pantalla para ver cómo quedó.`
+    case "desconocido":
+      return "Ocurrió un problema y no pudimos crear la cuenta. Probá de nuevo en unos minutos."
   }
 }

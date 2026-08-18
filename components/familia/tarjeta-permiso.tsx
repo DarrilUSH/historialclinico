@@ -17,6 +17,15 @@
  * va a rechazar igual -"la UI no debe ofrecer lo que la base va a
  * rechazar"-.
  *
+ * **El TITULAR nunca queda bloqueado**, y quien calcula ese flag es
+ * `app/(app)/(con-nav)/familia/page.tsx`, que sabe si el actor es dueño del
+ * perfil activo. Las dos políticas de la base arrancan con
+ * `es_titular(owner_profile_id) or (...)`: la nota ⑥ acota a los
+ * administradores de un perfil gestionado -para evitar la guerra de hermanos
+ * donde el que llega primero al botón deja al otro afuera del historial del
+ * padre-, no a la persona cuyos datos son. Ver el comentario de ese archivo
+ * para el defecto que esto corrigió.
+ *
  * ## Chica (Sprint 14, tanda B): fila densa + "Revocar acceso" como ícono
  *
  * "Revocar acceso" pasa a ícono-botón de 40px en chica -mismo patrón

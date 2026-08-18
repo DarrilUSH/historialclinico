@@ -27,15 +27,39 @@
  * gate de `autorizado` (que solo protege la administración de accesos DEL
  * perfil activo) y sin depender de `esGestionado`/`permisos` de ese perfil
  * en absoluto.
+ *
+ * ## "Darle su propia cuenta" (Sprint 15, tarea 15.2)
+ *
+ * Al revés que la anterior, la GRADUACIÓN sí es una operación sobre el perfil
+ * ACTIVO: es "este perfil pasa a tener dueño". Por eso esta pantalla es su
+ * lugar natural -para graduar a Lucas hay que estar mirando a Lucas, igual
+ * que para administrar sus accesos- y no hace falta inventar una pantalla de
+ * detalle por perfil, que el producto no tiene.
+ *
+ * Quién la ve: **solo el CREADOR** del perfil gestionado, y la pregunta la
+ * contesta la BASE (`puede_graduar_perfil()`,
+ * `supabase/migrations/20260817230000_graduacion.sql`), no una comparación
+ * hecha acá. Es MÁS estricta que `autorizado` -que sobre un gestionado
+ * alcanza a cualquier `can_manage`-, a propósito: darle una cuenta a una
+ * persona es decidir sobre su identidad, no sobre sus datos. Esconder la
+ * sección no es el control: `graduarPerfilGestionado` vuelve a consultar la
+ * misma función antes de crear nada.
  */
 
 import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { ArrowLeftIcon, ScrollTextIcon, UserPlusIcon, UsersIcon } from "lucide-react"
+import {
+  ArrowLeftIcon,
+  KeyRoundIcon,
+  ScrollTextIcon,
+  UserPlusIcon,
+  UsersIcon,
+} from "lucide-react"
 
 import { FormularioCrearGestionado } from "@/components/familia/formulario-crear-gestionado"
+import { FormularioGraduacion } from "@/components/familia/formulario-graduacion"
 import { FormularioInvitar } from "@/components/familia/formulario-invitar"
 import { TarjetaPermiso, type FilaPermiso } from "@/components/familia/tarjeta-permiso"
 import { requerirSesion } from "@/lib/auth/guardas"
@@ -107,12 +131,67 @@ export default async function PaginaFamilia() {
         <FormularioCrearGestionado />
       </section>
 
+      {/*
+        Graduación (Sprint 15, tarea 15.2). Solo tiene sentido preguntarle a
+        la base cuando el perfil activo es gestionado: para uno con cuenta la
+        respuesta es siempre `false` y el viaje sería puro costo.
+      */}
+      {esGestionado && (
+        <SeccionGraduacion perfilId={perfil.id} perfilNombre={perfil.full_name} />
+      )}
+
       {!autorizado ? (
         <AccesoDenegadoInline nombrePerfil={perfil.full_name} />
       ) : (
         <SeccionAccesosDelPerfilActivo perfilId={perfil.id} perfilNombre={perfil.full_name} esPropio={permisos.esPropio} />
       )}
     </div>
+  )
+}
+
+/**
+ * "Darle su propia cuenta". Se renderiza únicamente para el CREADOR del
+ * perfil gestionado, y quien lo decide es `puede_graduar_perfil()` en la
+ * base: acá no se recalcula el predicado -mismo criterio que
+ * `lib/auth/guardas.ts`, "reescribirlo en TypeScript garantizaría que algún
+ * día la app y la base opinen distinto"-.
+ *
+ * Función `async` propia, como `SeccionAccesosDelPerfilActivo`, para que la
+ * consulta no se dispare cuando el perfil activo no es gestionado.
+ */
+async function SeccionGraduacion({
+  perfilId,
+  perfilNombre,
+}: {
+  perfilId: string
+  perfilNombre: string
+}) {
+  const { supabase } = await requerirSesion({ desde: "/familia" })
+
+  const { data: puedeGraduar } = await supabase.rpc("puede_graduar_perfil", {
+    perfil: perfilId,
+  })
+
+  if (puedeGraduar !== true) {
+    return null
+  }
+
+  return (
+    <section className="flex flex-col gap-4 chica:gap-3">
+      <div className="flex items-center gap-3 chica:gap-2">
+        <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <KeyRoundIcon className="size-5" aria-hidden="true" />
+        </span>
+        <div className="flex flex-col">
+          <h2 className="text-lg font-semibold text-foreground">Darle su propia cuenta</h2>
+          <p className="text-sm text-muted-foreground">
+            Si {perfilNombre} ya puede manejar su historial, dale un correo y una contraseña
+            para entrar por su cuenta.
+          </p>
+        </div>
+      </div>
+      <FormularioGraduacion perfilId={perfilId} perfilNombre={perfilNombre} />
+    </section>
   )
 }
 
@@ -208,8 +287,28 @@ async function SeccionAccesosDelPerfilActivo({
                 key={fila.id}
                 perfilId={perfilId}
                 permiso={fila}
+                // Nota ⑥ de docs/seguridad-rls.md §3.2, con su alcance exacto:
+                // la prohibición de destituir a OTRO administrador rige para
+                // los administradores de un perfil gestionado, **no para el
+                // titular**. Las dos políticas lo dicen igual —
+                // `family_permissions_update_autoridad` y
+                // `family_permissions_delete_autoridad` arrancan las dos con
+                // `es_titular(owner_profile_id) or (...)`—: el titular revoca
+                // y edita cualquier acceso a SUS datos, sin excepción.
+                //
+                // El `!esPropio` faltaba y se detectó probando la graduación
+                // en el teléfono (Sprint 15, tarea 15.2): recién graduado,
+                // Lucas entraba a su propia Familia y veía "no podés editar ni
+                // revocar su acceso" sobre quien lo había administrado hasta
+                // ese día — justo lo contrario de la decisión de producto del
+                // sprint ("el nuevo titular puede revocarlos desde Familia") y
+                // de lo que la base permite. Sin la condición, `esPropio`
+                // fijaba `perfilActorId = perfilId` (el perfil dueño), y como
+                // nadie puede tener acceso sobre sí mismo (CHECK de no
+                // autorreferencia) la comparación daba `true` siempre: TODA
+                // fila `can_manage` quedaba bloqueada para el titular.
                 bloqueadaPorOtroAdministrador={
-                  fila.canManage && fila.perfilVinculadoId !== perfilActorId
+                  !esPropio && fila.canManage && fila.perfilVinculadoId !== perfilActorId
                 }
               />
             ))}

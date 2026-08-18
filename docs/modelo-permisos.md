@@ -565,7 +565,7 @@ El modelo **no** implementa reglas automáticas por edad. `profiles.date_of_birt
 
 - Un hijo chico se modela como **perfil gestionado** (`user_id IS NULL`), administrado por madre o padre: es exactamente el caso B, con otro vínculo jurídico detrás (responsabilidad parental en lugar de mandato).
 - Un adolescente puede tener **perfil con cuenta**, y entonces es titular pleno: puede revocarle el acceso a su madre y ella no puede reponérselo sin que él lo otorgue.
-- **No hay transición automática al cumplir años.** El Código Civil y Comercial argentino reconoce autonomía progresiva en decisiones de salud (art. 26), pero traducir eso a una regla de software —a qué edad, para qué tipo de dato, con qué excepciones— es una decisión de producto y legal que este sprint no tiene mandato para tomar. Queda registrada como decisión **deliberadamente no tomada**, igual que el catálogo global de médicos en `modelo-datos.md`.
+- **No hay transición automática al cumplir años.** El Código Civil y Comercial argentino reconoce autonomía progresiva en decisiones de salud (art. 26), pero traducir eso a una regla de software —a qué edad, para qué tipo de dato, con qué excepciones— es una decisión de producto y legal que este sprint no tiene mandato para tomar. Queda registrada como decisión **deliberadamente no tomada**, igual que el catálogo global de médicos en `modelo-datos.md`. Lo que sí existe desde el Sprint 15 (tarea 15.2) es la transición **manual y explícita**: quien creó el perfil decide cuándo esa persona pasa a tener su propia cuenta, con el flujo de graduación de [8.6](#86-transición-de-gestionado-a-perfil-con-cuenta). Ninguna política mira la edad para eso tampoco.
 - Lo que exige el modelo: quien crea un perfil gestionado **declara** que tiene el consentimiento del titular o su representación legal. Desde el Sprint 15 (tarea 15.1) esa declaración se persiste como consentimiento → [Deuda D6](#d6-registro-del-consentimiento-en-perfiles-gestionados-aplicada).
 
 ### 8.5 Borrado de un perfil: el `CASCADE` y lo que el `CASCADE` no alcanza
@@ -602,15 +602,23 @@ Borrar una fila de `profiles` dispara, por las `FOREIGN KEY` ya definidas:
 
 ### 8.6 Transición de gestionado a perfil con cuenta
 
+> **IMPLEMENTADA** en el Sprint 15, tarea 15.2 (`supabase/migrations/20260817230000_graduacion.sql`). El ancla de esta sección se deja intacta a propósito: la enlazan [3.2](#32-caso-b--perfil-gestionado-sin-cuenta-user_id-is-null), la nota ② de la matriz y `docs/seguridad-rls.md`.
+
 Roberto se compra un celular y quiere entrar él mismo. La operación es `UPDATE profiles SET user_id = <uuid nuevo> WHERE id = p-roberto`, y es **la única operación del modelo que ningún rol puede hacer desde la aplicación** (nota ②): cambia la titularidad, y una escritura de titularidad disponible en la app es una puerta para adueñarse del historial de otro.
 
-Cuando se implemente (no está en Sprint 1 ni 2), debe ser un flujo dedicado, server-side, que:
+El producto la llama **graduación** y la implementa `supabase/migrations/20260817230000_graduacion.sql`, como el flujo dedicado y server-side que esta sección venía pidiendo. Los cinco requisitos, y cómo quedó cada uno:
 
-1. Verifique que `profiles.user_id IS NULL` (no se "roba" un perfil que ya tiene dueño).
-2. Vincule una cuenta recién creada y verificada por email, nunca una preexistente con perfil propio (lo impediría igual `profiles_user_id_unico`).
-3. **Conserve** las filas de `family_permissions` existentes: la familia sigue viendo lo mismo que antes hasta que Roberto decida lo contrario.
-4. **Transfiera la autoridad de otorgamiento** a Roberto de forma automática: al dejar de ser `user_id IS NULL`, las notas ⚑ dejan de aplicar y los `can_manage` pierden la potestad de otorgar, ver la lista de accesos y borrar el perfil. **Eso ocurre solo, sin migrar datos**, porque las políticas leen `user_id IS NULL` en tiempo de consulta. Es la principal ventaja de haber puesto la regla ahí y no en una columna aparte.
-5. Se audite con una acción propia (hoy el enum `access_action` no tiene un literal para esto → se resuelve con `otorgar_permiso` + `metadata`, o se agrega el valor al enum cuando se implemente).
+1. **Verifica que `profiles.user_id IS NULL`.** No como lectura previa sino como cláusula del propio `UPDATE` (`where id = <perfil> and user_id is null`), dentro de `completar_alta_de_cuenta`: es una guarda **atómica**, así que dos graduaciones simultáneas del mismo perfil no pueden ganar las dos. Si no se puede vincular, se levanta excepción y el alta entera se deshace —la cuenta no llega a existir—, en vez de quedar a medio camino.
+2. **Vincula una cuenta recién creada.** La crea la Admin API de Supabase con `service_role` (`lib/auth/cuentas-admin.ts`) y la vinculación ocurre en el trigger `AFTER INSERT ON auth.users`, o sea en la **misma transacción** que el alta: no hay ventana entre "la cuenta existe" y "el perfil está vinculado". Nace con `email_confirm: true` porque el vínculo con el perfil no lo establece el correo sino el creador, cuya autoridad la base ya verificó.
+3. **Conserva** las filas de `family_permissions` existentes. Es además la decisión de producto cerrada con el usuario para este sprint: los accesos se mantienen y es el nuevo titular quien decide, desde `/familia`, cuáles conserva.
+4. **Transfiere la autoridad de otorgamiento** de forma automática: al dejar de ser `user_id IS NULL`, las notas ⚑ dejan de aplicar y los `can_manage` pierden la potestad de otorgar, ver la lista de accesos y borrar el perfil. **Ocurre solo, sin migrar datos**, porque las políticas leen `user_id IS NULL` en tiempo de consulta — la principal ventaja de haber puesto la regla ahí y no en una columna aparte. Lo mismo vale para el trigger de no orfandad (D4), que deja de tutelar el perfil: por eso el nuevo titular **sí** puede revocarle el acceso a quien lo administraba (un perfil con cuenta no puede quedar huérfano, [8.2](#82-perfil-huérfano-un-gestionado-sin-administrador)).
+5. **Auditoría con acción propia: sigue abierta**, y no por olvido. Hoy `otorgar_permiso` y `revocar_permiso` —los dos literales que el enum ya tiene para este ABM— tampoco se escriben desde ninguna parte, así que agregar un tercero solo para la graduación daría una lista de accesos que muestra la graduación y sigue sin mostrar los otorgamientos. Mientras tanto el hecho queda registrado, y de forma no falsificable, en `profiles.created_by_profile_id` (quién había creado el perfil, sellado por trigger y sobreviviente a la graduación), en `auth.users.created_at` de la cuenta nueva y en su `raw_app_meta_data.perfil_existente`.
+
+**Quién puede graduar: solo el CREADOR.** No cualquier `can_manage`, aunque sobre un perfil gestionado la nota ⚑ le dé la autoridad de otorgamiento. Lo decide la función `puede_graduar_perfil()` en la base, y la razón es que darle una cuenta a una persona es decidir sobre su **identidad**, no sobre sus datos: quien creó el perfil es quien declaró ser su representante legal y firmó `acceso_familiar_representante` ([9.4](#94-el-consentimiento-del-perfil-gestionado)); un familiar al que después le dieron `can_manage` para cargar estudios no heredó esa representación.
+
+**El consentimiento no se hereda.** La cuenta graduada nace **sin ninguna fila de `consents`**: hasta ese momento regía el consentimiento del representante, que dice algo sobre él. Su titular acepta la Política de Privacidad y los Términos **él mismo**, la primera vez que entra, en el gate `/aceptar-terminos` (`app/(app)/layout.tsx` lo aplica a toda la sección autenticada). Ver [9.4](#94-el-consentimiento-del-perfil-gestionado).
+
+**Lo que sigue prohibido.** La nota ② no se relajó ni un milímetro: desde una sesión de usuario, `profiles.user_id` sigue siendo inmutable en los dos sentidos —nadie se adueña de un perfil ajeno y nadie "des-gradúa" al que graduó—. La graduación esquiva el trigger `profiles_proteger_titularidad` únicamente porque corre en el contexto de GoTrue, sin JWT y sin rol de usuario, que es la excepción que ese trigger declara en su propio `COMMENT`. Y el claim que identifica al perfil viaja en `raw_app_meta_data` —la metadata que **solo** escribe la Admin API— y nunca en `raw_user_meta_data`, que la escribe cualquiera desde el navegador: leerlo de la segunda convertiría un `signUp` preparado en una toma de posesión del historial de un perfil gestionado ajeno. Ver `docs/seguridad-rls.md` §2.8 y el BLOQUE 21 de `scripts/test-rls.sql`, que prueba el intento.
 
 ### 8.7 Permiso otorgado a un perfil que no tiene cuenta
 
@@ -650,6 +658,14 @@ Los datos de salud son **datos sensibles** (art. 2 y 7): su tratamiento requiere
 ### 9.4 El consentimiento del perfil gestionado
 
 Todo el caso B descansa en que quien crea el perfil de Roberto **tiene su consentimiento o su representación legal**. Desde el Sprint 15 (tarea 15.1) esa declaración queda registrada: crear un perfil gestionado desde `/familia` pasa por el RPC transaccional `crear_perfil_gestionado()` (`supabase/migrations/20260817220000_perfiles_gestionados.sql`), que en la misma transacción que crea el perfil y su fila de arranque inserta una fila de `consents` con `document = 'acceso_familiar_representante'`. Cierra la [Deuda D6](#d6-registro-del-consentimiento-en-perfiles-gestionados-aplicada).
+
+**Ese consentimiento no se transfiere al graduar** (tarea 15.2, [8.6](#86-transición-de-gestionado-a-perfil-con-cuenta)). Dice algo sobre el representante —que declara actuar en nombre de otro—, no sobre el representado, así que no puede valer como consentimiento de la persona cuando esa persona pasa a decidir por sí misma. Por eso la cuenta graduada **nace sin ninguna fila de `consents`** y su titular acepta la Política de Privacidad y los Términos él mismo, la primera vez que entra:
+
+- el gate lo aplica `app/(app)/layout.tsx` sobre toda la sección autenticada, y de forma redundante `elegirPerfil`, que sin consentimiento no fija la cookie de perfil activo (sin ella ninguna pantalla renderiza un dato);
+- la pantalla es `/aceptar-terminos`, y la escritura la hace `registrarLegalesDeAlta()` (`lib/legales.ts`) **con el cliente del usuario**, bajo la política `consents_insert_propio` (`user_id = auth.uid()`): un consentimiento que la aplicación pudiera firmar a nombre de cualquiera no sería un consentimiento;
+- a diferencia del resto de la auditoría del proyecto, un fallo de escritura acá **no se traga**: si la fila no entró, la persona no aceptó, y no se la deja pasar.
+
+Es también el único camino de alta en que el trigger `auth_users_crear_perfil_de_cuenta` deliberadamente **no** firma nada: sellar las filas en nombre de alguien que todavía no inició sesión ni una vez sería fabricar la prueba de un hecho que no ocurrió.
 
 ---
 

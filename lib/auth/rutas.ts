@@ -25,6 +25,23 @@ export const RUTA_LOGIN = "/login"
 export const RUTA_POST_LOGIN = "/perfiles"
 
 /**
+ * Gate de consentimiento del primer ingreso (Sprint 15, tarea 15.2).
+ *
+ * **Es una ruta PRIVADA**, y por eso no aparece en `RUTAS_PUBLICAS`: exige
+ * sesión como cualquier otra pantalla de la aplicación —quien llega acá ya
+ * inició sesión, lo que le falta es aceptar los documentos—. Se declara con
+ * nombre propio porque la nombran tres lugares que no deben poder
+ * desincronizarse: `app/(app)/layout.tsx` (que manda acá a quien no firmó),
+ * `elegirPerfil` (`app/(app)/(sin-nav)/perfiles/actions.ts`) y la propia
+ * pantalla, que vuelve a `RUTA_POST_LOGIN` al aceptar.
+ *
+ * Vive bajo `app/(auth)/` y NO bajo `app/(app)/` a propósito: si colgara del
+ * mismo layout que aplica el gate, mandaría a la persona a sí misma en un
+ * bucle infinito de redirecciones.
+ */
+export const RUTA_ACEPTAR_TERMINOS = "/aceptar-terminos"
+
+/**
  * El service worker (`public/sw.js`), que **tiene que ser público** aunque no
  * sea una pantalla.
  *

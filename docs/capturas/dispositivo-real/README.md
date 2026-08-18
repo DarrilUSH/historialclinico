@@ -59,6 +59,63 @@ Flujo verificado con toques e ingreso de texto reales por ADB: login de María �
 | sprint15-familia-formulario.png | `/familia` (tarea 15.1) en el dispositivo real, sesión VIVA de María: la sección nueva "Crear un perfil para un familiar sin cuenta" con el formulario completo con datos reales tipeados en el teléfono -"Lucas Gomez" en Nombre completo, "12/04/2019" en Fecha de nacimiento (picker nativo de Android sobre `type="date"`)- y el checkbox de consentimiento del representante marcado |
 | sprint15-familia-creado.png | La MISMA pantalla justo después de tocar "Crear perfil" de verdad: mensaje de éxito real "Creaste el perfil de Lucas Gomez. Ya aparece en tu selector de perfiles, marcado como gestionado por vos.", con el formulario ya reseteado (vacío otra vez, listo para cargar a otra persona) |
 | sprint15-perfil-gestionado.png | `/perfiles` (selector "estilo Netflix") en el dispositivo real, tras la creación: "Lucas Gomez" aparece con badge "Gestionado por vos" **y** el subtítulo discreto nuevo "Sin cuenta propia" -las dos señales juntas, ninguna reemplaza a la otra-, junto a "María Gómez" ("Tu perfil", sin el subtítulo) y "Roberto Gómez" (el gestionado preexistente del seed, con el mismo subtítulo nuevo) |
+| sprint15-graduacion-formulario.png | `/familia` (tarea 15.2) con el perfil ACTIVO de Lucas Gómez y la sesión de María, su creadora: la sección nueva "Darle su propia cuenta" con datos reales tipeados en el teléfono (`lucas@ejemplo.com.ar` y la contraseña inicial, enmascarada con su ojito), el bloque "Qué cambia a partir de ahora" con las cuatro consecuencias en castellano llano -incluida "Esta acción no se puede deshacer"- y el checkbox de confirmación marcado |
+| sprint15-graduacion-listo.png | La misma pantalla justo después de tocar "Darle su propia cuenta" de verdad: el aviso de éxito real con el correo con el que esa persona va a entrar y el recordatorio de que cambie la contraseña, y debajo el acceso de María **intacto** (Ve el historial / Puede cargar datos / Administra) — la decisión de producto del sprint, visible en pantalla |
+| sprint15-graduacion-gate-legales.png | Primer ingreso REAL de la cuenta graduada (logout de María + login con `lucas@ejemplo.com.ar`): el gate `/aceptar-terminos` que `app/(app)/layout.tsx` impone sobre toda la sección autenticada. Explica en castellano llano que su historial ya existe y está completo, que los accesos actuales se mantienen y que puede quitarlos desde Familia, con el checkbox de consentimiento sin marcar y "Cerrar sesión" siempre a mano |
+| sprint15-graduacion-lucas-dueno.png | `/familia` con la sesión de Lucas ya como TITULAR ("Tu historial" en el encabezado, sin badge de gestionado): ve el acceso de María con sus tres flags **y** los controles para editarlo o revocarlo — el defecto que esta captura verifica corregido, ver más abajo |
+
+## Sprint 15 · tarea 15.2 — Graduación: el perfil gestionado recibe su propia cuenta
+
+**2026-08-17/18.** Samsung Galaxy A71 real (`R58N85AW49F`), `adb reverse tcp:3000 tcp:3000` + `adb forward tcp:9222 localabstract:chrome_devtools_remote`, CDP nativo por WebSocket de Node. Mismo método de tipeo que la 15.1 (setter nativo de `HTMLInputElement` + `dispatchEvent`), y **toques reales** (`Input.dispatchMouseEvent` sobre las coordenadas CSS de cada control) para checkboxes, botones y el diálogo de confirmación.
+
+**Flujo completo con DOS cuentas reales, de punta a punta:**
+
+1. **María** inicia sesión, entra a `/familia` y crea el perfil gestionado "Lucas Gómez" (12/04/2019 → en esta corrida 2008-04-12) con el flujo de la 15.1.
+2. Cambia el perfil activo a Lucas y `/familia` le muestra la sección nueva **"Darle su propia cuenta"** — que la base autoriza con `puede_graduar_perfil()`, no la interfaz (`sprint15-graduacion-formulario.png`).
+3. Toca "Darle su propia cuenta" de verdad: la Server Action verifica la autoridad contra la base, crea la cuenta con la Admin API y el trigger vincula el perfil. Aviso de éxito real y **acceso de María intacto** (`sprint15-graduacion-listo.png`).
+4. **Logout** y **login con `lucas@ejemplo.com.ar`** y la contraseña inicial: el redirect no va a `/perfiles` sino al gate **`/aceptar-terminos`** (`sprint15-graduacion-gate-legales.png`). Se verificó además que el gate tiene dientes: `/perfiles`, `/inicio`, `/estudios`, `/familia` y `/sos` **todas** redirigen ahí mientras no acepte.
+5. Lucas marca el checkbox y toca "Aceptar y entrar": aterriza en `/perfiles`, donde su perfil aparece como **"Tu perfil"** y ya sin el subtítulo "Sin cuenta propia".
+6. Entra a `/familia` y ve el acceso de María con sus tres flags (`sprint15-graduacion-lucas-dueno.png`), **lo revoca** con el diálogo de confirmación real, y la pantalla pasa a "Todavía no le diste acceso a nadie sobre este perfil" — el criterio de aceptación del sprint, ejecutado en el teléfono.
+
+**Verificación cruzada contra la base LOCAL** (no solo la pantalla), en cada paso:
+
+```sql
+-- Tras graduar: UN solo perfil, el de siempre, ahora con dueño.
+select p.id, p.full_name, p.user_id, u.email
+  from public.profiles p join auth.users u on u.id = p.user_id
+ where p.full_name = 'Lucas Gómez';
+-- 665e8f19-… | Lucas Gómez | a68e5868-… | lucas@ejemplo.com.ar
+
+-- La cuenta graduada NACE SIN consentimientos (los firma su titular en el gate).
+select count(*) from public.consents c join auth.users u on u.id = c.user_id
+ where u.email = 'lucas@ejemplo.com.ar';
+-- 0
+
+-- Después de aceptar en /aceptar-terminos: los dos, con SU user_id y su IP.
+select c.document, c.version, host(c.ip) from public.consents c
+  join auth.users u on u.id = c.user_id where u.email = 'lucas@ejemplo.com.ar';
+-- privacidad | 2026-08-14-v1 | ::ffff:127.0.0.1
+-- terminos   | 2026-08-14-v1 | ::ffff:127.0.0.1
+
+-- Tras la revocación de Lucas: cero accesos sobre su historial.
+select pr.full_name from public.family_permissions fp
+  join public.profiles pr on pr.id = fp.granted_profile_id
+  join public.profiles o  on o.id  = fp.owner_profile_id
+ where o.full_name = 'Lucas Gómez';
+-- (0 rows)
+```
+
+### DOS defectos reales que solo aparecieron en el teléfono
+
+**1. La graduación no vinculaba nada (y decía que sí).** La primera versión enganchaba la graduación en el trigger `AFTER INSERT ON auth.users` que ya existía, dando por sentado que `auth.admin.createUser` mandaría el `app_metadata` completo en ese `INSERT`. No lo hace. La cuenta se creaba, el trigger no veía el claim, tomaba el camino normal y le estrenaba a la cuenta un perfil propio **en blanco**, mientras el perfil gestionado seguía sin dueño — y la pantalla mostraba el mensaje de éxito. El arnés RLS no lo detectaba porque simulaba el `INSERT` con la metadata ya puesta, o sea que probaba la suposición, no la realidad.
+
+Se midió con dos triggers de diagnóstico temporales sobre `auth.users` (`tg_op`, `txid_current()`, las dos metadatas), y la traza fue concluyente: el `INSERT` lleva `raw_user_meta_data` pero un `raw_app_meta_data` con solo el proveedor; el claim llega en un `UPDATE` posterior, **dentro de la misma transacción**. La implementación pasó a engancharse en `AFTER UPDATE OF raw_app_meta_data`, deshaciendo el alta automática de esa misma transacción antes de vincular (condición exacta `created_at = now()`), y el BLOQUE 21 del arnés se reescribió para reproducir la forma real (INSERT + UPDATE juntos) además de la que traería una versión futura de GoTrue. Traza completa en el encabezado de `supabase/migrations/20260817230000_graduacion.sql`.
+
+**2. El titular no podía revocarle el acceso a un administrador.** Recién graduado, Lucas entraba a su propia Familia y sobre la tarjeta de María leía *"Es otro administrador de este perfil: no podés editar ni revocar su acceso"*, sin formulario ni botón de revocar — exactamente lo contrario de la decisión de producto del sprint. Era un defecto preexistente de la interfaz (Sprint 2), no de la base: las políticas `family_permissions_update_autoridad` y `family_permissions_delete_autoridad` arrancan las dos con `es_titular(owner_profile_id) or (...)`, así que el titular siempre pudo; la nota ⑥ acota solo a los administradores de un perfil gestionado. `app/(app)/(con-nav)/familia/page.tsx` calculaba `bloqueadaPorOtroAdministrador` sin mirar `esPropio`, y como para el titular `perfilActorId` es el propio perfil dueño —sobre el que nadie puede tener acceso, por el CHECK de no autorreferencia—, la comparación daba `true` para TODA fila `can_manage`. Corregido con `!esPropio &&`, verificado en el teléfono con la revocación real del paso 6.
+
+**Data de desarrollo que queda en la base LOCAL:** la cuenta `lucas@ejemplo.com.ar` (contraseña inicial `lucas-2026-clave`) y su perfil "Lucas Gómez", ya graduado y sin accesos de terceros. Es la única que se conserva de la corrida; las otras cinco que se usaron para verificar el aviso de éxito se borraron al terminar. Desaparece con cualquier `npx supabase db reset`. **Nada de esto existe en producción.**
+
+**Suites completas corridas para esta tarea:** `npx tsc --noEmit` limpio; `npx eslint .` limpio; `npm run test` → **774/774**; `node scripts/verificar-contraste.mjs` → **196/196 PASS** (sin tokens de color nuevos: todo reutiliza `bg-primary/10`, `text-primary`, `bg-muted/40`, `border-border`, los de `Alerta variante="exito"` y los de `Boton`); `npm run build` exitoso con el dev server detenido (`netstat` confirmado antes y después). RLS: `scripts/test-rls.sql` → **357/357 PASS × 2 corridas consecutivas** (319 preexistentes + 38 del BLOQUE 21 nuevo); Storage RLS **27/27**, sin cambios (esta tarea no tocó Storage).
 
 ## Sprint 15 · tarea 15.1 — Perfiles gestionados desde /familia
 

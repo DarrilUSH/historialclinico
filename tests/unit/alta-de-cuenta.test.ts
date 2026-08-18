@@ -26,7 +26,7 @@
  * que simula el flujo de producción insertando directo en `auth.users`.
  */
 
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import path from "node:path"
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -153,29 +153,51 @@ describe("registrarse — lo que viaja al trigger del alta", () => {
 })
 
 describe("VERSION_LEGALES y su espejo en SQL", () => {
-  const migracion = readFileSync(
-    path.resolve(
-      __dirname,
-      "../../supabase/migrations/20260814140000_alta_de_cuenta.sql",
-    ),
-    "utf8",
-  )
+  const carpetaMigraciones = path.resolve(__dirname, "../../supabase/migrations")
 
-  it("la constante de la migración es la misma que la de lib/legales.ts", () => {
-    // La base no puede importar TypeScript, así que la migración repite el
-    // valor como fallback para las cuentas que no nacen del formulario. Si
-    // las dos se separan, una cuenta invitada desde el panel de Supabase
-    // quedaría con un consentimiento fechado en una versión que no existe.
-    const espejo = migracion.match(
-      /k_version_legales\s+constant\s+text\s*:=\s*'([^']+)'/,
-    )
+  /**
+   * TODAS las migraciones que declaran el espejo, no solo la que lo introdujo.
+   *
+   * Importa desde el Sprint 15: `20260817230000_graduacion.sql` volvió a
+   * escribir `completar_alta_de_cuenta` con `CREATE OR REPLACE` para sumarle
+   * la rama de graduación, así que hoy la constante vive en DOS archivos y la
+   * que la base termina usando es la de la migración MÁS NUEVA. Un test que
+   * mirara solo la primera pasaría en verde mientras la función viva usa un
+   * valor distinto —exactamente el modo de falla que este archivo existe para
+   * impedir—. Por eso se buscan todas y se exige que coincidan todas.
+   */
+  const espejos = readdirSync(carpetaMigraciones)
+    .filter((archivo) => archivo.endsWith(".sql"))
+    .sort()
+    .map((archivo) => ({
+      archivo,
+      sql: readFileSync(path.join(carpetaMigraciones, archivo), "utf8"),
+    }))
+    .filter(({ sql }) => sql.includes("k_version_legales"))
 
-    expect(espejo, "no se encontró la constante k_version_legales en la migración")
-      .not.toBeNull()
-    expect(espejo?.[1]).toBe(VERSION_LEGALES)
+  it("hay al menos una migración con el espejo (si no, este test no prueba nada)", () => {
+    expect(espejos.length).toBeGreaterThan(0)
   })
 
-  it("la migración registra los dos documentos que se firman al registrarse", () => {
-    expect(migracion).toContain("values ('privacidad'), ('terminos')")
+  it.each(espejos.map(({ archivo }) => archivo))(
+    "%s declara la misma versión que lib/legales.ts",
+    (archivo) => {
+      // La base no puede importar TypeScript, así que la migración repite el
+      // valor como fallback para las cuentas que no nacen del formulario. Si
+      // las dos se separan, una cuenta invitada desde el panel de Supabase
+      // quedaría con un consentimiento fechado en una versión que no existe.
+      const sql = espejos.find((espejo) => espejo.archivo === archivo)!.sql
+      const encontrado = sql.match(/k_version_legales\s+constant\s+text\s*:=\s*'([^']+)'/)
+
+      expect(encontrado, `no se encontró la constante k_version_legales en ${archivo}`)
+        .not.toBeNull()
+      expect(encontrado?.[1]).toBe(VERSION_LEGALES)
+    },
+  )
+
+  it("la última migración que la declara registra los dos documentos del alta", () => {
+    // La última es la que define la función viva. Es donde tiene que estar el
+    // INSERT de los dos consentimientos.
+    expect(espejos[espejos.length - 1].sql).toContain("values ('privacidad'), ('terminos')")
   })
 })
