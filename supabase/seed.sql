@@ -787,5 +787,133 @@ insert into public.push_subscriptions (
 
 
 -- =============================================================================
+-- 13. CATÁLOGO DE CENTROS DE SALUD (health_centers) — Sprint 16, tarea 16.3
+-- -----------------------------------------------------------------------------
+-- 24 establecimientos REALES del Registro Federal (REFES), copiados tal cual de
+-- la edición de diciembre de 2025 del CSV del Ministerio de Salud
+-- (datos.salud.gob.ar, licencia CC-BY-4.0): mismos ids, mismos nombres en
+-- mayúsculas, mismos domicilios sin normalizar y mismas coordenadas.
+--
+-- ── POR QUÉ HAY SEED SI EL CATÁLOGO SE DESCARGA SOLO
+--
+-- Porque `npx supabase db reset` tiene que dejar una base USABLE sin internet.
+-- Sin estas filas, después de cada reset habría que apretar "Actualizar" y
+-- esperar la descarga de 9 MB del portal del Ministerio para poder probar
+-- /lugares o el autocompletar de "Lugar" de un turno — y las pruebas quedarían
+-- atadas a que un servidor público esté arriba.
+--
+-- ── POR QUÉ ESTOS 24 Y NO 24 INVENTADOS
+--
+-- Son los que la familia del usuario usa de verdad (Clínica San Jorge de
+-- Ushuaia y sus anexos, Hospital Regional de Ushuaia, TCba Salguero, Instituto
+-- Médico Platense, Hospital Británico) más una muestra elegida para cubrir los
+-- casos que el código tiene que saber manejar:
+--
+--   · las cinco categorías de tipología que /lugares muestra por defecto
+--     (10/13/14 con internación, 50 consultorios, 51 laboratorios,
+--     52 tratamiento) y una "residencia" (17), que el filtro por defecto NO
+--     muestra: sirve para verificar que el filtro filtra de verdad;
+--   · centros CON coordenadas -precarga del turno sin geocodificar- y SIN
+--     coordenadas -"Pedir viaje" no aparece y "Cómo llegar" cae en la
+--     búsqueda por dirección-;
+--   · centros con y sin sitio web (el REFES lo publica sin esquema:
+--     "www.tcba.com.ar", ver lib/lugares/formato.ts#urlSitioWeb);
+--   · las formas de provincia que hay que normalizar: "CABA" → "Ciudad
+--     Autónoma de Buenos Aires", "TIERRA DEL FUEGO" → el nombre completo, y
+--     las que ya coinciden ("SANTA FE", "MENDOZA");
+--   · nombres con puntos y siglas ("O.S.E.C.A.C. - BIOQUIMICA - CAPITAL.-") y
+--     cinco homónimos parciales de "SAN JORGE" en tres provincias, que es lo
+--     que hace realista probar la búsqueda.
+--
+-- `search_text` y `locality_search` se escriben ya normalizados, con el mismo
+-- criterio de lib/lugares/normalizar.ts (minúsculas, sin tildes, ñ conservada):
+-- son columnas derivadas y la sincronización real las recalcula igual.
+--
+-- Una sincronización real REEMPLAZA estas filas (upsert por refes_id) y da de
+-- baja las que la edición vigente ya no traiga: el seed no es una fuente
+-- paralela de verdad, es un punto de partida.
+-- =============================================================================
+
+insert into public.health_centers (
+    refes_id, name, typology_id, typology_code, typology_name, funding_origin,
+    province_refes, province, department_name, locality_name, postal_code, address, website,
+    latitude, longitude, search_text, locality_search
+) values
+    ('10940142395005', 'CLINICA SAN JORGE', 10, 'ESCIG', 'Alto riesgo con terapia intensiva', 'Privado',
+     'TIERRA DEL FUEGO', 'Tierra del Fuego, Antártida e Islas del Atlántico Sur', 'USHUAIA', 'USHUAIA', '9410', 'ONACHAGA 184', 'www.sanatoriosanjorge.com.ar',
+     -54.815326, -68.326034, 'clinica san jorge ushuaia ushuaia tierra del fuego', 'ushuaia'),
+    ('50940142395650', 'CENTRO MEDICO CLINICA SAN JORGE', 50, 'ESSIDT', 'Con atención médica diaria y con especialidades y/o otras profesiones', 'Privado',
+     'TIERRA DEL FUEGO', 'Tierra del Fuego, Antártida e Islas del Atlántico Sur', 'USHUAIA', 'USHUAIA', '9410', 'DE LA ESTANCIA Nº 1955', null,
+     -54.815323, -68.325766, 'centro medico clinica san jorge ushuaia ushuaia tierra del fuego', 'ushuaia'),
+    ('50940142395377', 'CONSULTORIOS EXTERNOS ANEXOS SANATORIO SAN JORGE', 50, 'ESSIDT', 'Con atención médica diaria y con especialidades y/o otras profesiones', 'Privado',
+     'TIERRA DEL FUEGO', 'Tierra del Fuego, Antártida e Islas del Atlántico Sur', 'USHUAIA', 'USHUAIA', '9410', 'Jainen N° 133', null,
+     -54.815516, -68.324803, 'consultorios externos anexos sanatorio san jorge ushuaia ushuaia tierra del fuego', 'ushuaia'),
+    ('50940142395026', 'CENTRO DE PEDIATRIA SANATORIO SAN JORGE', 50, 'ESSIDT', 'Con atención médica diaria y con especialidades y/o otras profesiones', 'Privado',
+     'TIERRA DEL FUEGO', 'Tierra del Fuego, Antártida e Islas del Atlántico Sur', 'USHUAIA', 'USHUAIA', '9410', 'ONACHANGA 136', null,
+     -54.815187, -68.32512, 'centro de pediatria sanatorio san jorge ushuaia ushuaia tierra del fuego', 'ushuaia'),
+    ('10940142195003', 'HOSPITAL REGIONAL USHUAIA GOBERNADOR ERNESTO M. CAMPOS', 10, 'ESCIG', 'Alto riesgo con terapia intensiva', 'Provincial',
+     'TIERRA DEL FUEGO', 'Tierra del Fuego, Antártida e Islas del Atlántico Sur', 'USHUAIA', 'USHUAIA', '9410', '12 de Octubre 65', null,
+     -54.813728, -68.320214, 'hospital regional ushuaia gobernador ernesto m. campos ushuaia ushuaia tierra del fuego', 'ushuaia'),
+    ('10940142495001', 'HOSPITAL NAVAL USHUAIA.', 10, 'ESCIG', 'Mediano riesgo con internación con cuidados especiales', 'FFAA/Seguridad',
+     'TIERRA DEL FUEGO', 'Tierra del Fuego, Antártida e Islas del Atlántico Sur', 'USHUAIA', 'USHUAIA', '9410', 'YAGANES Nº 299', null,
+     -54.80281, -68.299309, 'hospital naval ushuaia. ushuaia ushuaia tierra del fuego', 'ushuaia'),
+    ('52940142395384', 'CENTRO DE NEFROLOGIA Y HEMODIALISIS USHUAIA (CENHEUS)', 52, 'ESSIT', 'Centro de Diálisis', 'Privado',
+     'TIERRA DEL FUEGO', 'Tierra del Fuego, Antártida e Islas del Atlántico Sur', 'USHUAIA', 'USHUAIA', '9410', 'KUANIP N° 49', null,
+     -54.82901, -68.347605, 'centro de nefrologia y hemodialisis ushuaia (cenheus) ushuaia ushuaia tierra del fuego', 'ushuaia'),
+    ('10940072195002', 'HOSPITAL REGIONAL NUESTRA SEÑORA DE LA CANDELARIA.', 10, 'ESCIG', 'Alto riesgo con terapia intensiva', 'Provincial',
+     'TIERRA DEL FUEGO', 'Tierra del Fuego, Antártida e Islas del Atlántico Sur', 'RÍO GRANDE', 'RIO GRANDE', '9420', 'FLORENTINO AMEGHINO 709', null,
+     -53.782896, -67.697358, 'hospital regional nuestra señora de la candelaria. rio grande rio grande tierra del fuego', 'rio grande'),
+    ('50020012318151', 'CENTRO MEDICO  TCBA SALGUERO CENTRO DE DIAGNOSTICO', 50, 'ESSIDT', 'Con atención médica diaria y con especialidades y/o otras profesiones', 'Privado',
+     'CABA', 'Ciudad Autónoma de Buenos Aires', 'COMUNA 5', 'ALMAGRO', '1177', 'Jerónimo Salguero 554', 'www.tcba.com.ar',
+     -34.604114, -58.419633, 'centro medico tcba salguero centro de diagnostico almagro comuna 5 caba', 'almagro'),
+    ('10020012315207', 'HOSPITAL BRITANICO DE BUENOS AIRES', 10, 'ESCIG', 'Alto riesgo con terapia intensiva', 'Privado',
+     'CABA', 'Ciudad Autónoma de Buenos Aires', 'COMUNA 4', 'BARRACAS', '1275', 'Perdriel 74', 'www.hospitalbritanico.org.ar',
+     -34.634408, -58.388236, 'hospital britanico de buenos aires barracas comuna 4 caba', 'barracas'),
+    ('50020042319733', 'CONSULTORIOS EXTERNOS HOSPITAL BRITANICO', 50, 'ESSIDT', 'Con atención médica diaria y con especialidades y/o otras profesiones', 'Privado',
+     'CABA', 'Ciudad Autónoma de Buenos Aires', 'COMUNA 4', 'PARQUE PATRICIOS', '1134', 'Solis 2171', null,
+     -34.63323, -58.38905, 'consultorios externos hospital britanico parque patricios comuna 4 caba', 'parque patricios'),
+    ('10020012315256', 'HOSPITAL ITALIANO DE BUENOS AIRES', 10, 'ESCIG', 'Alto riesgo con terapia intensiva especializada', 'Privado',
+     'CABA', 'Ciudad Autónoma de Buenos Aires', 'COMUNA 5', 'BOEDO', '1199', 'Gascón 450', 'www.hospitalitaliano.org.ar',
+     -34.606654, -58.424782, 'hospital italiano de buenos aires boedo comuna 5 caba', 'boedo'),
+    ('10020012315204', 'HOSPITAL ALEMAN', 10, 'ESCIG', 'Alto riesgo con terapia intensiva', 'Privado',
+     'CABA', 'Ciudad Autónoma de Buenos Aires', 'COMUNA 2', 'RECOLETA', '1118', 'Avenida Pueyrredón 1650', 'www.hospitalaleman.com.ar',
+     -34.592258, -58.401241, 'hospital aleman recoleta comuna 2 caba', 'recoleta'),
+    ('10020012315173', 'CEMIC - HOSPITAL UNIVERSITARIO SEDE SAAVEDRA', 10, 'ESCIG', 'Alto riesgo con terapia intensiva', 'Privado',
+     'CABA', 'Ciudad Autónoma de Buenos Aires', 'COMUNA 12', 'COGHLAN', '1431', 'Galván 4102', 'www.cemic.edu.ar',
+     -34.556857, -58.495186, 'cemic - hospital universitario sede saavedra coghlan comuna 12 caba', 'coghlan'),
+    ('14020012315319', 'FLENI - SEDE BELGRANO', 14, 'ESCIE', 'Alto riesgo con terapia intensiva especializada', 'Privado',
+     'CABA', 'Ciudad Autónoma de Buenos Aires', 'COMUNA 13', 'BELGRANO', '1428', 'Montañeses 2325', 'www.fleni.org.ar/web/fleni_sedebelgrano.php',
+     -34.555381, -58.450656, 'fleni - sede belgrano belgrano comuna 13 caba', 'belgrano'),
+    ('10020012515209', 'HOSPITAL DE CLINICAS JOSE DE SAN MARTIN', 10, 'ESCIG', 'Alto riesgo con terapia intensiva', 'Universitario público',
+     'CABA', 'Ciudad Autónoma de Buenos Aires', 'COMUNA 2', 'RECOLETA', '1120', 'AV. CÓRDOBA 2351', 'www.hospitaldeclinicas.uba.ar',
+     -34.599408, -58.400341, 'hospital de clinicas jose de san martin recoleta comuna 2 caba', 'recoleta'),
+    ('14020012315317', 'INSTITUTO DE CARDIOLOGIA Y CIRUGIA CARDIOVASCULAR - FUNDACION FAVALORO (EDIFICIO CENTRAL)', 14, 'ESCIE', 'Alto riesgo con terapia intensiva especializada', 'Privado',
+     'CABA', 'Ciudad Autónoma de Buenos Aires', 'COMUNA 1', 'MONSERRAT', 'C1093AAS', 'Av. Belgrano 1746', 'www.fundacionfavaloro.org',
+     -34.61382, -58.391089, 'instituto de cardiologia y cirugia cardiovascular - fundacion favaloro (edificio central) monserrat comuna 1 caba', 'monserrat'),
+    ('10064412300422', 'INSTITUTO MEDICO PLATENSE SA', 10, 'ESCIG', 'Alto riesgo con terapia intensiva', 'Privado',
+     'BUENOS AIRES', 'Buenos Aires', 'LA PLATA', 'LA PLATA', '1900', 'Calle 51 Nº 315', null,
+     -34.911133, -57.944427, 'instituto medico platense sa la plata la plata buenos aires', 'la plata'),
+    ('14064412300637', 'CENTRO GASTROENTEROLOGICO PLATENSE', 14, 'ESCIE', 'Bajo riesgo con internación simple', 'Privado',
+     'BUENOS AIRES', 'Buenos Aires', 'LA PLATA', 'LA PLATA', '1900', 'CALLE 3 1096', null,
+     -34.913408, -57.942394, 'centro gastroenterologico platense la plata la plata buenos aires', 'la plata'),
+    ('13064412319051', 'CLINICA SAN JORGE NEUROPSIQUIATRICA S.A.', 13, 'ESCIESM', 'Bajo riesgo con internación simple', 'Privado',
+     'BUENOS AIRES', 'Buenos Aires', 'LA PLATA', 'LA PLATA', '1900', 'Avenida 7 124', null,
+     -34.902593, -57.965862, 'clinica san jorge neuropsiquiatrica s.a. la plata la plata buenos aires', 'la plata'),
+    ('10820842384220', 'SANATORIO BRITANICO', 10, 'ESCIG', 'Alto riesgo con terapia intensiva especializada', 'Privado',
+     'SANTA FE', 'Santa Fe', 'ROSARIO', 'ROSARIO', '2000', 'PARAGUAY 40', null,
+     -32.936865, -60.641824, 'sanatorio britanico rosario rosario santa fe', 'rosario'),
+    ('51500072758974', 'O.S.E.C.A.C. - BIOQUIMICA - CAPITAL.-', 51, 'ESSID', 'Laboratorio de Análisis Clínicos', 'Privado',
+     'MENDOZA', 'Mendoza', 'CAPITAL', '3A. SECCION', '5500', 'RIOJA 267', 'www.osecac.org.ar',
+     -32.901229, -68.837618, 'o.s.e.c.a.c. - bioquimica - capital.- 3a. seccion capital mendoza', '3a. seccion'),
+    ('51140142335474', 'LABORATORIO LABSIB SALUD INTEGRAL BIOQUIMICA', 51, 'ESSID', 'Laboratorio de Análisis Clínicos', 'Privado',
+     'CÓRDOBA', 'Córdoba', 'CAPITAL', 'CORDOBA', '5000', 'Obispo Salguero 732 Subsuelo A Barrio Nueva Cordoba', null,
+     null, null, 'laboratorio labsib salud integral bioquimica cordoba capital cordoba', 'cordoba'),
+    ('15300842343638', 'GERIATRICO SAN JORGE II', 17, 'ESCIRES', 'Vivienda para personas mayores', 'Privado',
+     'ENTRE RÍOS', 'Entre Ríos', 'PARANÁ', 'PARANA', '3100', 'PRESIDENTE PERON 670', null,
+     null, null, 'geriatrico san jorge ii parana parana entre rios', 'parana')
+on conflict (refes_id) do nothing;
+
+
+-- =============================================================================
 -- Fin del seed
 -- =============================================================================

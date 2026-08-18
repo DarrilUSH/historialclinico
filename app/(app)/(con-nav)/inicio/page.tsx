@@ -21,15 +21,21 @@
  *
  * ## Modo chica (Sprint 13, tarea 13.2)
  *
- * Las seis cards de acceso directo (Medicación, Signos vitales, Coberturas,
- * Médicos, Ficha para el médico, Ficha SOS) pasan de columna apilada a una
- * GRILLA de 2 columnas compactas -ícono + título, sin la bajada explicativa
- * larga, que es ayuda contextual y no dato clínico (docs/densidad.md §4,
- * regla 5: "la densidad no saca contenido", pero una ayuda no es contenido-.
- * Se factorizan en `TarjetaAcceso` (más abajo en este mismo archivo) para que
- * las seis compartan la MISMA clase base y el MISMO override `chica:`, en vez
- * de repetir seis veces la chance de que una quede desalineada de las otras
- * cinco.
+ * Las cards de acceso directo (Medicación, Signos vitales, Coberturas,
+ * Médicos, Especialidades, Lugares, Ficha para el médico, Ficha SOS) pasan de
+ * columna apilada a una GRILLA de columnas compactas -ícono + título, sin la
+ * bajada explicativa larga, que es ayuda contextual y no dato clínico
+ * (docs/densidad.md §4, regla 5: "la densidad no saca contenido", pero una
+ * ayuda no es contenido-. Se factorizan en `TarjetaAcceso` (más abajo en este
+ * mismo archivo) para que todas compartan la MISMA clase base y el MISMO
+ * override `chica:`, en vez de repetir el bloque una vez por card con la
+ * chance de que alguna quede desalineada de las demás.
+ *
+ * Sprint 16 (tarea 16.3) suma dos: "Especialidades" (`/especialidades`) y
+ * "Lugares" (`/lugares`). Con eso la grilla de 3 columnas pasa de 2 filas a
+ * 3 exactas para quien tiene todos los permisos (8 cards: 3 + 3 + 2), sin
+ * tocar ni una clase de la grilla —que era justamente el punto de haberla
+ * factorizado—.
  *
  * El envoltorio de la grilla (`flex flex-col gap-8` en grande, `chica:grid
  * chica:grid-cols-2` en compacta) usa el MISMO `gap-8` que tenían las cards
@@ -49,6 +55,8 @@ import {
   ClipboardListIcon,
   CreditCardIcon,
   HeartPulseIcon,
+  HospitalIcon,
+  ListChecksIcon,
   type LucideIcon,
   PillIcon,
   StethoscopeIcon,
@@ -164,9 +172,11 @@ export default async function PaginaInicio() {
           mismo criterio "app nativa" que usan las grillas de accesos de
           MercadoPago/bancos (3-4 tiles por fila con label corto)-, y ganan
           una fila entera contra la grilla de 2 columnas del Sprint 13 (6
-          tiles: 2 filas de 3 en vez de 3 filas de 2). El único título que no
-          entraba así nomás es "Ficha para el médico" -ver `TarjetaAcceso`
-          más abajo, que le suma un label corto SOLO en chica-. */}
+          tiles: 2 filas de 3 en vez de 3 filas de 2). Con las dos cards del
+          Sprint 16 son 8 tiles: 3 filas, la última con 2. Los dos títulos que
+          no entraban así nomás son "Ficha para el médico" -que lleva un label
+          corto SOLO en chica- y "Especialidades" -una sola palabra larga, que
+          se resuelve con separación silábica: ver `TarjetaAcceso` más abajo-. */}
       <div className="flex w-full max-w-sm flex-col gap-8 chica:grid chica:max-w-none chica:grid-cols-3 chica:gap-2">
         {/*
           Acceso a /medicacion (Sprint 7, tarea 7.2). Sin slot propio en la
@@ -224,6 +234,38 @@ export default async function PaginaInicio() {
           Icono={StethoscopeIcon}
           titulo="Médicos"
           descripcion="Directorio de profesionales y contacto"
+        />
+
+        {/*
+          Acceso a /especialidades (Sprint 16, tarea 16.3). Mismo patrón que
+          las de arriba: sin fetch propio, igual para cualquier permiso -es la
+          MISMA lista de `doctors` que ya puede ver quien tiene `can_view`,
+          leída por especialidad en vez de por nombre-. Va pegada a "Médicos"
+          a propósito: son las dos caras de la misma información y en la
+          grilla de 3 columnas quedan una al lado de la otra.
+        */}
+        <TarjetaAcceso
+          href="/especialidades"
+          Icono={ListChecksIcon}
+          titulo="Especialidades"
+          descripcion="Tus médicos agrupados por especialidad"
+        />
+
+        {/*
+          Acceso a /lugares (Sprint 16, tarea 16.3): el catálogo REFES de
+          centros de salud del país. Sin gate de permiso -y es el único caso
+          de esta grilla en que eso no es una simplificación sino la verdad
+          del modelo: el catálogo es un dato PÚBLICO del Estado, global, que
+          no cuelga de ningún perfil (ver el encabezado de
+          `app/(app)/(con-nav)/lugares/page.tsx`)-. Sin fetch propio: el
+          contador de centros y la fecha de la última actualización viven en
+          la pantalla de destino, no en la card.
+        */}
+        <TarjetaAcceso
+          href="/lugares"
+          Icono={HospitalIcon}
+          titulo="Lugares"
+          descripcion="Buscar clínicas, hospitales y laboratorios"
         />
 
         {/*
@@ -387,7 +429,24 @@ function TarjetaAcceso({
         <Icono className="size-5 chica:size-4.5" />
       </span>
       <span className="flex flex-col text-left chica:items-center chica:text-center">
-        <span className={cn("text-base font-semibold text-foreground", tituloChico && "chica:hidden")}>
+        {/*
+          `chica:hyphens-auto` (Sprint 16, tarea 16.3): "Especialidades" es
+          una sola palabra de 14 caracteres y a `text-base` de chica (14px)
+          no entra en los ~105px de contenido de un tile de 3 columnas. Un
+          `tituloChico` no ayuda —no hay abreviatura de "Especialidades" que
+          una persona mayor lea sin dudar—, truncar con elipsis está
+          prohibido en esta pantalla, y dejarla desbordar rompe la grilla. La
+          separación silábica del navegador la parte donde corresponde
+          ("Especia-lidades") porque `app/layout.tsx` declara `lang="es-AR"`:
+          es la única de las tres salidas que no pierde ni una letra. Solo en
+          chica: en grande ninguna card la necesita.
+        */}
+        <span
+          className={cn(
+            "text-base font-semibold text-foreground chica:hyphens-auto",
+            tituloChico && "chica:hidden",
+          )}
+        >
           {titulo}
         </span>
         {tituloChico && (

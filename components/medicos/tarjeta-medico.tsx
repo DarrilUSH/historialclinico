@@ -48,7 +48,27 @@ function formatearFecha(fechaIso: string): string {
   return FORMATO_FECHA_CORTA.format(new Date(`${fechaIso.slice(0, 10)}T00:00:00Z`))
 }
 
-function DatosMedico({ medico }: { medico: FilaMedico }) {
+/**
+ * Nivel del encabezado con el nombre del médico (Sprint 16, tarea 16.3).
+ *
+ * En `/medicos` la lista cuelga directo del `<h1>` de la pantalla, así que el
+ * nombre es un `h2` -ver la nota de abajo-. En `/especialidades` cada
+ * especialidad es una SECCIÓN con su propio `h2` ("Cardiología"), y los
+ * médicos que cuelgan de ella tienen que ser `h3`: dos `h2` hermanos, uno
+ * dentro del otro conceptualmente, es una jerarquía plana que un lector de
+ * pantalla no puede recorrer (WCAG 1.3.1, misma regla que ya cita el
+ * comentario de `DatosMedico`).
+ */
+export type NivelTituloMedico = "h2" | "h3"
+
+function DatosMedico({
+  medico,
+  nivelTitulo = "h2",
+}: {
+  medico: FilaMedico
+  nivelTitulo?: NivelTituloMedico
+}) {
+  const Titulo = nivelTitulo
   // Todas las especialidades juntas, en una sola línea ("Clínica Médica ·
   // Cardiología", Sprint 16, tarea 16.2): la primera es la PRINCIPAL
   // (`lib/turnos/autocompletar-medico.ts` la usa para precargar el turno),
@@ -62,11 +82,15 @@ function DatosMedico({ medico }: { medico: FilaMedico }) {
 
   return (
     <div className="flex flex-col gap-1 chica:gap-0.5">
-      {/* h2 y no h3: mismo caso que `tarjeta-cobertura.tsx` -el h2 de
-          `/medicos` solo existe en el estado vacío, así que con la lista
-          cargada el h3 saltaba un nivel desde el h1 (Sprint 11, WCAG 1.3.1)-.
-          El tamaño lo sigue dando `text-lg`. */}
-      <h2 className="text-lg font-semibold text-balance text-foreground">{medico.full_name}</h2>
+      {/* h2 por defecto y no h3: mismo caso que `tarjeta-cobertura.tsx` -el
+          h2 de `/medicos` solo existe en el estado vacío, así que con la
+          lista cargada el h3 saltaba un nivel desde el h1 (Sprint 11, WCAG
+          1.3.1)-. `/especialidades` sí lo baja a h3, porque ahí el h2 es la
+          especialidad que agrupa (ver `NivelTituloMedico`). El tamaño lo
+          sigue dando `text-lg` en los dos casos. */}
+      <Titulo className="text-lg font-semibold text-balance text-foreground">
+        {medico.full_name}
+      </Titulo>
       {/* Especialidades + matrícula + institución: TRES líneas en grande.
           Chica (Sprint 13, tarea 13.5) las combina en UNA -mismo patrón que
           `tarjeta-medicacion.tsx` (Tanda 3)-: las versiones largas se ocultan
@@ -87,9 +111,12 @@ function DatosMedico({ medico }: { medico: FilaMedico }) {
 export function TarjetaMedicoActivo({
   medico,
   puedeEditar,
+  nivelTitulo,
 }: {
   medico: FilaMedico
   puedeEditar: boolean
+  /** `"h3"` cuando la tarjeta cuelga de un `<h2>` de sección (`/especialidades`). Default `"h2"`. */
+  nivelTitulo?: NivelTituloMedico
 }) {
   const urlComoLlegar = linkComoLlegar({
     latitude: medico.latitude,
@@ -110,7 +137,7 @@ export function TarjetaMedicoActivo({
 
   return (
     <Tarjeta className="gap-4 px-(--card-spacing) chica:gap-3">
-      <DatosMedico medico={medico} />
+      <DatosMedico medico={medico} nivelTitulo={nivelTitulo} />
 
       {/* Llamar / Cómo llegar: ya son una fila a partir de `sm:`. Chica
           (Sprint 13, tarea 13.5) los pone en fila en CUALQUIER ancho -es el

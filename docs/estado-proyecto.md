@@ -127,6 +127,10 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 - **Base UI (no Radix):** el Select necesita `items` para mostrar labels. `cookies()` solo escribible en fase action (Next 16) — para deep links con cookie usar route handler (patrón `/turnos/enlace`).
 - **Playwright formal:** deuda técnica declarada (Sprint 11). El Browser pane tuvo clicks colgados al final de esta sesión; la verificación equivalente se hizo por SQL transaccional.
 - **Enum `access_action`** no tiene literal `subir_documento` — deuda de migración anotada para Sprint 11.
+- **Catálogo REFES (Sprint 16.3):** el portal `datos.salud.gob.ar` sirve una cadena TLS INCOMPLETA — el `fetch` de Node falla con `UNABLE_TO_VERIFY_LEAF_SIGNATURE` (los navegadores no lo notan porque persiguen la extensión AIA, Node no). La salida NO es `rejectUnauthorized:false`: el intermedio Sectigo está pineado en `lib/lugares/ca-ministerio.ts` y se suma a las raíces de Node **solo para ese host**. Si el Ministerio cambia de CA, la sincronización falla ruidosamente y hay que actualizar ese archivo.
+- **El portal anuncia `Accept-Ranges: bytes` pero NO honra `Range`:** pedir `bytes=0-200` devuelve HTTP 200 con los 8.970.242 bytes enteros (medido). Por eso el CSV se copia una vez al bucket privado `refes-sync` y cada tanda lee su ventana desde Storage, que sí responde 206.
+- **CKAN publica `last_modified` sin zona horaria** ("2025-12-17T15:53:47.670000") y `Date.parse` la interpreta en la hora local del servidor: comparar esa fecha contra la cabecera HTTP `Last-Modified` NUNCA da igual, y el "ya estás al día" del botón Actualizar re-descargaba y reprocesaba 36.046 filas cada vez. Se compara cabecera contra cabecera, con un `HEAD` de 350 ms.
+- **La edición más nueva del REFES no siempre está en CSV:** al 2026-08-18 el recurso más reciente del dataset es un XLSX (enero 2026) y el CSV más nuevo es de diciembre 2025. La app solo lee CSV, a propósito (leer XLSX exigiría una dependencia nueva); queda declarado como deuda, no como olvido.
 
 ## Pendientes que requieren al usuario
 

@@ -503,6 +503,144 @@ export type Database = {
           },
         ]
       }
+      health_centers: {
+        Row: {
+          address: string | null
+          department_name: string | null
+          funding_origin: string | null
+          latitude: number | null
+          locality_name: string | null
+          locality_search: string | null
+          longitude: number | null
+          name: string
+          postal_code: string | null
+          province: string | null
+          province_refes: string
+          refes_id: string
+          search_text: string
+          synced_at: string
+          typology_code: string | null
+          typology_id: number | null
+          typology_name: string | null
+          website: string | null
+        }
+        Insert: {
+          address?: string | null
+          department_name?: string | null
+          funding_origin?: string | null
+          latitude?: number | null
+          locality_name?: string | null
+          locality_search?: string | null
+          longitude?: number | null
+          name: string
+          postal_code?: string | null
+          province?: string | null
+          province_refes: string
+          refes_id: string
+          search_text: string
+          synced_at?: string
+          typology_code?: string | null
+          typology_id?: number | null
+          typology_name?: string | null
+          website?: string | null
+        }
+        Update: {
+          address?: string | null
+          department_name?: string | null
+          funding_origin?: string | null
+          latitude?: number | null
+          locality_name?: string | null
+          locality_search?: string | null
+          longitude?: number | null
+          name?: string
+          postal_code?: string | null
+          province?: string | null
+          province_refes?: string
+          refes_id?: string
+          search_text?: string
+          synced_at?: string
+          typology_code?: string | null
+          typology_id?: number | null
+          typology_name?: string | null
+          website?: string | null
+        }
+        Relationships: []
+      }
+      health_centers_sync: {
+        Row: {
+          current_etag: string | null
+          current_last_modified: string | null
+          current_resource_id: string | null
+          current_resource_url: string | null
+          current_row_count: number | null
+          current_synced_at: string | null
+          id: boolean
+          run_byte_offset: number
+          run_data_since: string | null
+          run_error: string | null
+          run_etag: string | null
+          run_heartbeat_at: string | null
+          run_last_modified: string | null
+          run_resource_id: string | null
+          run_resource_url: string | null
+          run_rows_processed: number
+          run_started_at: string | null
+          run_started_by: string | null
+          run_storage_path: string | null
+          run_total_bytes: number | null
+          run_total_rows: number | null
+          status: string
+        }
+        Insert: {
+          current_etag?: string | null
+          current_last_modified?: string | null
+          current_resource_id?: string | null
+          current_resource_url?: string | null
+          current_row_count?: number | null
+          current_synced_at?: string | null
+          id?: boolean
+          run_byte_offset?: number
+          run_data_since?: string | null
+          run_error?: string | null
+          run_etag?: string | null
+          run_heartbeat_at?: string | null
+          run_last_modified?: string | null
+          run_resource_id?: string | null
+          run_resource_url?: string | null
+          run_rows_processed?: number
+          run_started_at?: string | null
+          run_started_by?: string | null
+          run_storage_path?: string | null
+          run_total_bytes?: number | null
+          run_total_rows?: number | null
+          status?: string
+        }
+        Update: {
+          current_etag?: string | null
+          current_last_modified?: string | null
+          current_resource_id?: string | null
+          current_resource_url?: string | null
+          current_row_count?: number | null
+          current_synced_at?: string | null
+          id?: boolean
+          run_byte_offset?: number
+          run_data_since?: string | null
+          run_error?: string | null
+          run_etag?: string | null
+          run_heartbeat_at?: string | null
+          run_last_modified?: string | null
+          run_resource_id?: string | null
+          run_resource_url?: string | null
+          run_rows_processed?: number
+          run_started_at?: string | null
+          run_started_by?: string | null
+          run_storage_path?: string | null
+          run_total_bytes?: number | null
+          run_total_rows?: number | null
+          status?: string
+        }
+        Relationships: []
+      }
       insurance_cards: {
         Row: {
           back_storage_path: string | null
@@ -1458,6 +1596,10 @@ export type Database = {
           recordatorio_id: string
           ventana: string
         }[]
+      }
+      reclamar_sincronizacion_refes: {
+        Args: { p_ttl_segundos?: number; p_usuario: string }
+        Returns: boolean
       }
       registrar_suscripcion_push: {
         Args: {

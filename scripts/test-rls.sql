@@ -102,9 +102,16 @@ as $$
     values (bloque, caso, esperado, obtenido, esperado = obtenido);
 $$;
 
-grant usage on schema pruebas_rls to anon, authenticated;
-grant select, insert on pruebas_rls.resultado to anon, authenticated;
-grant usage, select on sequence pruebas_rls.resultado_n_seq to anon, authenticated;
+-- `service_role` se suma en el Sprint 16 (tarea 16.3, BLOQUE 22): es el
+-- primer bloque del arnés que necesita PROBAR el camino permitido de un rol
+-- de servidor -que service_role sí puede escribir el catálogo REFES y sí
+-- puede tomar el lock de sincronización-, y para registrar el resultado tiene
+-- que poder escribir en la tabla del arnés desde ese rol. No afecta a ningún
+-- bloque anterior: el esquema `pruebas_rls` vive fuera de `public` y se borra
+-- entero al terminar la corrida.
+grant usage on schema pruebas_rls to anon, authenticated, service_role;
+grant select, insert on pruebas_rls.resultado to anon, authenticated, service_role;
+grant usage, select on sequence pruebas_rls.resultado_n_seq to anon, authenticated, service_role;
 
 
 -- =============================================================================
@@ -5676,6 +5683,381 @@ select pruebas_rls.registrar('21. graduación',
           from pg_proc p
           join pg_namespace n on n.oid = p.pronamespace
          where n.nspname = 'public' and p.proname = 'puede_graduar_perfil'));
+
+
+-- =============================================================================
+-- BLOQUE 22 — Catálogo REFES de centros de salud (Sprint 16, tarea 16.3)
+-- -----------------------------------------------------------------------------
+-- `health_centers` y `health_centers_sync` son las PRIMERAS tablas del
+-- proyecto sin dueño: no cuelgan de un `profile_id` y la matriz de
+-- docs/modelo-permisos.md no tiene nada que decidir sobre ellas. Su modelo es
+-- otro y este bloque lo verifica entero:
+--
+--   · `authenticated` LEE todo y NO ESCRIBE NADA (ni el catálogo ni el lock).
+--   · `anon` no ve ni una fila -la lección de siempre: toda tabla nueva
+--     repite su propio `revoke`, porque el `revoke all on all tables` de
+--     `20260812220000_rls.sql` §4 fue una foto, no una regla viva-.
+--   · `service_role` es el único que escribe.
+--   · El LOCK de sincronización no se puede tomar ni tocar desde una sesión
+--     del navegador, es atómico entre dos llamadas simultáneas, y CADUCA.
+--
+-- Las dos capas se prueban por separado a propósito: que falte la política y
+-- que falte el privilegio son dos candados independientes, y un bloque que
+-- solo probara "no puedo escribir" no distinguiría cuál de los dos se cayó.
+-- =============================================================================
+\echo '### BLOQUE 22 — catálogo REFES: lectura para todos, escritura para nadie'
+
+-- El total real del catálogo (el seed carga 24; si alguien sincronizó de
+-- verdad contra el portal antes de correr el arnés, son 36.046). Se lee ACÁ,
+-- como postgres, para comparar contra lo que ve una sesión con cuenta sin
+-- clavar un número que dependa del estado local.
+select count(*)::text as total_catalogo from public.health_centers \gset
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+-- ── Lectura: el catálogo entero, sin filtro por perfil.
+-- Va como SQL plano y no adentro de un `do $$`: psql NO interpola sus
+-- variables (`:'total_catalogo'`) dentro de un bloque con comillas de dólar,
+-- así que el `:'...'` quedaría literal y sería un error de sintaxis. Como
+-- este caso espera ÉXITO, tampoco hace falta el `exception` que sí llevan los
+-- bloques de más abajo, que esperan un rechazo.
+select pruebas_rls.registrar('22. catálogo REFES',
+       'María lee el catálogo completo', :'total_catalogo',
+       (select count(*)::text from public.health_centers));
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.health_centers_sync;
+        v := c || ' fila(s)';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'María lee el estado de la sincronización (para "última actualización")',
+        '1 fila(s)', v);
+end $$;
+
+-- ── Escritura del catálogo: las tres, rechazadas
+do $$
+declare v text;
+begin
+    begin
+        insert into public.health_centers (refes_id, name, province_refes, search_text)
+        values ('99999999999999', 'CLINICA TRUCHA', 'BUENOS AIRES', 'clinica trucha');
+        v := 'insertado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'María inserta un centro en el catálogo', 'rechazado (42501)', v);
+end $$;
+
+do $$
+declare v text; n integer;
+begin
+    begin
+        update public.health_centers set name = 'NOMBRE CAMBIADO A MANO';
+        get diagnostics n = row_count;
+        v := n || ' filas modificadas';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'María renombra un centro del catálogo', 'rechazado (42501)', v);
+end $$;
+
+do $$
+declare v text; n integer;
+begin
+    begin
+        delete from public.health_centers;
+        get diagnostics n = row_count;
+        v := n || ' filas borradas';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'María borra el catálogo entero', 'rechazado (42501)', v);
+end $$;
+
+-- ── El LOCK no se manipula desde el navegador
+do $$
+declare v text; n integer;
+begin
+    begin
+        update public.health_centers_sync set status = 'idle', run_started_by = null;
+        get diagnostics n = row_count;
+        v := n || ' filas modificadas';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'María libera a mano el lock de sincronización', 'rechazado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.health_centers_sync (id) values (false);
+        v := 'insertado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'María agrega una segunda fila de estado', 'rechazado (42501)', v);
+end $$;
+
+do $$
+declare v text; n integer;
+begin
+    begin
+        delete from public.health_centers_sync;
+        get diagnostics n = row_count;
+        v := n || ' filas borradas';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'María borra la fila de estado', 'rechazado (42501)', v);
+end $$;
+
+-- ── La función del lock es SECURITY DEFINER: la corre el Route Handler con
+--    service_role, nunca una sesión del navegador (mismo criterio que todas
+--    las funciones auxiliares del proyecto, docs/modelo-permisos.md §6).
+do $$
+declare v text; r boolean;
+begin
+    begin
+        select public.reclamar_sincronizacion_refes(
+            '11111111-1111-4111-8111-111111111111'::uuid, 120) into r;
+        v := 'ejecutó y devolvió ' || coalesce(r::text, 'null');
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'María toma el lock llamando a la función directo', 'rechazado (42501)', v);
+end $$;
+
+commit;
+
+
+-- ── anon: nada de nada
+begin;
+select set_config('request.jwt.claims', '', true);
+set local role anon;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.health_centers;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'anon lee el catálogo', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.health_centers_sync;
+        v := c || ' filas';
+    exception when insufficient_privilege then v := 'denegado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'anon lee el estado de la sincronización', 'denegado (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        insert into public.health_centers (refes_id, name, province_refes, search_text)
+        values ('88888888888888', 'CLINICA ANONIMA', 'BUENOS AIRES', 'clinica anonima');
+        v := 'insertado';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'anon inserta un centro', 'rechazado (42501)', v);
+end $$;
+
+do $$
+declare v text; r boolean;
+begin
+    begin
+        select public.reclamar_sincronizacion_refes(null, 120) into r;
+        v := 'ejecutó';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'anon toma el lock de sincronización', 'rechazado (42501)', v);
+end $$;
+
+commit;
+
+
+-- ── Las dos capas, por separado: privilegios y políticas
+select pruebas_rls.registrar('22. catálogo REFES',
+       'Privilegios de authenticated sobre health_centers',
+       'SELECT',
+       coalesce((select string_agg(privilege_type, ', ' order by privilege_type)
+                   from information_schema.role_table_grants
+                  where table_schema = 'public' and table_name = 'health_centers'
+                    and grantee = 'authenticated'), '(ninguno)'));
+
+select pruebas_rls.registrar('22. catálogo REFES',
+       'Privilegios de authenticated sobre health_centers_sync',
+       'SELECT',
+       coalesce((select string_agg(privilege_type, ', ' order by privilege_type)
+                   from information_schema.role_table_grants
+                  where table_schema = 'public' and table_name = 'health_centers_sync'
+                    and grantee = 'authenticated'), '(ninguno)'));
+
+select pruebas_rls.registrar('22. catálogo REFES',
+       'Privilegios de anon sobre las dos tablas del catálogo', '0',
+       (select count(*)::text
+          from information_schema.role_table_grants
+         where table_schema = 'public'
+           and table_name in ('health_centers', 'health_centers_sync')
+           and grantee = 'anon'));
+
+select pruebas_rls.registrar('22. catálogo REFES',
+       'Políticas de ESCRITURA en las dos tablas del catálogo', '0',
+       (select count(*)::text
+          from pg_policies
+         where schemaname = 'public'
+           and tablename in ('health_centers', 'health_centers_sync')
+           and cmd <> 'SELECT'));
+
+select pruebas_rls.registrar('22. catálogo REFES',
+       'Las dos tablas del catálogo con RLS habilitada', '2',
+       (select count(*)::text
+          from pg_tables
+         where schemaname = 'public'
+           and tablename in ('health_centers', 'health_centers_sync')
+           and rowsecurity));
+
+select pruebas_rls.registrar('22. catálogo REFES',
+       'reclamar_sincronizacion_refes es SECURITY DEFINER y fija su search_path',
+       'definer/search_path fijado',
+       (select case when p.prosecdef then 'definer' else 'invoker' end
+               || '/' ||
+               case when coalesce(array_to_string(p.proconfig, ','), '') like 'search_path=%'
+                    then 'search_path fijado' else 'search_path heredado' end
+          from pg_proc p
+          join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.proname = 'reclamar_sincronizacion_refes'));
+
+-- La auditoría de "quién apretó Actualizar" no puede impedir dar de baja una
+-- cuenta: la FK es ON DELETE SET NULL ('n'), no RESTRICT ni CASCADE.
+select pruebas_rls.registrar('22. catálogo REFES',
+       'run_started_by referencia auth.users con ON DELETE SET NULL', 'n',
+       (select c.confdeltype::text
+          from pg_constraint c
+          join pg_class t on t.oid = c.conrelid
+         where t.relname = 'health_centers_sync' and c.contype = 'f'));
+
+
+-- ── El lock: atómico, exclusivo y CADUCABLE (como service_role, que es quien
+--    lo usa de verdad desde app/api/lugares/sincronizar/route.ts).
+begin;
+set local role service_role;
+
+do $$
+declare primera boolean; segunda boolean;
+begin
+    -- Estado limpio de partida.
+    update public.health_centers_sync
+       set status = 'idle', run_heartbeat_at = null, run_started_by = null, run_error = null;
+
+    select public.reclamar_sincronizacion_refes(
+        '11111111-1111-4111-8111-111111111111'::uuid, 120) into primera;
+    -- Segunda persona apretando "Actualizar" en el mismo minuto.
+    select public.reclamar_sincronizacion_refes(
+        '22222222-2222-4222-8222-222222222222'::uuid, 120) into segunda;
+
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'Dos "Actualizar" seguidos: solo el primero se lleva el lock',
+        'true/false', primera::text || '/' || segunda::text);
+end $$;
+
+do $$
+declare v uuid;
+begin
+    select run_started_by into v from public.health_centers_sync;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'Queda auditado quién disparó la sincronización',
+        '11111111-1111-4111-8111-111111111111', coalesce(v::text, '(nadie)'));
+end $$;
+
+do $$
+declare tomado boolean;
+begin
+    -- Lock CADUCADO: la pestaña se cerró y el latido quedó viejo. Con un TTL
+    -- de 1 segundo y un latido de hace una hora, la llamada siguiente se lo
+    -- lleva. Sin esta cláusula, una corrida abandonada dejaría el botón
+    -- "Actualizar" muerto para siempre.
+    update public.health_centers_sync set run_heartbeat_at = now() - interval '1 hour';
+
+    select public.reclamar_sincronizacion_refes(
+        '22222222-2222-4222-8222-222222222222'::uuid, 1) into tomado;
+
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'Un lock sin latido caduca y la corrida siguiente lo toma', 'true', tomado::text);
+end $$;
+
+-- ── service_role SÍ escribe el catálogo: es el camino real de la
+--    sincronización, y probar solo las prohibiciones dejaría sin verificar
+--    que el camino permitido funciona.
+do $$
+declare v text; c integer;
+begin
+    begin
+        insert into public.health_centers (refes_id, name, province_refes, search_text)
+        values ('00000000000000', 'CENTRO DE PRUEBA DEL ARNÉS', 'BUENOS AIRES', 'centro de prueba del arnes')
+        on conflict (refes_id) do update set name = excluded.name;
+        select count(*) into c from public.health_centers where refes_id = '00000000000000';
+        v := c || ' fila';
+    exception when others then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'service_role hace upsert de un centro (el camino de la sincronización)', '1 fila', v);
+end $$;
+
+-- La fila de estado es ÚNICA por construcción (PK booleana + CHECK id).
+do $$
+declare v text;
+begin
+    begin
+        insert into public.health_centers_sync (id) values (false);
+        v := 'insertada';
+    exception when check_violation      then v := 'rechazada por el CHECK';
+             when unique_violation      then v := 'rechazada por la PK';
+             when others                then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('22. catálogo REFES',
+        'Ni service_role puede crear una segunda fila de estado',
+        'rechazada por el CHECK', v);
+end $$;
+
+-- Limpieza del bloque: el centro de prueba y el estado como estaba.
+delete from public.health_centers where refes_id = '00000000000000';
+update public.health_centers_sync
+   set status = 'idle', run_heartbeat_at = null, run_started_by = null, run_error = null,
+       run_started_at = null;
+
+commit;
 
 
 -- =============================================================================

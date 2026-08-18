@@ -49,12 +49,20 @@ if (typeof window !== 'undefined') {
  * tocar con este módulo. No participa de `encolar_purga_storage()` porque sus
  * objetos nunca cuelgan de una fila de `documents`/`insurance_cards`/`profiles`;
  * la purga la maneja `lib/documentos/compartir-temporal.ts` directamente.
+ *
+ * `refesSync` es de la misma familia que `compartidosTemp` (Sprint 16, tarea
+ * 16.3, `20260818100000_catalogo_refes.sql` §4): bucket privado SIN ninguna
+ * política de `storage.objects`, así que solo se toca con este módulo. Guarda
+ * el CSV del REFES mientras dura una sincronización por tandas y lo borra al
+ * terminar; tampoco participa de `encolar_purga_storage()`, por el mismo
+ * motivo (su objeto no cuelga de ninguna fila del dominio).
  */
 export const BUCKETS = {
   documentos: 'documentos-medicos',
   credenciales: 'credenciales-cobertura',
   avatares: 'avatares',
   compartidosTemp: 'compartidos-temp',
+  refesSync: 'refes-sync',
 } as const;
 
 export type Bucket = (typeof BUCKETS)[keyof typeof BUCKETS];
@@ -215,26 +223,115 @@ export async function descargarObjeto(bucket: Bucket, path: string): Promise<Obj
  * `app/api/compartir/route.ts`- y de construir el `path` con el `user_id` de
  * esa sesión, nunca con uno que mande el cliente.
  *
- * `upsert: false`: el path lleva un uuid recién generado (igual que
- * `construirStoragePath` en `lib/documentos/ingesta.ts`), así que no puede
- * existir. Si existiera, sobrescribir sería destruir el archivo de otra
- * fila de `shared_uploads_temp`.
+ * `sobrescribir: false` (el default): el path del share target lleva un uuid
+ * recién generado (igual que `construirStoragePath` en
+ * `lib/documentos/ingesta.ts`), así que no puede existir. Si existiera,
+ * sobrescribir sería destruir el archivo de otra fila de
+ * `shared_uploads_temp`.
+ *
+ * `sobrescribir: true` existe para el bucket `refes-sync` (Sprint 16, tarea
+ * 16.3), donde el path **es determinístico a propósito** —
+ * `refes/<resourceId>.csv`, la identidad de la edición — y una corrida que se
+ * cortó y se vuelve a lanzar tiene que poder pisar el archivo a medio subir
+ * de la anterior. Ahí no hay nada de nadie que destruir: es una copia
+ * temporal de un archivo público que se borra al terminar.
  */
 export async function subirObjeto(
   bucket: Bucket,
   path: string,
   datos: Blob,
   contentType: string,
+  opciones: { sobrescribir?: boolean } = {},
 ): Promise<void> {
   const rutaLimpia = validarPath(path);
 
   const { error } = await clienteAdmin()
     .storage.from(bucket)
-    .upload(rutaLimpia, datos, { contentType, upsert: false });
+    .upload(rutaLimpia, datos, { contentType, upsert: opciones.sobrescribir === true });
 
   if (error) {
     throw new Error(`No se pudo subir "${bucket}/${rutaLimpia}": ${error.message}`);
   }
+}
+
+/**
+ * Lee un RANGO de bytes de un objeto privado (HTTP `Range`), sin traer el
+ * archivo entero.
+ *
+ * Existe para la sincronización del catálogo REFES (Sprint 16, tarea 16.3):
+ * el CSV pesa ~9 MB y cada tanda solo necesita su ventana de ~1 MB. Sin
+ * rango, cada una de las nueve tandas bajaría los 9 MB completos para tirar el
+ * 90% — y esa es exactamente la razón por la que el archivo se copia a
+ * Storage en vez de re-pedírselo al Ministerio: **el portal anuncia
+ * `Accept-Ranges: bytes` pero NO honra el header `Range`** (medido: devuelve
+ * HTTP 200 con los 8.970.242 bytes enteros), mientras que Storage sí lo honra
+ * (HTTP 206 con exactamente los bytes pedidos, 33 ms).
+ *
+ * Va por `fetch` contra la API REST de Storage y no por
+ * `supabase-js.storage.download()` porque ese método no expone forma de mandar
+ * un header `Range`: acepta `transform` (imágenes) y nada más. La credencial
+ * es la misma `SUPABASE_SERVICE_ROLE_KEY` del cliente de arriba, así que
+ * valen todas las advertencias del encabezado de este módulo.
+ *
+ * Devuelve los bytes REALMENTE entregados: si el rango pedido excede el final
+ * del objeto, Storage recorta y devuelve menos, que es el comportamiento
+ * correcto para la última tanda.
+ */
+export async function descargarRangoDeObjeto(
+  bucket: Bucket,
+  path: string,
+  desde: number,
+  cantidad: number,
+): Promise<Uint8Array> {
+  const rutaLimpia = validarPath(path);
+
+  if (!Number.isInteger(desde) || desde < 0) {
+    throw new Error(`El byte inicial del rango debe ser un entero >= 0 (recibido: ${desde}).`);
+  }
+  if (!Number.isInteger(cantidad) || cantidad <= 0) {
+    throw new Error(`La cantidad de bytes del rango debe ser un entero > 0 (recibido: ${cantidad}).`);
+  }
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url) {
+    throw new Error('Falta la variable de entorno NEXT_PUBLIC_SUPABASE_URL.');
+  }
+  if (!serviceRoleKey) {
+    throw new Error('Falta la variable de entorno SUPABASE_SERVICE_ROLE_KEY.');
+  }
+
+  const hasta = desde + cantidad - 1;
+  const respuesta = await fetch(
+    `${url.replace(/\/$/, '')}/storage/v1/object/${bucket}/${encodeURI(rutaLimpia)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${serviceRoleKey}`,
+        apikey: serviceRoleKey,
+        Range: `bytes=${desde}-${hasta}`,
+      },
+    },
+  );
+
+  // 206 = rango entregado · 200 = el servidor ignoró el rango y mandó todo.
+  // Los dos son manejables; cualquier otro estado es un fallo real.
+  if (respuesta.status !== 206 && respuesta.status !== 200) {
+    throw new Error(
+      `No se pudo leer el rango ${desde}-${hasta} de "${bucket}/${rutaLimpia}": ` +
+        `HTTP ${respuesta.status}.`,
+    );
+  }
+
+  const cuerpo = new Uint8Array(await respuesta.arrayBuffer());
+
+  // Si Storage ignoró el rango (200), se recorta acá para que quien llama
+  // reciba siempre exactamente la ventana que pidió.
+  if (respuesta.status === 200 && cuerpo.length > cantidad) {
+    return cuerpo.subarray(desde, desde + cantidad);
+  }
+
+  return cuerpo;
 }
 
 /**

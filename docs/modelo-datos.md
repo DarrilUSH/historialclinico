@@ -92,6 +92,8 @@ profiles ◄──────────────────────�
 | `access_logs` | `resource_id` | *(sin FK)* | — | — | Debe sobrevivir al borrado del recurso auditado |
 | `push_subscriptions` | `user_id` | `auth.users` | N → 1 | `CASCADE` | Sin cuenta no hay push |
 | `push_subscriptions` | `profile_id` | `profiles` | N → 0..1 | `CASCADE` | Perfil activo al suscribirse (ver decisión 9) |
+| `health_centers` | *(sin FK)* | — | — | — | **Tabla sin dueño**: catálogo público del Estado, igual para todas las familias (ver decisión 14) |
+| `health_centers_sync` | `run_started_by` | `auth.users` | 0..1 → 0..1 | `SET NULL` | Auditoría de quién apretó "Actualizar"; el registro sobrevive a la baja de la cuenta |
 
 ### Diagrama ER
 
@@ -255,6 +257,18 @@ No hay constraints del tipo `CHECK (document_date <= current_date)`. PostgreSQL 
 Todas las tablas mutables tienen `created_at` y `updated_at` `timestamptz NOT NULL DEFAULT now()`, con trigger `set_updated_at` en `BEFORE UPDATE`. Las funciones declaran `SET search_path = ''` para cumplir el lint de Supabase (`function_search_path_mutable`).
 
 **`access_logs` es la excepción:** no tiene `updated_at` ni trigger, porque es append-only. Una columna `updated_at` en una tabla de auditoría es una invitación a modificarla.
+
+### 14. `health_centers`: la primera tabla sin dueño (Sprint 16, tarea 16.3)
+
+Todo lo demás en este esquema cuelga de un `profile_id` y se autoriza con la matriz de [`modelo-permisos.md`](./modelo-permisos.md). El catálogo REFES de establecimientos de salud, no: son 36.046 filas de un archivo público del Ministerio de Salud (CC-BY-4.0), idénticas para todas las familias. Duplicarlas por perfil sería guardar 36 mil filas por persona que usa la app.
+
+Eso cambia tres cosas respecto del resto del modelo, y las tres están documentadas en `20260818100000_catalogo_refes.sql`:
+
+- **La PK es la clave natural de la fuente** (`refes_id`, el `establecimiento_id` de 14 dígitos), no un uuid propio: la sincronización es un `upsert` idempotente sobre esa columna, y ninguna otra tabla referencia a esta.
+- **La RLS es de solo lectura para `authenticated`, sobre todas las filas** (`using (true)`, deliberado y no una política olvidada), sin ninguna política de escritura: escribe únicamente `service_role`, desde las tandas de sincronización.
+- **`appointments` NO tiene FK a `health_centers`.** Elegir un centro del catálogo COPIA su nombre, dirección, ciudad, provincia y coordenadas al turno, igual que `appointments.doctor_name` copia el nombre del médico (decisión de `20260812200000_schema_inicial.sql` §4.4). Un turno viejo no puede cambiar porque el Ministerio corrigió un domicilio seis meses después, ni romperse porque una edición nueva dio de baja el establecimiento.
+
+`health_centers_sync` es su tabla de estado: **una sola fila** (patrón singleton, PK booleana con `CHECK (id)`), con la edición vigente, el byte donde reanudar una corrida cortada y el lock contra sincronizaciones concurrentes.
 
 ---
 

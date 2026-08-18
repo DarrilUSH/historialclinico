@@ -27,6 +27,7 @@ import { AccionesEstadoTurno } from "@/components/turnos/acciones-estado-turno"
 import { BadgeEstadoTurno } from "@/components/turnos/badge-estado-turno"
 import { FormularioTurno, type ValoresTurno } from "@/components/turnos/formulario-turno"
 import { requerirSesion } from "@/lib/auth/guardas"
+import { leerEstadoCatalogo } from "@/lib/lugares/consulta"
 import { fechaIsoUshuaia, horaUshuaia } from "@/lib/turnos/fecha"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
@@ -72,12 +73,19 @@ export default async function PaginaEditarTurno({
     redirect("/turnos")
   }
 
-  const { data: medicos } = await supabase
-    .from("doctors")
-    .select("id, full_name, specialties, institution, address, city, province, latitude, longitude")
-    .eq("profile_id", activo.perfil.id)
-    .eq("is_active", true)
-    .order("full_name", { ascending: true })
+  const [{ data: medicos }, estadoCatalogo] = await Promise.all([
+    supabase
+      .from("doctors")
+      .select("id, full_name, specialties, institution, address, city, province, latitude, longitude")
+      .eq("profile_id", activo.perfil.id)
+      .eq("is_active", true)
+      .order("full_name", { ascending: true }),
+    // Sprint 16, tarea 16.3: habilita el autocompletar de "Lugar" contra el
+    // catálogo REFES también al EDITAR -corregir el lugar de un turno ya
+    // cargado es justamente el caso en que precargar dirección y coordenadas
+    // de una sola vez más ayuda-.
+    leerEstadoCatalogo(supabase),
+  ])
 
   const fechaTurno = new Date(turno.appointment_date)
 
@@ -124,6 +132,7 @@ export default async function PaginaEditarTurno({
         turnoId={turno.id}
         valoresIniciales={valoresIniciales}
         medicos={medicos ?? []}
+        catalogoDisponible={estadoCatalogo.centros > 0}
       />
     </div>
   )

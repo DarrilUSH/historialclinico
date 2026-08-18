@@ -16,6 +16,7 @@ import { ArrowLeftIcon } from "lucide-react"
 
 import { FormularioTurno } from "@/components/turnos/formulario-turno"
 import { requerirSesion } from "@/lib/auth/guardas"
+import { leerEstadoCatalogo } from "@/lib/lugares/consulta"
 import { hoyIsoUshuaia } from "@/lib/turnos/fecha"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { obtenerUltimaUbicacionConocida } from "@/lib/ubicacion/ultima-usada"
@@ -37,7 +38,7 @@ export default async function PaginaNuevoTurno() {
 
   const { supabase } = await requerirSesion({ desde: "/turnos/nuevo" })
 
-  const [{ data: medicos }, ultimaUbicacion] = await Promise.all([
+  const [{ data: medicos }, ultimaUbicacion, estadoCatalogo] = await Promise.all([
     supabase
       .from("doctors")
       .select("id, full_name, specialties, institution, address, city, province, latitude, longitude")
@@ -47,6 +48,10 @@ export default async function PaginaNuevoTurno() {
     // Sprint 16, tarea 16.1: sugerencia editable, NUNCA un valor fijo tipo
     // Ushuaia -ver `lib/ubicacion/ultima-usada.ts`-.
     obtenerUltimaUbicacionConocida(supabase, activo.perfil.id),
+    // Sprint 16, tarea 16.3: una sola fila, para saber si "Lugar" puede
+    // ofrecer el autocompletar del catálogo REFES o tiene que seguir siendo
+    // un campo de texto común (ver `components/turnos/formulario-turno.tsx`).
+    leerEstadoCatalogo(supabase),
   ])
 
   return (
@@ -70,6 +75,7 @@ export default async function PaginaNuevoTurno() {
         modo="crear"
         medicos={medicos ?? []}
         fechaMinimaIso={hoyIsoUshuaia()}
+        catalogoDisponible={estadoCatalogo.centros > 0}
         valoresIniciales={
           ultimaUbicacion
             ? { lugarCiudad: ultimaUbicacion.ciudad, lugarProvincia: ultimaUbicacion.provincia }

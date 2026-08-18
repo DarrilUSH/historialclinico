@@ -78,6 +78,22 @@
  * del directorio (más abajo) sigue completando este campo con SU
  * especialidad principal si está vacío, sin pisar lo ya tecleado -sin
  * cambios respecto de antes, ver `lib/turnos/autocompletar-medico.ts`-.
+ *
+ * ## Lugar: autocompletar contra el catálogo REFES (Sprint 16, tarea 16.3)
+ *
+ * Cuando el catálogo de centros de salud está sincronizado
+ * (`catalogoDisponible`), "Lugar" deja de ser un `CampoTexto` y pasa a ser
+ * `CampoLugar` (`components/lugares/campo-lugar.tsx`): busca en los 36.046
+ * establecimientos del Registro Federal a medida que se tipea y, al elegir
+ * uno, precarga de una vez el nombre, la dirección, la ciudad, la provincia
+ * **y las coordenadas** que publica el registro oficial. Eso es lo que hace
+ * que "Cómo llegar" y "Pedir viaje" funcionen sin geocodificar nada y sin
+ * que nadie tenga que copiar números de Google Maps a mano.
+ *
+ * Si el catálogo NUNCA se sincronizó, el campo es exactamente el
+ * `CampoTexto` de siempre: sin buscador vacío, sin cartel que explique lo que
+ * falta hacer, sin una sola diferencia respecto de antes de esta tarea.
+ * Nadie tiene que descargar 36 mil centros para poder anotar un turno.
  */
 
 import * as React from "react"
@@ -96,6 +112,7 @@ import { Boton } from "@/components/base/boton"
 import { CampoNumero } from "@/components/base/campo-numero"
 import { CampoTexto } from "@/components/base/campo-texto"
 import { CampoTextarea } from "@/components/base/campo-textarea"
+import { CampoLugar } from "@/components/lugares/campo-lugar"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -105,6 +122,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CATALOGO_ESPECIALIDADES } from "@/lib/especialidades/catalogo"
+import { precargaDesdeCentro, type CentroSugerido } from "@/lib/lugares/sugerencias"
 import {
   camposAutocompletadosDesdeMedico,
   type MedicoParaAutocompletar,
@@ -152,6 +170,12 @@ export interface FormularioTurnoProps {
   medicos: MedicoParaAutocompletar[]
   /** Solo para `modo === "crear"`: tope inferior del `<input type="date">` (hoy, hora de Ushuaia). En edición no se restringe: un turno pasado se puede seguir corrigiendo. */
   fechaMinimaIso?: string
+  /**
+   * `true` si el catálogo REFES tiene centros cargados (Sprint 16, tarea
+   * 16.3). Con `false` -nunca se sincronizó-, "Lugar" es el `CampoTexto` de
+   * siempre: ver el comentario de cabecera.
+   */
+  catalogoDisponible?: boolean
 }
 
 const ESTADO_INICIAL: EstadoTurnoAccion = { error: null }
@@ -163,6 +187,7 @@ export function FormularioTurno({
   valoresIniciales,
   medicos,
   fechaMinimaIso,
+  catalogoDisponible = false,
 }: FormularioTurnoProps) {
   const accion = modo === "crear" ? crearTurno : actualizarTurno
   const [estado, enviarAccion, pendiente] = useActionState(accion, ESTADO_INICIAL)
@@ -235,6 +260,31 @@ export function FormularioTurno({
       setLongitud(cambios.longitud)
       setMostrarCoordenadas(true)
     }
+  }
+
+  /**
+   * Elegir un centro del catálogo REFES (Sprint 16, tarea 16.3): reemplaza
+   * las CINCO partes del lugar de una vez -nombre, dirección, ciudad,
+   * provincia y coordenadas-, no solo las vacías. El porqué de esa diferencia
+   * con `elegirMedicoDelDirectorio` está en
+   * `lib/lugares/sugerencias.ts#precargaDesdeCentro`: acá la persona está
+   * diciendo sobre ESTE campo "el lugar es este otro", y dejar media
+   * dirección de la clínica anterior la mandaría al lugar equivocado.
+   */
+  function elegirCentroDelCatalogo(centro: CentroSugerido) {
+    const precarga = precargaDesdeCentro(centro)
+
+    setLugarNombre(precarga.lugarNombre)
+    setLugarDireccion(precarga.lugarDireccion)
+    setLugarCiudad(precarga.lugarCiudad)
+    setLugarProvincia(precarga.lugarProvincia)
+    setLatitud(precarga.latitud)
+    setLongitud(precarga.longitud)
+
+    // El panel de coordenadas se abre solo cuando el registro las trajo: es
+    // la confirmación visible de que "Cómo llegar" va a tener el punto exacto.
+    // Si no las trajo, no se abre un panel vacío que parezca un pendiente.
+    if (precarga.latitud.length > 0) setMostrarCoordenadas(true)
   }
 
   return (
@@ -326,14 +376,27 @@ export function FormularioTurno({
         <CampoTexto id="hora" label="Hora" type="time" required defaultValue={valoresIniciales?.hora} />
       </div>
 
-      <CampoTexto
-        id="lugarNombre"
-        label="Lugar"
-        maxLength={150}
-        value={lugarNombre}
-        onChange={(evento) => setLugarNombre(evento.target.value)}
-        ayuda="Nombre de la clínica o el consultorio (opcional)."
-      />
+      {catalogoDisponible ? (
+        <CampoLugar
+          id="lugarNombre"
+          label="Lugar"
+          maxLength={150}
+          value={lugarNombre}
+          onChange={setLugarNombre}
+          onElegirCentro={elegirCentroDelCatalogo}
+          ayuda="Escribí el nombre y elegilo del listado oficial: se completan solos la dirección, la ciudad y el mapa."
+          placeholder="Ej: clinica san jorge"
+        />
+      ) : (
+        <CampoTexto
+          id="lugarNombre"
+          label="Lugar"
+          maxLength={150}
+          value={lugarNombre}
+          onChange={(evento) => setLugarNombre(evento.target.value)}
+          ayuda="Nombre de la clínica o el consultorio (opcional)."
+        />
+      )}
 
       <CampoTexto
         id="lugarDireccion"
