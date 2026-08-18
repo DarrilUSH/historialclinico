@@ -24,6 +24,12 @@ ejemplos nuevos sin pasar por la misma limpieza.
 | `casa-salud-ginecologia.txt` | Casa Salud | **El caso INCOMPLETO — el más importante.** Fecha "martes 14/7": sin año y SIN HORA → la IA debe dejar la hora VACÍA y marcar el año como inferido (el próximo 14/7 futuro, cotejando que caiga martes), JAMÁS inventar datos que el mensaje no trae. Sin especialidad explícita (inferible de "prácticas ginecológicas", con cautela) y sin dirección. "Dra. Rosario Diulio" en orden natural con tratamiento. Tarifario largo + copago en EFECTIVO + pedido de confirmar asistencia → todo a notas |
 
 | `casa-salud-confirmacion.txt` | Casa Salud (2.º mensaje, tras confirmar) | Mensaje de datos finales, cortísimo: "Día: 26/5" (sin año), "Horario: 18.10hs" (**hora con PUNTO, no dos puntos**), "Profesional: Ardans" (solo apellido). Aislado casi no alcanza; su valor es el par con el mensaje largo |
+| `centro-loria-sin-anio.txt` | Sede Lorìa (red TCba, prob.) | "Fecha: 28/04" sin año + hora en campo aparte; "Centro: LORIA" a secas (nombre en clave, sin dirección); **"Preparación: No requiere."** — preparación explícitamente vacía (no volcarla como si fuera una indicación); el recordatorio genérico (DNI, orden, credencial, estudios anteriores) sí va a notas; paciente en orden NOMBRES + APELLIDO |
+| `tcba-salguero-puncion.txt` | TCba Salguero (Buenos Aires) | LA MISMA paciente que el caso anterior pero "SOSA , CARLA MARIA INES" — apellido primero y **coma con espacios raros**: par ideal para normalización de nombres; "Fecha del turno: 13/11/2025 Hora del turno: 15:21" — dos campos en UNA línea, minuto no redondo; dirección con rango "554/560" + teléfono del centro "4860-1000" (sin característica) → notas; **"Práctica:"** como nombre de campo del estudio (tercer sinónimo: Especialidad/profesional-que-es-estudio/Práctica); "Profesional: Acha Agustina" — probablemente APELLIDO NOMBRE sin coma: ambigüedad real a resolver con cautela |
+
+**Lección de red:** estos dos últimos son con toda probabilidad de la MISMA red
+(TCba) y aún así usan templates distintos — no alcanza con "aprender el
+formato de una institución"; cada mensaje se analiza por su contenido.
 
 ## Varios mensajes en un solo paste: ¿dividir o fusionar?
 
