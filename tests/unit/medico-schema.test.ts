@@ -15,7 +15,9 @@ function datosValidos(extra: Record<string, string> = {}) {
     matricula: "MN 45678",
     institucion: "Clínica Ushuaia",
     telefono: "+54 2901 234000",
-    direccion: "Gob. Paz 150, Ushuaia",
+    direccion: "Gob. Paz 150",
+    ciudad: "Ushuaia",
+    provincia: "Tierra del Fuego, Antártida e Islas del Atlántico Sur",
     latitud: "",
     longitud: "",
     notas: "",
@@ -33,7 +35,9 @@ describe("lib/validacion/medico.schema.ts", () => {
       expect(resultado.datos.matricula).toBe("MN 45678")
       expect(resultado.datos.institucion).toBe("Clínica Ushuaia")
       expect(resultado.datos.telefono).toBe("+54 2901 234000")
-      expect(resultado.datos.direccion).toBe("Gob. Paz 150, Ushuaia")
+      expect(resultado.datos.direccion).toBe("Gob. Paz 150")
+      expect(resultado.datos.ciudad).toBe("Ushuaia")
+      expect(resultado.datos.provincia).toBe("Tierra del Fuego, Antártida e Islas del Atlántico Sur")
       expect(resultado.datos.latitud).toBeUndefined()
       expect(resultado.datos.longitud).toBeUndefined()
     }
@@ -47,6 +51,8 @@ describe("lib/validacion/medico.schema.ts", () => {
         institucion: "",
         telefono: "",
         direccion: "",
+        ciudad: "",
+        provincia: "",
         notas: "",
       }),
     )
@@ -57,7 +63,30 @@ describe("lib/validacion/medico.schema.ts", () => {
       expect(resultado.datos.institucion).toBeUndefined()
       expect(resultado.datos.telefono).toBeUndefined()
       expect(resultado.datos.direccion).toBeUndefined()
+      expect(resultado.datos.ciudad).toBeUndefined()
+      expect(resultado.datos.provincia).toBeUndefined()
     }
+  })
+
+  // Sprint 16, tarea 16.1: ciudad y provincia.
+  it("acepta CABA con su nombre completo", () => {
+    const resultado = validarMedico(
+      datosValidos({ ciudad: "CABA", provincia: "Ciudad Autónoma de Buenos Aires" }),
+    )
+    expect(resultado.ok).toBe(true)
+  })
+
+  it("rechaza una provincia que no está en la lista de las 24 jurisdicciones", () => {
+    const resultado = validarMedico(datosValidos({ provincia: "Ushuaia" }))
+    expect(resultado.ok).toBe(false)
+    if (!resultado.ok) {
+      expect(resultado.error).toMatch(/provincia/i)
+    }
+  })
+
+  it("rechaza una ciudad demasiado larga", () => {
+    const resultado = validarMedico(datosValidos({ ciudad: "a".repeat(101) }))
+    expect(resultado.ok).toBe(false)
   })
 
   it("rechaza el nombre vacío", () => {

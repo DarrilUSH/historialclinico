@@ -27,6 +27,15 @@
  * `UPDATE` que no matchea ninguna fila (ya estaba en el estado pedido, o es
  * de otro perfil) no tira error, así que se usa `{ count: "exact" }` para
  * devolver un mensaje claro en vez de fingir éxito.
+ *
+ * ## Ciudad/provincia y geocodificación automática (Sprint 16, tarea 16.1)
+ *
+ * `crearMedico`/`actualizarMedico` persisten `ciudad`/`provincia` en
+ * `doctors.city`/`province`. Mismo criterio que `turnos/actions.ts`: si la
+ * persona no cargó coordenadas a mano pero sí una dirección,
+ * `resolverCoordenadas` intenta geocodificar con Nominatim
+ * (`lib/ubicacion/geocodificacion.ts`), mejor esfuerzo, nunca bloquea el
+ * guardado.
  */
 
 import { redirect } from "next/navigation"
@@ -34,7 +43,8 @@ import { revalidatePath } from "next/cache"
 
 import { esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
-import { validarMedico } from "@/lib/validacion/medico.schema"
+import { geocodificarDireccion } from "@/lib/ubicacion/geocodificacion"
+import { validarMedico, type DatosMedicoValidado } from "@/lib/validacion/medico.schema"
 
 export interface EstadoMedicoAccion {
   error: string | null
@@ -72,10 +82,41 @@ function datosCrudosDelFormulario(formData: FormData) {
     institucion: campo(formData, "institucion"),
     telefono: campo(formData, "telefono"),
     direccion: campo(formData, "direccion"),
+    ciudad: campo(formData, "ciudad"),
+    provincia: campo(formData, "provincia"),
     latitud: campo(formData, "latitud"),
     longitud: campo(formData, "longitud"),
     notas: campo(formData, "notas"),
   }
+}
+
+/**
+ * Coordenadas listas para `doctors.latitude`/`longitude`: calcado de
+ * `turnos/actions.ts#resolverCoordenadas` (Sprint 16, tarea 16.1). Si la
+ * persona cargó las dos a mano, ganan sin tocar la red. Si no, y hay
+ * dirección, intenta geocodificar con Nominatim -mejor esfuerzo, nunca
+ * lanza-. Sin dirección tampoco, quedan en `null`.
+ */
+async function resolverCoordenadas(
+  datos: DatosMedicoValidado,
+): Promise<{ latitud: number | null; longitud: number | null }> {
+  if (datos.latitud !== undefined && datos.longitud !== undefined) {
+    return { latitud: datos.latitud, longitud: datos.longitud }
+  }
+
+  if (!datos.direccion) {
+    return { latitud: null, longitud: null }
+  }
+
+  const geocodificado = await geocodificarDireccion({
+    calle: datos.direccion,
+    ciudad: datos.ciudad,
+    provincia: datos.provincia,
+  })
+
+  return geocodificado
+    ? { latitud: geocodificado.latitud, longitud: geocodificado.longitud }
+    : { latitud: null, longitud: null }
 }
 
 /**
@@ -103,6 +144,7 @@ export async function crearMedico(
     }
 
     const { datos } = validacion
+    const { latitud, longitud } = await resolverCoordenadas(datos)
 
     const { error } = await supabase.from("doctors").insert({
       profile_id: activo.perfil.id,
@@ -112,8 +154,10 @@ export async function crearMedico(
       institution: datos.institucion ?? null,
       phone: datos.telefono ?? null,
       address: datos.direccion ?? null,
-      latitude: datos.latitud ?? null,
-      longitude: datos.longitud ?? null,
+      city: datos.ciudad ?? null,
+      province: datos.provincia ?? null,
+      latitude: latitud,
+      longitude: longitud,
       notes: datos.notas ?? null,
     })
 
@@ -160,6 +204,7 @@ export async function actualizarMedico(
     }
 
     const { datos } = validacion
+    const { latitud, longitud } = await resolverCoordenadas(datos)
 
     const { error, count } = await supabase
       .from("doctors")
@@ -171,8 +216,10 @@ export async function actualizarMedico(
           institution: datos.institucion ?? null,
           phone: datos.telefono ?? null,
           address: datos.direccion ?? null,
-          latitude: datos.latitud ?? null,
-          longitude: datos.longitud ?? null,
+          city: datos.ciudad ?? null,
+          province: datos.provincia ?? null,
+          latitude: latitud,
+          longitude: longitud,
           notes: datos.notas ?? null,
         },
         { count: "exact" },

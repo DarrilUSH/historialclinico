@@ -10,14 +10,28 @@ describe("linkComoLlegar", () => {
     expect(url).toBe("https://www.google.com/maps/dir/?api=1&destination=-54.8083%2C-68.3")
   })
 
-  it("genera URL de Google Maps con dirección sin coords", () => {
+  it("genera URL de Google Maps con dirección sin coords, acotada al país (nunca a una localidad fija)", () => {
     const url = linkComoLlegar({
       direccion: "Gob. Paz 150",
     })
     expect(url).toContain("https://www.google.com/maps/dir/?api=1&destination=")
     expect(url).toContain("Gob.%20Paz%20150")
-    expect(url).toContain("Ushuaia")
-    expect(url).toContain("Tierra%20del%20Fuego")
+    expect(url).toContain("Argentina")
+  })
+
+  it("REGRESIÓN Sprint 16 (tarea 16.1): una dirección de OTRA provincia ya no queda pegada a Ushuaia", () => {
+    // Bug reportado por el usuario con uso real: antes de esta tarea, la
+    // rama "sin coords" agregaba ", Ushuaia, Tierra del Fuego" a CUALQUIER
+    // dirección, incluida una de La Plata. El llamador (`tarjeta-turno.tsx`,
+    // `tarjeta-medico.tsx`) le pasa acá la dirección YA combinada con
+    // ciudad/provincia reales vía `lib/ubicacion/formato.ts#direccionCompleta`.
+    const url = linkComoLlegar({
+      direccion: "Avenida 51 Nº 315, La Plata, Buenos Aires",
+    })
+    expect(url).toContain("La%20Plata")
+    expect(url).toContain("Buenos%20Aires")
+    expect(url).not.toContain("Ushuaia")
+    expect(url).not.toContain("Tierra")
   })
 
   it("codifica tildes y ñ en la dirección", () => {

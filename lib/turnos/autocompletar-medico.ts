@@ -27,6 +27,13 @@
  * Se cambia acá a "solo si está vacío" para los cinco campos por igual, y
  * queda documentado como el criterio nuevo: elegir un médico ya cargado no
  * debe borrar una corrección que la persona ya hizo a mano.
+ *
+ * ## Ciudad y provincia se suman al mismo criterio (Sprint 16, tarea 16.1)
+ *
+ * `lugarCiudad`/`lugarProvincia` siguen exactamente la misma regla que
+ * `lugarDireccion`: se completan solo si el campo está vacío en el momento de
+ * la elección, cada uno de forma independiente -a diferencia de
+ * latitud/longitud, que se completan JUNTAS o ninguna-.
  */
 
 export interface MedicoParaAutocompletar {
@@ -35,6 +42,8 @@ export interface MedicoParaAutocompletar {
   specialty: string | null
   institution: string | null
   address: string | null
+  city: string | null
+  province: string | null
   latitude: number | null
   longitude: number | null
 }
@@ -44,6 +53,8 @@ export interface CamposAutocompletablesTurno {
   especialidad: string
   lugarNombre: string
   lugarDireccion: string
+  lugarCiudad: string
+  lugarProvincia: string
   latitud: string
   longitud: string
 }
@@ -78,6 +89,14 @@ export function camposAutocompletadosDesdeMedico(
 
   if (doctor.address && estaVacio(actuales.lugarDireccion)) {
     cambios.lugarDireccion = doctor.address
+  }
+
+  if (doctor.city && estaVacio(actuales.lugarCiudad)) {
+    cambios.lugarCiudad = doctor.city
+  }
+
+  if (doctor.province && estaVacio(actuales.lugarProvincia)) {
+    cambios.lugarProvincia = doctor.province
   }
 
   if (

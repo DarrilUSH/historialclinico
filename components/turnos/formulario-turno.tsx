@@ -47,8 +47,26 @@
  * por defecto, con un link que abre Google Maps con la dirección ya escrita
  * -`https://www.google.com/maps/search/...`, una búsqueda pública sin API
  * key- para que la persona copie las coordenadas del pin a mano y las pegue
- * acá. Nominatim queda documentado en el roadmap como opción futura; esta
- * tarea no lo implementa.
+ * acá. Desde el Sprint 16 (tarea 16.1) también hay un intento automático de
+ * geocodificación con Nominatim del lado del servidor
+ * (`lib/ubicacion/geocodificacion.ts`) cuando esta persona NO pega
+ * coordenadas: el campo manual sigue siendo la fuente de verdad si se
+ * completa, la automática es solo un mejor esfuerzo de respaldo.
+ *
+ * ## Ciudad y provincia (Sprint 16, tarea 16.1)
+ *
+ * Se suman como campos propios -no como parte de "Dirección"- para que la
+ * geocodificación y el deep link de "Cómo llegar" puedan armar una consulta
+ * real (calle + ciudad + provincia + Argentina) en vez de asumir una
+ * localidad fija. Antes de esta tarea, sin estos campos, el link de "Cómo
+ * llegar" completaba lo que faltaba pegando ", Ushuaia, Tierra del Fuego" a
+ * cualquier dirección -el bug que reportó el usuario con turnos cargados en
+ * La Plata, CABA, etc.-. "Ciudad" es texto libre; "Provincia" es un
+ * `<Select>` con las 24 jurisdicciones argentinas
+ * (`lib/ubicacion/provincias.ts`). Los dos llegan precargados desde
+ * `/turnos/nuevo` con la última ciudad/provincia que el perfil haya usado
+ * -`lib/ubicacion/ultima-usada.ts`-, nunca con un valor fijo: son una
+ * sugerencia editable, no una imposición.
  */
 
 import * as React from "react"
@@ -78,12 +96,20 @@ import {
   camposAutocompletadosDesdeMedico,
   type MedicoParaAutocompletar,
 } from "@/lib/turnos/autocompletar-medico"
+import { direccionCompleta } from "@/lib/ubicacion/formato"
+import { PROVINCIAS_ARGENTINAS } from "@/lib/ubicacion/provincias"
 import { cn } from "@/lib/utils"
 
 export type { MedicoParaAutocompletar }
 
 /** Valor del `<SelectItem>` "Ninguno": limpia `doctorId` sin tocar los campos de texto. Un `id` real de `doctors` es siempre un uuid, así que este sentinel nunca puede colisionar con uno. */
 const SENTINEL_NINGUN_MEDICO = "ninguno"
+
+/** Opciones del `<Select>` de provincia: "Sin especificar" (viaja como `""`, el schema la trata como no provista) + las 24 jurisdicciones. */
+const OPCIONES_PROVINCIA: { value: string; label: string }[] = [
+  { value: "", label: "Sin especificar" },
+  ...PROVINCIAS_ARGENTINAS.map((provincia) => ({ value: provincia, label: provincia })),
+]
 
 export interface ValoresTurno {
   especialidad: string
@@ -94,6 +120,9 @@ export interface ValoresTurno {
   hora: string
   lugarNombre: string
   lugarDireccion: string
+  /** Sprint 16, tarea 16.1. */
+  lugarCiudad: string
+  lugarProvincia: string
   latitud: string
   longitud: string
   notasPreparacion: string
@@ -129,6 +158,8 @@ export function FormularioTurno({
   const [medico, setMedico] = React.useState(valoresIniciales?.medico ?? "")
   const [lugarNombre, setLugarNombre] = React.useState(valoresIniciales?.lugarNombre ?? "")
   const [lugarDireccion, setLugarDireccion] = React.useState(valoresIniciales?.lugarDireccion ?? "")
+  const [lugarCiudad, setLugarCiudad] = React.useState(valoresIniciales?.lugarCiudad ?? "")
+  const [lugarProvincia, setLugarProvincia] = React.useState(valoresIniciales?.lugarProvincia ?? "")
   const [latitud, setLatitud] = React.useState(valoresIniciales?.latitud ?? "")
   const [longitud, setLongitud] = React.useState(valoresIniciales?.longitud ?? "")
   // El médico vinculado puede no estar entre los `medicos` ACTIVOS que recibe
@@ -141,10 +172,19 @@ export function FormularioTurno({
     Boolean(valoresIniciales?.latitud || valoresIniciales?.longitud),
   )
 
-  const urlMaps =
-    lugarDireccion.trim().length > 0
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lugarDireccion.trim())}`
-      : "https://www.google.com/maps"
+  // Calle + ciudad + provincia combinadas (Sprint 16, tarea 16.1): mismo
+  // armado que usa el deep link de "Cómo llegar" en pantalla
+  // (`lib/ubicacion/formato.ts#direccionCompleta`), para que la búsqueda que
+  // se pre-carga en Google Maps apunte a la localidad correcta y no solo a la
+  // calle.
+  const direccionParaMaps = direccionCompleta({
+    direccion: lugarDireccion,
+    ciudad: lugarCiudad,
+    provincia: lugarProvincia,
+  })
+  const urlMaps = direccionParaMaps
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(direccionParaMaps)}`
+    : "https://www.google.com/maps"
 
   function elegirMedicoDelDirectorio(valor: string | null) {
     if (!valor || valor === SENTINEL_NINGUN_MEDICO) {
@@ -165,6 +205,8 @@ export function FormularioTurno({
       especialidad,
       lugarNombre,
       lugarDireccion,
+      lugarCiudad,
+      lugarProvincia,
       latitud,
       longitud,
     })
@@ -173,6 +215,8 @@ export function FormularioTurno({
     if (cambios.especialidad !== undefined) setEspecialidad(cambios.especialidad)
     if (cambios.lugarNombre !== undefined) setLugarNombre(cambios.lugarNombre)
     if (cambios.lugarDireccion !== undefined) setLugarDireccion(cambios.lugarDireccion)
+    if (cambios.lugarCiudad !== undefined) setLugarCiudad(cambios.lugarCiudad)
+    if (cambios.lugarProvincia !== undefined) setLugarProvincia(cambios.lugarProvincia)
     if (cambios.latitud !== undefined && cambios.longitud !== undefined) {
       setLatitud(cambios.latitud)
       setLongitud(cambios.longitud)
@@ -285,6 +329,46 @@ export function FormularioTurno({
         onChange={(evento) => setLugarDireccion(evento.target.value)}
         ayuda="Calle y altura (opcional)."
       />
+
+      {/*
+        Ciudad + provincia (Sprint 16, tarea 16.1): en una grilla de 2
+        columnas, mismo criterio que fecha/hora de arriba -son dos campos
+        cortos y relacionados-. Sin esto, la geocodificación y "Cómo llegar"
+        no tenían de dónde sacar una localidad real y terminaban asumiendo
+        Ushuaia (ver el comentario de cabecera del archivo).
+      */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
+        <CampoTexto
+          id="lugarCiudad"
+          label="Ciudad"
+          maxLength={100}
+          value={lugarCiudad}
+          onChange={(evento) => setLugarCiudad(evento.target.value)}
+          ayuda="Ej: La Plata, CABA, Ushuaia (opcional)."
+        />
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="lugarProvincia-trigger">Provincia</Label>
+          <Select
+            items={OPCIONES_PROVINCIA}
+            value={lugarProvincia || ""}
+            onValueChange={(valor) => setLugarProvincia(String(valor ?? ""))}
+          >
+            <SelectTrigger id="lugarProvincia-trigger" className="w-full">
+              <SelectValue placeholder="Sin especificar" />
+            </SelectTrigger>
+            <SelectContent>
+              {OPCIONES_PROVINCIA.map((opcion) => (
+                <SelectItem key={opcion.value || "sin-especificar"} value={opcion.value}>
+                  {opcion.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {/* El valor real que lee la Server Action: el `<Select>` es pura UI, mismo patrón que `doctorId` más arriba y que `formulario-sos.tsx#grupoSanguineo`. */}
+          <input type="hidden" name="lugarProvincia" value={lugarProvincia} />
+        </div>
+      </div>
 
       <div className="flex flex-col gap-3">
         <Boton

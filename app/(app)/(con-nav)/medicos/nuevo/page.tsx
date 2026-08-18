@@ -13,7 +13,9 @@ import { redirect } from "next/navigation"
 import { ArrowLeftIcon } from "lucide-react"
 
 import { FormularioMedico } from "@/components/medicos/formulario-medico"
+import { requerirSesion } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { obtenerUltimaUbicacionConocida } from "@/lib/ubicacion/ultima-usada"
 
 export const metadata: Metadata = {
   title: "Nuevo médico — Historial Médico",
@@ -29,6 +31,12 @@ export default async function PaginaNuevoMedico() {
   if (!activo.permisos.canUpload) {
     redirect("/medicos")
   }
+
+  // Sprint 16, tarea 16.1: sugerencia editable de ciudad/provincia a partir
+  // de lo último que cargó ESTE perfil, nunca un valor fijo tipo Ushuaia -ver
+  // `lib/ubicacion/ultima-usada.ts`-.
+  const { supabase } = await requerirSesion({ desde: "/medicos/nuevo" })
+  const ultimaUbicacion = await obtenerUltimaUbicacionConocida(supabase, activo.perfil.id)
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
@@ -47,7 +55,14 @@ export default async function PaginaNuevoMedico() {
         </p>
       </div>
 
-      <FormularioMedico modo="crear" />
+      <FormularioMedico
+        modo="crear"
+        valoresIniciales={
+          ultimaUbicacion
+            ? { ciudad: ultimaUbicacion.ciudad, provincia: ultimaUbicacion.provincia }
+            : undefined
+        }
+      />
     </div>
   )
 }

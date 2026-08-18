@@ -50,7 +50,7 @@ export const metadata: Metadata = {
 // "Pedir viaje" nunca aparecía en la lista (sí en /inicio, que las trae).
 // Detectado por la tanda A del Sprint 14, corregido en su auditoría.
 const COLUMNAS =
-  "id, specialty, doctor_name, appointment_date, location_name, location_address, status, latitude, longitude, preparation_notes"
+  "id, specialty, doctor_name, appointment_date, location_name, location_address, location_city, location_province, status, latitude, longitude, preparation_notes"
 
 export default async function PaginaTurnos({
   searchParams,

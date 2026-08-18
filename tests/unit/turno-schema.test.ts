@@ -18,7 +18,9 @@ function datosValidos(extra: Record<string, string> = {}) {
     fecha: "2026-08-20",
     hora: "10:30",
     lugarNombre: "Clínica Ushuaia",
-    lugarDireccion: "Gob. Paz 150, Ushuaia",
+    lugarDireccion: "Gob. Paz 150",
+    lugarCiudad: "",
+    lugarProvincia: "",
     latitud: "",
     longitud: "",
     notasPreparacion: "",
@@ -154,6 +156,58 @@ describe("lib/validacion/turno.schema.ts", () => {
   it("rechaza una especialidad demasiado larga", () => {
     const resultado = validarTurno(datosValidos({ especialidad: "a".repeat(101) }), {
       exigirFechaFutura: false,
+      ahora: AHORA,
+    })
+    expect(resultado.ok).toBe(false)
+  })
+
+  // Sprint 16, tarea 16.1: ciudad y provincia.
+  it("acepta ciudad y provincia válidas", () => {
+    const resultado = validarTurno(
+      datosValidos({ lugarCiudad: "La Plata", lugarProvincia: "Buenos Aires" }),
+      { exigirFechaFutura: true, ahora: AHORA },
+    )
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.lugarCiudad).toBe("La Plata")
+      expect(resultado.datos.lugarProvincia).toBe("Buenos Aires")
+    }
+  })
+
+  it("ciudad y provincia son opcionales", () => {
+    const resultado = validarTurno(datosValidos({ lugarCiudad: "", lugarProvincia: "" }), {
+      exigirFechaFutura: true,
+      ahora: AHORA,
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.lugarCiudad).toBeUndefined()
+      expect(resultado.datos.lugarProvincia).toBeUndefined()
+    }
+  })
+
+  it("acepta CABA con su nombre completo", () => {
+    const resultado = validarTurno(
+      datosValidos({ lugarCiudad: "CABA", lugarProvincia: "Ciudad Autónoma de Buenos Aires" }),
+      { exigirFechaFutura: true, ahora: AHORA },
+    )
+    expect(resultado.ok).toBe(true)
+  })
+
+  it("rechaza una provincia que no está en la lista de las 24 jurisdicciones", () => {
+    const resultado = validarTurno(datosValidos({ lugarProvincia: "Ushuaia" }), {
+      exigirFechaFutura: true,
+      ahora: AHORA,
+    })
+    expect(resultado.ok).toBe(false)
+    if (!resultado.ok) {
+      expect(resultado.error).toMatch(/provincia/i)
+    }
+  })
+
+  it("rechaza una ciudad demasiado larga", () => {
+    const resultado = validarTurno(datosValidos({ lugarCiudad: "a".repeat(101) }), {
+      exigirFechaFutura: true,
       ahora: AHORA,
     })
     expect(resultado.ok).toBe(false)

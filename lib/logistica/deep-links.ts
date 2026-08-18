@@ -14,8 +14,29 @@
 /**
  * Construye el link para "Cómo llegar" (Google Maps).
  * - Con lat/lng: `https://www.google.com/maps/dir/?api=1&destination=lat,lng`
- * - Sin coords pero con dirección: agrega ", Ushuaia, Tierra del Fuego" y codifica
+ * - Sin coords pero con dirección: agrega ", Argentina" y codifica
  * - Sin nada: `null`
+ *
+ * ## El bug de Ushuaia que corrige esta versión (Sprint 16, tarea 16.1)
+ *
+ * Antes de esta tarea, la rama "sin coords" agregaba ", Ushuaia, Tierra del
+ * Fuego" HARDCODEADO a cualquier dirección -Ushuaia es la sede real del
+ * desarrollo, pero la familia del usuario carga turnos en La Plata, CABA, y
+ * otras localidades: el link terminaba apuntando a un lugar equivocado, o
+ * Google Maps no encontraba nada porque buscaba, por ejemplo, "Avenida 51 Nº
+ * 315, Ushuaia, Tierra del Fuego" en vez de "..., La Plata, Buenos Aires"-.
+ * Bug reportado por el usuario con uso real (ROADMAP_SPRINTS.md §Sprint 16,
+ * ítem 1).
+ *
+ * La corrección NO agrega un parámetro de ciudad/provincia acá: el `direccion`
+ * que recibe esta función ya viene armado por el LLAMADOR con
+ * `lib/ubicacion/formato.ts#direccionCompleta` -calle + ciudad + provincia,
+ * las partes que estén cargadas-, así que esta función se queda simple
+ * (agrega ", Argentina" nada más, para acotar la búsqueda al país sin asumir
+ * ninguna localidad) y toda la lógica de "qué partes hay" vive en un solo
+ * lugar (`direccionCompleta`), no duplicada acá. Un turno viejo sin ciudad
+ * cargada sigue funcionando exactamente igual que antes -mismo `direccion`
+ * de siempre, solo que ya no se le pega una localidad ajena-.
  */
 export function linkComoLlegar(args: {
   latitude?: number | null
@@ -30,9 +51,9 @@ export function linkComoLlegar(args: {
     return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`
   }
 
-  // Sin coords pero con dirección: geocodificar por dirección
+  // Sin coords pero con dirección: buscar por texto, acotado al país -nunca a una localidad asumida-
   if (direccion && direccion.trim()) {
-    const lugarCompleto = `${direccion}, Ushuaia, Tierra del Fuego`
+    const lugarCompleto = `${direccion.trim()}, Argentina`
     return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(lugarCompleto)}`
   }
 

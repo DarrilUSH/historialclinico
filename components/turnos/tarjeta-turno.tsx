@@ -63,6 +63,7 @@ import { Boton } from "@/components/base/boton"
 import { BadgeEstadoTurno } from "@/components/turnos/badge-estado-turno"
 import { AccionesTurno } from "@/components/turnos/acciones-turno"
 import { Tarjeta } from "@/components/base/tarjeta"
+import { direccionCompleta } from "@/lib/ubicacion/formato"
 import { formatearFechaCortaTurno, formatearFechaLargaTurno, formatearHoraTurno } from "@/lib/turnos/formato"
 import { tiempoRelativo } from "@/lib/turnos/tiempo-relativo"
 import { cn } from "@/lib/utils"
@@ -75,6 +76,9 @@ export interface TurnoParaTarjeta {
   appointment_date: string
   location_name: string | null
   location_address: string | null
+  /** Sprint 16, tarea 16.1. `undefined` en consultas que todavía no las seleccionan -se trata como `null`, mismo criterio que `latitude`/`longitude` de acá abajo-. */
+  location_city?: string | null
+  location_province?: string | null
   status: EstadoTurno
   latitude?: number | null
   longitude?: number | null
@@ -91,7 +95,16 @@ export interface TarjetaTurnoProps {
 
 export function TarjetaTurno({ turno, puedeEditar, ahora = new Date() }: TarjetaTurnoProps) {
   const cancelado = turno.status === "cancelled"
-  const lugar = [turno.location_name, turno.location_address].filter(Boolean).join(" — ")
+  // La dirección completa (calle + ciudad + provincia, Sprint 16 tarea 16.1)
+  // alimenta tanto esta línea visible como los deep links de logística de
+  // abajo -un solo armado, mismo criterio que documenta
+  // `lib/ubicacion/formato.ts#direccionCompleta`-.
+  const direccion = direccionCompleta({
+    direccion: turno.location_address,
+    ciudad: turno.location_city,
+    provincia: turno.location_province,
+  })
+  const lugar = [turno.location_name, direccion].filter(Boolean).join(" — ")
 
   return (
     <Tarjeta className={cn("gap-3 px-(--card-spacing) chica:gap-2", cancelado && "opacity-60")}>
@@ -175,7 +188,7 @@ export function TarjetaTurno({ turno, puedeEditar, ahora = new Date() }: Tarjeta
           apellidoMedico={turno.doctor_name?.split(" ").slice(-1).join("") || undefined}
           fechaHora={turno.appointment_date}
           ubicacion={turno.location_name || undefined}
-          direccion={turno.location_address || undefined}
+          direccion={direccion || undefined}
           latitude={turno.latitude}
           longitude={turno.longitude}
           notas={turno.preparation_notes || undefined}

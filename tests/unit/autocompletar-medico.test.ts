@@ -1,5 +1,6 @@
 /**
- * Tests de `lib/turnos/autocompletar-medico.ts` (Sprint 10, tarea 10.1).
+ * Tests de `lib/turnos/autocompletar-medico.ts` (Sprint 10, tarea 10.1;
+ * ciudad/provincia sumadas en el Sprint 16, tarea 16.1).
  *
  *   npm run test -- autocompletar-medico
  */
@@ -17,7 +18,9 @@ const DOCTOR: MedicoParaAutocompletar = {
   full_name: "Dr. Carlos Rodríguez",
   specialty: "Cardiología",
   institution: "Clínica Ushuaia",
-  address: "Gob. Paz 150, Ushuaia",
+  address: "Gob. Paz 150",
+  city: "Ushuaia",
+  province: "Tierra del Fuego, Antártida e Islas del Atlántico Sur",
   latitude: -54.8083,
   longitude: -68.3,
 }
@@ -28,6 +31,8 @@ function camposVacios(extra: Partial<CamposAutocompletablesTurno> = {}): CamposA
     especialidad: "",
     lugarNombre: "",
     lugarDireccion: "",
+    lugarCiudad: "",
+    lugarProvincia: "",
     latitud: "",
     longitud: "",
     ...extra,
@@ -42,7 +47,9 @@ describe("lib/turnos/autocompletar-medico.ts", () => {
       medico: "Dr. Carlos Rodríguez",
       especialidad: "Cardiología",
       lugarNombre: "Clínica Ushuaia",
-      lugarDireccion: "Gob. Paz 150, Ushuaia",
+      lugarDireccion: "Gob. Paz 150",
+      lugarCiudad: "Ushuaia",
+      lugarProvincia: "Tierra del Fuego, Antártida e Islas del Atlántico Sur",
       latitud: "-54.8083",
       longitud: "-68.3",
     })
@@ -85,6 +92,32 @@ describe("lib/turnos/autocompletar-medico.ts", () => {
     expect(cambios.lugarDireccion).toBeUndefined()
   })
 
+  it("no pisa la ciudad si ya está escrita", () => {
+    const cambios = camposAutocompletadosDesdeMedico(DOCTOR, camposVacios({ lugarCiudad: "La Plata" }))
+
+    expect(cambios.lugarCiudad).toBeUndefined()
+  })
+
+  it("no completa la ciudad si el médico no la tiene cargada", () => {
+    const doctorSinCiudad: MedicoParaAutocompletar = { ...DOCTOR, city: null }
+    const cambios = camposAutocompletadosDesdeMedico(doctorSinCiudad, camposVacios())
+
+    expect(cambios.lugarCiudad).toBeUndefined()
+  })
+
+  it("no pisa la provincia si ya está escrita", () => {
+    const cambios = camposAutocompletadosDesdeMedico(DOCTOR, camposVacios({ lugarProvincia: "Buenos Aires" }))
+
+    expect(cambios.lugarProvincia).toBeUndefined()
+  })
+
+  it("no completa la provincia si el médico no la tiene cargada", () => {
+    const doctorSinProvincia: MedicoParaAutocompletar = { ...DOCTOR, province: null }
+    const cambios = camposAutocompletadosDesdeMedico(doctorSinProvincia, camposVacios())
+
+    expect(cambios.lugarProvincia).toBeUndefined()
+  })
+
   it("completa latitud y longitud juntas cuando las dos están vacías", () => {
     const cambios = camposAutocompletadosDesdeMedico(DOCTOR, camposVacios())
 
@@ -114,13 +147,15 @@ describe("lib/turnos/autocompletar-medico.ts", () => {
     expect(cambios.longitud).toBeUndefined()
   })
 
-  it("un médico sin institución ni dirección no completa esos campos", () => {
+  it("un médico sin institución, dirección, ciudad ni provincia no completa esos campos", () => {
     const doctorMinimo: MedicoParaAutocompletar = {
       id: DOCTOR.id,
       full_name: "Dra. Marcela Torres",
       specialty: null,
       institution: null,
       address: null,
+      city: null,
+      province: null,
       latitude: null,
       longitude: null,
     }
@@ -144,6 +179,8 @@ describe("lib/turnos/autocompletar-medico.ts", () => {
         especialidad: "Otra especialidad",
         lugarNombre: "Otro lugar",
         lugarDireccion: "Otra dirección",
+        lugarCiudad: "Otra ciudad",
+        lugarProvincia: "Buenos Aires",
         latitud: "1",
         longitud: "2",
       }),

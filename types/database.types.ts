@@ -148,7 +148,9 @@ export type Database = {
           id: string
           latitude: number | null
           location_address: string | null
+          location_city: string | null
           location_name: string | null
+          location_province: string | null
           longitude: number | null
           preparation_notes: string | null
           profile_id: string
@@ -165,7 +167,9 @@ export type Database = {
           id?: string
           latitude?: number | null
           location_address?: string | null
+          location_city?: string | null
           location_name?: string | null
+          location_province?: string | null
           longitude?: number | null
           preparation_notes?: string | null
           profile_id: string
@@ -182,7 +186,9 @@ export type Database = {
           id?: string
           latitude?: number | null
           location_address?: string | null
+          location_city?: string | null
           location_name?: string | null
+          location_province?: string | null
           longitude?: number | null
           preparation_notes?: string | null
           profile_id?: string
@@ -283,6 +289,7 @@ export type Database = {
       doctors: {
         Row: {
           address: string | null
+          city: string | null
           created_at: string
           created_by_profile_id: string | null
           deactivated_at: string | null
@@ -296,11 +303,13 @@ export type Database = {
           notes: string | null
           phone: string | null
           profile_id: string
+          province: string | null
           specialty: string | null
           updated_at: string
         }
         Insert: {
           address?: string | null
+          city?: string | null
           created_at?: string
           created_by_profile_id?: string | null
           deactivated_at?: string | null
@@ -314,11 +323,13 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           profile_id: string
+          province?: string | null
           specialty?: string | null
           updated_at?: string
         }
         Update: {
           address?: string | null
+          city?: string | null
           created_at?: string
           created_by_profile_id?: string | null
           deactivated_at?: string | null
@@ -332,6 +343,7 @@ export type Database = {
           notes?: string | null
           phone?: string | null
           profile_id?: string
+          province?: string | null
           specialty?: string | null
           updated_at?: string
         }
@@ -1493,6 +1505,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      vincular_perfil_graduado: {
+        Args: { p_perfil: string; p_user_id: string }
+        Returns: undefined
       }
     }
     Enums: {

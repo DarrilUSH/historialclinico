@@ -27,6 +27,7 @@ import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
 import { AccionesMedicoActivo, BotonReactivar } from "@/components/medicos/acciones-medico"
 import { linkComoLlegar } from "@/lib/logistica/deep-links"
+import { direccionCompleta } from "@/lib/ubicacion/formato"
 import type { Database } from "@/types/database.types"
 
 type FilaMedico = Database["public"]["Tables"]["doctors"]["Row"]
@@ -83,7 +84,18 @@ export function TarjetaMedicoActivo({
   const urlComoLlegar = linkComoLlegar({
     latitude: medico.latitude,
     longitude: medico.longitude,
-    direccion: medico.address,
+    // Calle + ciudad + provincia combinadas (Sprint 16, tarea 16.1): antes de
+    // esta tarea acá solo viajaba `medico.address` y `linkComoLlegar` le
+    // pegaba ", Ushuaia, Tierra del Fuego" a mano cuando faltaban
+    // coordenadas -ver el comentario de cabecera de
+    // `lib/logistica/deep-links.ts`-. Un médico cargado antes de esta tarea
+    // (sin `city`/`province`) sigue funcionando igual: `direccionCompleta`
+    // devuelve solo la calle si es lo único que hay.
+    direccion: direccionCompleta({
+      direccion: medico.address,
+      ciudad: medico.city,
+      provincia: medico.province,
+    }),
   })
 
   return (

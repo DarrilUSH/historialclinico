@@ -27,12 +27,26 @@
  * negativas, así que el formulario usa `CampoNumero` con `permiteNegativo`
  * (ver `components/medicos/formulario-medico.tsx`), y este schema acepta el
  * signo `-` en las dos strings crudas.
+ *
+ * ## Ciudad y provincia (Sprint 16, tarea 16.1)
+ *
+ * `ciudad` es texto libre opcional, igual que `institucion`. `provincia` es
+ * un dominio CERRADO -calco exacto del patrón de `lugarProvincia` en
+ * `lib/validacion/turno.schema.ts`, que a su vez calca `grupoSanguineo` de
+ * `lib/validacion/sos.schema.ts`-: `""` se transforma en `undefined` antes
+ * del enum, para que "vacío" nunca compita con las 24 jurisdicciones válidas
+ * de `PROVINCIAS_ARGENTINAS`. El `CHECK` `doctors_province_valida`
+ * (`supabase/migrations/20260817231000_ciudad_provincia_direcciones.sql`) es
+ * la misma lista copiada en el borde de la base.
  */
 
 import { z } from "zod"
 
+import { PROVINCIAS_ARGENTINAS } from "@/lib/ubicacion/provincias"
+
 const MENSAJE_COORDENADAS_INCOMPLETAS =
   "Cargá las dos coordenadas (latitud y longitud) o dejá las dos en blanco."
+const MENSAJE_PROVINCIA_INVALIDA = "Elegí una provincia de la lista."
 
 /** Acepta coma o punto decimal (mismo criterio que `campo-numero.tsx#decimal`). Devuelve `null` si no es un número válido. */
 function parsearDecimal(valor: string): number | null {
@@ -74,6 +88,15 @@ const schemaMedico = z
     telefono: campoTextoOpcional(50, "El teléfono es demasiado largo (máx. 50 caracteres)."),
 
     direccion: campoTextoOpcional(300, "La dirección es demasiado larga (máx. 300 caracteres)."),
+
+    ciudad: campoTextoOpcional(100, "La ciudad es demasiado larga (máx. 100 caracteres)."),
+
+    provincia: z
+      .string({ message: "La provincia debe ser texto." })
+      .trim()
+      .optional()
+      .transform((valor) => (valor && valor.length > 0 ? valor : undefined))
+      .pipe(z.enum(PROVINCIAS_ARGENTINAS, { message: MENSAJE_PROVINCIA_INVALIDA }).optional()),
 
     latitud: campoCoordenada,
     longitud: campoCoordenada,
@@ -134,6 +157,8 @@ export interface DatosMedicoValidado {
   institucion?: string
   telefono?: string
   direccion?: string
+  ciudad?: string
+  provincia?: string
   latitud?: number
   longitud?: number
   notas?: string

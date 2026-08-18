@@ -16,7 +16,21 @@
  * coordenadas desde Google Maps, mantener apretado el punto"). Las dos
  * `CampoNumero` usan `permiteNegativo`: Ushuaia, como el resto del hemisferio
  * sur y oeste, tiene latitud y longitud siempre negativas -mismo motivo que
- * documenta `campo-numero.tsx#permiteNegativo`-.
+ * documenta `campo-numero.tsx#permiteNegativo`-. Desde el Sprint 16 (tarea
+ * 16.1) también hay un intento automático de geocodificación con Nominatim
+ * del lado del servidor si esta persona no pega coordenadas a mano
+ * (`lib/ubicacion/geocodificacion.ts`).
+ *
+ * ## Ciudad y provincia (Sprint 16, tarea 16.1)
+ *
+ * Mismo criterio que `components/turnos/formulario-turno.tsx`: campos
+ * propios -no parte de "Dirección"- para que la geocodificación y "Cómo
+ * llegar" puedan armar calle + ciudad + provincia + Argentina en vez de
+ * asumir una localidad fija (el bug de Ushuaia que reportó el usuario).
+ * "Ciudad" es texto libre, "Provincia" un `<Select>` con las 24
+ * jurisdicciones (`lib/ubicacion/provincias.ts`), precargados en
+ * `/medicos/nuevo` con la última ciudad/provincia usada por el perfil
+ * (`lib/ubicacion/ultima-usada.ts`) como sugerencia editable.
  */
 
 import * as React from "react"
@@ -30,6 +44,22 @@ import { Boton } from "@/components/base/boton"
 import { CampoNumero } from "@/components/base/campo-numero"
 import { CampoTexto } from "@/components/base/campo-texto"
 import { CampoTextarea } from "@/components/base/campo-textarea"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { direccionCompleta } from "@/lib/ubicacion/formato"
+import { PROVINCIAS_ARGENTINAS } from "@/lib/ubicacion/provincias"
+
+/** Opciones del `<Select>` de provincia: calcado de `formulario-turno.tsx`. */
+const OPCIONES_PROVINCIA: { value: string; label: string }[] = [
+  { value: "", label: "Sin especificar" },
+  ...PROVINCIAS_ARGENTINAS.map((provincia) => ({ value: provincia, label: provincia })),
+]
 
 export interface ValoresMedico {
   nombre: string
@@ -38,6 +68,9 @@ export interface ValoresMedico {
   institucion: string
   telefono: string
   direccion: string
+  /** Sprint 16, tarea 16.1. */
+  ciudad: string
+  provincia: string
   latitud: string
   longitud: string
   notas: string
@@ -57,14 +90,19 @@ export function FormularioMedico({ modo, medicoId, valoresIniciales }: Formulari
   const [estado, enviarAccion, pendiente] = useActionState(accion, ESTADO_INICIAL)
 
   const [direccion, setDireccion] = React.useState(valoresIniciales?.direccion ?? "")
+  const [ciudad, setCiudad] = React.useState(valoresIniciales?.ciudad ?? "")
+  const [provincia, setProvincia] = React.useState(valoresIniciales?.provincia ?? "")
   const [mostrarCoordenadas, setMostrarCoordenadas] = React.useState(
     Boolean(valoresIniciales?.latitud || valoresIniciales?.longitud),
   )
 
-  const urlMaps =
-    direccion.trim().length > 0
-      ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(direccion.trim())}`
-      : "https://www.google.com/maps"
+  // Calle + ciudad + provincia combinadas (Sprint 16, tarea 16.1): mismo
+  // armado que `formulario-turno.tsx` y que el deep link de "Cómo llegar" en
+  // pantalla (`lib/ubicacion/formato.ts#direccionCompleta`).
+  const direccionParaMaps = direccionCompleta({ direccion, ciudad, provincia })
+  const urlMaps = direccionParaMaps
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(direccionParaMaps)}`
+    : "https://www.google.com/maps"
 
   return (
     <form action={enviarAccion} className="flex flex-col gap-5">
@@ -131,6 +169,39 @@ export function FormularioMedico({ modo, medicoId, valoresIniciales }: Formulari
         onChange={(evento) => setDireccion(evento.target.value)}
         ayuda="Calle y altura (opcional)."
       />
+
+      {/* Ciudad + provincia (Sprint 16, tarea 16.1): calcado de `formulario-turno.tsx`. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
+        <CampoTexto
+          id="ciudad"
+          label="Ciudad"
+          maxLength={100}
+          value={ciudad}
+          onChange={(evento) => setCiudad(evento.target.value)}
+          ayuda="Ej: La Plata, CABA, Ushuaia (opcional)."
+        />
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="provincia-trigger">Provincia</Label>
+          <Select
+            items={OPCIONES_PROVINCIA}
+            value={provincia || ""}
+            onValueChange={(valor) => setProvincia(String(valor ?? ""))}
+          >
+            <SelectTrigger id="provincia-trigger" className="w-full">
+              <SelectValue placeholder="Sin especificar" />
+            </SelectTrigger>
+            <SelectContent>
+              {OPCIONES_PROVINCIA.map((opcion) => (
+                <SelectItem key={opcion.value || "sin-especificar"} value={opcion.value}>
+                  {opcion.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <input type="hidden" name="provincia" value={provincia} />
+        </div>
+      </div>
 
       <div className="flex flex-col gap-3">
         <Boton

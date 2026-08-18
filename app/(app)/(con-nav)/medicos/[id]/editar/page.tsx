@@ -54,7 +54,7 @@ export default async function PaginaEditarMedico({
   const { data: medico } = await supabase
     .from("doctors")
     .select(
-      "id, full_name, specialty, license_number, institution, phone, address, latitude, longitude, notes",
+      "id, full_name, specialty, license_number, institution, phone, address, city, province, latitude, longitude, notes",
     )
     .eq("id", id)
     .eq("profile_id", activo.perfil.id)
@@ -71,6 +71,8 @@ export default async function PaginaEditarMedico({
     institucion: medico.institution ?? "",
     telefono: medico.phone ?? "",
     direccion: medico.address ?? "",
+    ciudad: medico.city ?? "",
+    provincia: medico.province ?? "",
     latitud: medico.latitude !== null ? String(medico.latitude) : "",
     longitud: medico.longitude !== null ? String(medico.longitude) : "",
     notas: medico.notes ?? "",

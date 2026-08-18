@@ -18,6 +18,7 @@ import { FormularioTurno } from "@/components/turnos/formulario-turno"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { hoyIsoUshuaia } from "@/lib/turnos/fecha"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { obtenerUltimaUbicacionConocida } from "@/lib/ubicacion/ultima-usada"
 
 export const metadata: Metadata = {
   title: "Nuevo turno — Historial Médico",
@@ -36,12 +37,17 @@ export default async function PaginaNuevoTurno() {
 
   const { supabase } = await requerirSesion({ desde: "/turnos/nuevo" })
 
-  const { data: medicos } = await supabase
-    .from("doctors")
-    .select("id, full_name, specialty, institution, address, latitude, longitude")
-    .eq("profile_id", activo.perfil.id)
-    .eq("is_active", true)
-    .order("full_name", { ascending: true })
+  const [{ data: medicos }, ultimaUbicacion] = await Promise.all([
+    supabase
+      .from("doctors")
+      .select("id, full_name, specialty, institution, address, city, province, latitude, longitude")
+      .eq("profile_id", activo.perfil.id)
+      .eq("is_active", true)
+      .order("full_name", { ascending: true }),
+    // Sprint 16, tarea 16.1: sugerencia editable, NUNCA un valor fijo tipo
+    // Ushuaia -ver `lib/ubicacion/ultima-usada.ts`-.
+    obtenerUltimaUbicacionConocida(supabase, activo.perfil.id),
+  ])
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
@@ -60,7 +66,16 @@ export default async function PaginaNuevoTurno() {
         </p>
       </div>
 
-      <FormularioTurno modo="crear" medicos={medicos ?? []} fechaMinimaIso={hoyIsoUshuaia()} />
+      <FormularioTurno
+        modo="crear"
+        medicos={medicos ?? []}
+        fechaMinimaIso={hoyIsoUshuaia()}
+        valoresIniciales={
+          ultimaUbicacion
+            ? { lugarCiudad: ultimaUbicacion.ciudad, lugarProvincia: ultimaUbicacion.provincia }
+            : undefined
+        }
+      />
     </div>
   )
 }

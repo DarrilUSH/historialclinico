@@ -262,7 +262,7 @@ insert into public.family_permissions (
 -- Cardiólogo
 insert into public.doctors (
     id, profile_id, full_name, specialty, license_number,
-    institution, phone, address,
+    institution, phone, address, city, province,
     latitude, longitude, is_active,
     created_by_profile_id,
     created_at, updated_at
@@ -274,7 +274,9 @@ insert into public.doctors (
     'MN 45678',
     'Clínica Ushuaia',
     '+54 2901 234000',
-    'Gob. Paz 150, Ushuaia',
+    'Gob. Paz 150',
+    'Ushuaia',
+    'Tierra del Fuego, Antártida e Islas del Atlántico Sur',
     -54.8083,
     -68.3000,
     true,
@@ -285,7 +287,7 @@ insert into public.doctors (
 -- Endocrinólogo
 insert into public.doctors (
     id, profile_id, full_name, specialty, license_number,
-    institution, phone, address,
+    institution, phone, address, city, province,
     latitude, longitude, is_active,
     created_by_profile_id,
     created_at, updated_at
@@ -297,7 +299,9 @@ insert into public.doctors (
     'MN 56789',
     'Consultorio Torres',
     '+54 2901 234111',
-    'Maipú 345, Ushuaia',
+    'Maipú 345',
+    'Ushuaia',
+    'Tierra del Fuego, Antártida e Islas del Atlántico Sur',
     -54.8078,
     -68.2999,
     true,
@@ -503,7 +507,7 @@ on conflict do nothing;
 -- Turno futuro 1: Cardiología (2 días desde ahora)
 insert into public.appointments (
     profile_id, specialty, doctor_name, doctor_id,
-    appointment_date, location_name, location_address,
+    appointment_date, location_name, location_address, location_city, location_province,
     latitude, longitude, preparation_notes,
     status, created_by_profile_id,
     created_at, updated_at
@@ -514,7 +518,9 @@ insert into public.appointments (
     '990e8400-e29b-41d4-a716-446655440001'::uuid,
     (now() + interval '2 days')::timestamptz,
     'Clínica Ushuaia',
-    'Gob. Paz 150, Ushuaia',
+    'Gob. Paz 150',
+    'Ushuaia',
+    'Tierra del Fuego, Antártida e Islas del Atlántico Sur',
     -54.8083,
     -68.3000,
     'Llevar análisis recientes. Ayuno de 8 horas antes del ECG.',
@@ -526,7 +532,7 @@ insert into public.appointments (
 -- Turno futuro 2: Endocrinología (1 semana desde ahora)
 insert into public.appointments (
     profile_id, specialty, doctor_name, doctor_id,
-    appointment_date, location_name, location_address,
+    appointment_date, location_name, location_address, location_city, location_province,
     latitude, longitude, preparation_notes,
     status, created_by_profile_id,
     created_at, updated_at
@@ -537,7 +543,9 @@ insert into public.appointments (
     '990e8400-e29b-41d4-a716-446655440002'::uuid,
     (now() + interval '7 days')::timestamptz,
     'Consultorio Torres',
-    'Maipú 345, Ushuaia',
+    'Maipú 345',
+    'Ushuaia',
+    'Tierra del Fuego, Antártida e Islas del Atlántico Sur',
     -54.8078,
     -68.2999,
     'Traer registro de glucemias de la última semana.',
@@ -549,7 +557,7 @@ insert into public.appointments (
 -- Turno pasado: Consulta general (20 días atrás)
 insert into public.appointments (
     profile_id, specialty, doctor_name, doctor_id,
-    appointment_date, location_name, location_address,
+    appointment_date, location_name, location_address, location_city, location_province,
     status, created_by_profile_id,
     created_at, updated_at
 ) values (
@@ -559,7 +567,9 @@ insert into public.appointments (
     '990e8400-e29b-41d4-a716-446655440001'::uuid,
     (now() - interval '20 days')::timestamptz,
     'Centro de Salud Municipal',
-    'Avenida Maipú, Ushuaia',
+    'Avenida Maipú',
+    'Ushuaia',
+    'Tierra del Fuego, Antártida e Islas del Atlántico Sur',
     'completed',
     '660e8400-e29b-41d4-a716-446655440001'::uuid,
     now() - interval '20 days',

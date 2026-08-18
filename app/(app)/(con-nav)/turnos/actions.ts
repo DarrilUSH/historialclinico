@@ -33,6 +33,17 @@
  * docs/modelo-permisos.md-, así que se usa `{ count: "exact" }` para
  * distinguir ese caso y devolver un mensaje claro en vez de fingir éxito.
  *
+ * ## Ciudad/provincia y geocodificación automática (Sprint 16, tarea 16.1)
+ *
+ * `crearTurno`/`actualizarTurno` persisten `lugarCiudad`/`lugarProvincia` en
+ * `appointments.location_city`/`location_province`. Si la persona NO cargó
+ * coordenadas a mano pero sí cargó una dirección, `resolverCoordenadas`
+ * intenta geocodificar automáticamente con Nominatim
+ * (`lib/ubicacion/geocodificacion.ts`) usando calle+ciudad+provincia. Es
+ * "mejor esfuerzo": cualquier fallo (sin resultados, timeout, red) deja
+ * `latitude`/`longitude` en `NULL`, exactamente como pasaba antes de esta
+ * tarea -nunca bloquea el guardado del turno-.
+ *
  * ## `doctorId`: vinculación con el directorio (Sprint 10, tarea 10.1)
  *
  * `crearTurno` y `actualizarTurno` reciben además un `doctorId` opcional
@@ -55,7 +66,8 @@ import { revalidatePath } from "next/cache"
 
 import { type ClienteSupabaseServidor, esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
-import { validarTurno } from "@/lib/validacion/turno.schema"
+import { geocodificarDireccion } from "@/lib/ubicacion/geocodificacion"
+import { validarTurno, type DatosTurnoValidado } from "@/lib/validacion/turno.schema"
 import type { EstadoTurno } from "@/types/dominio"
 
 export interface EstadoTurnoAccion {
@@ -95,6 +107,8 @@ function datosCrudosDelFormulario(formData: FormData) {
     hora: campo(formData, "hora"),
     lugarNombre: campo(formData, "lugarNombre"),
     lugarDireccion: campo(formData, "lugarDireccion"),
+    lugarCiudad: campo(formData, "lugarCiudad"),
+    lugarProvincia: campo(formData, "lugarProvincia"),
     latitud: campo(formData, "latitud"),
     longitud: campo(formData, "longitud"),
     notasPreparacion: campo(formData, "notasPreparacion"),
@@ -137,6 +151,37 @@ async function resolverDoctorId(
 }
 
 /**
+ * Coordenadas listas para `appointments.latitude`/`longitude`: si la persona
+ * cargó las dos a mano, esas ganan sin tocar la red -el flujo manual de
+ * copiar el pin de Google Maps sigue siendo la fuente de verdad-. Si no cargó
+ * ninguna pero sí hay una dirección, intenta geocodificar automáticamente
+ * (Sprint 16, tarea 16.1: `lib/ubicacion/geocodificacion.ts`, mejor esfuerzo,
+ * nunca lanza). Sin dirección tampoco, quedan las dos en `null`, igual que
+ * siempre.
+ */
+async function resolverCoordenadas(
+  datos: DatosTurnoValidado,
+): Promise<{ latitud: number | null; longitud: number | null }> {
+  if (datos.latitud !== undefined && datos.longitud !== undefined) {
+    return { latitud: datos.latitud, longitud: datos.longitud }
+  }
+
+  if (!datos.lugarDireccion) {
+    return { latitud: null, longitud: null }
+  }
+
+  const geocodificado = await geocodificarDireccion({
+    calle: datos.lugarDireccion,
+    ciudad: datos.lugarCiudad,
+    provincia: datos.lugarProvincia,
+  })
+
+  return geocodificado
+    ? { latitud: geocodificado.latitud, longitud: geocodificado.longitud }
+    : { latitud: null, longitud: null }
+}
+
+/**
  * Alta de turno. `FormData` trae los campos del formulario -ver
  * `components/turnos/formulario-turno.tsx`-; el perfil sale de la cookie
  * activa, no del formulario (mismo motivo que documenta
@@ -171,6 +216,7 @@ export async function crearTurno(
     }
 
     const { datos } = validacion
+    const { latitud, longitud } = await resolverCoordenadas(datos)
 
     const { error } = await supabase.from("appointments").insert({
       profile_id: activo.perfil.id,
@@ -180,8 +226,10 @@ export async function crearTurno(
       appointment_date: datos.fechaHoraIso,
       location_name: datos.lugarNombre ?? null,
       location_address: datos.lugarDireccion ?? null,
-      latitude: datos.latitud ?? null,
-      longitude: datos.longitud ?? null,
+      location_city: datos.lugarCiudad ?? null,
+      location_province: datos.lugarProvincia ?? null,
+      latitude: latitud,
+      longitude: longitud,
       preparation_notes: datos.notasPreparacion ?? null,
     })
 
@@ -239,6 +287,7 @@ export async function actualizarTurno(
     }
 
     const { datos } = validacion
+    const { latitud, longitud } = await resolverCoordenadas(datos)
 
     const { error, count } = await supabase
       .from("appointments")
@@ -250,8 +299,10 @@ export async function actualizarTurno(
           appointment_date: datos.fechaHoraIso,
           location_name: datos.lugarNombre ?? null,
           location_address: datos.lugarDireccion ?? null,
-          latitude: datos.latitud ?? null,
-          longitude: datos.longitud ?? null,
+          location_city: datos.lugarCiudad ?? null,
+          location_province: datos.lugarProvincia ?? null,
+          latitude: latitud,
+          longitude: longitud,
           preparation_notes: datos.notasPreparacion ?? null,
         },
         { count: "exact" },

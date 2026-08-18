@@ -12,6 +12,7 @@
  */
 
 import { createClient } from "@/lib/supabase/server"
+import { direccionCompleta } from "@/lib/ubicacion/formato"
 import type { Turno } from "@/types/dominio"
 
 // Formato de línea VEVENT máx 75 octetos (RFC 5545)
@@ -54,8 +55,13 @@ function generarIcs(turno: Turno): string {
     summary += ` — ${turno.doctor_name}`
   }
 
-  // LOCATION
-  const location = [turno.location_name, turno.location_address]
+  // LOCATION: calle + ciudad + provincia combinadas (Sprint 16, tarea 16.1) —
+  // sin asumir ninguna localidad si el turno no las tiene cargadas.
+  const location = [turno.location_name, direccionCompleta({
+    direccion: turno.location_address,
+    ciudad: turno.location_city,
+    provincia: turno.location_province,
+  })]
     .filter(Boolean)
     .join(" — ")
 
