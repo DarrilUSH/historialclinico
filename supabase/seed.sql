@@ -913,6 +913,22 @@ insert into public.health_centers (
      null, null, 'geriatrico san jorge ii parana parana entre rios', 'parana')
 on conflict (refes_id) do nothing;
 
+-- El comentario de arriba promete que `npx supabase db reset` deja
+-- `/lugares` y el autocompletar de "Lugar" -y, desde los cruces
+-- inteligentes, las dos franjas "¿Es este?"- USABLES sin apretar
+-- "Actualizar": eso depende de que `health_centers_sync.current_row_count`
+-- diga la verdad, no solo de que las 24 filas existan en `health_centers`.
+-- `leerEstadoCatalogo` (`lib/lugares/consulta.ts`) lee ESTA fila -no hace un
+-- `count(*)` sobre la tabla- para decidir `catalogoDisponible`; sin este
+-- `update`, la fila de estado queda en su default de migración
+-- (`current_row_count` NULL) y toda la UI que depende del catálogo se
+-- comporta como si estuviera vacío, aunque las 24 filas ya estén cargadas.
+update public.health_centers_sync
+   set current_row_count  = 24,
+       current_synced_at  = now(),
+       current_resource_url = 'seed local — supabase/seed.sql, sin descarga real'
+ where id = true;
+
 
 -- =============================================================================
 -- 12. BANDEJA DE GMAIL (Sprint 17, tarea 17.2) — SOLO PARA DESARROLLO LOCAL

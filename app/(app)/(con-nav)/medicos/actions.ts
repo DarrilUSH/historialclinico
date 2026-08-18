@@ -54,6 +54,7 @@ import { revalidatePath } from "next/cache"
 
 import { esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import type { MedicoParaAutocompletar } from "@/lib/turnos/autocompletar-medico"
 import { geocodificarDireccion } from "@/lib/ubicacion/geocodificacion"
 import { validarMedico, type DatosMedicoValidado } from "@/lib/validacion/medico.schema"
 
@@ -138,6 +139,51 @@ async function resolverCoordenadas(
     : { latitud: null, longitud: null }
 }
 
+/** Columnas que necesita `MedicoParaAutocompletar` (`lib/turnos/autocompletar-medico.ts`) del médico recién insertado. */
+const COLUMNAS_MEDICO_AUTOCOMPLETAR =
+  "id, full_name, specialties, institution, address, city, province, latitude, longitude"
+
+/**
+ * Núcleo compartido del `INSERT` en `doctors`: lo usan `crearMedico` (el alta
+ * de `/medicos/nuevo`, que redirige) y `crearMedicoDesdeCruce` (el alta desde
+ * la franja "¿Agregar a tus médicos?" de un cruce inteligente, que NO puede
+ * redirigir -perdería el turno o el documento que se está revisando-). Un
+ * solo lugar que arma el `insert`, para que las dos rutas de alta nunca
+ * puedan divergir en qué columnas escriben.
+ */
+async function insertarMedico(
+  supabase: Awaited<ReturnType<typeof requerirPermiso>>["supabase"],
+  perfilId: string,
+  datos: DatosMedicoValidado,
+): Promise<{ error: string | null; medico: MedicoParaAutocompletar | null }> {
+  const { latitud, longitud } = await resolverCoordenadas(datos)
+
+  const { data, error } = await supabase
+    .from("doctors")
+    .insert({
+      profile_id: perfilId,
+      full_name: datos.nombre,
+      specialties: datos.especialidades,
+      license_number: datos.matricula ?? null,
+      institution: datos.institucion ?? null,
+      phone: datos.telefono ?? null,
+      address: datos.direccion ?? null,
+      city: datos.ciudad ?? null,
+      province: datos.provincia ?? null,
+      latitude: latitud,
+      longitude: longitud,
+      notes: datos.notas ?? null,
+    })
+    .select(COLUMNAS_MEDICO_AUTOCOMPLETAR)
+    .single()
+
+  if (error || !data) {
+    return { error: error?.message ?? "sin fila devuelta", medico: null }
+  }
+
+  return { error: null, medico: data }
+}
+
 /**
  * Alta de médico. `FormData` trae los campos de
  * `components/medicos/formulario-medico.tsx`; el perfil sale de la cookie
@@ -162,23 +208,7 @@ export async function crearMedico(
       return { error: validacion.error }
     }
 
-    const { datos } = validacion
-    const { latitud, longitud } = await resolverCoordenadas(datos)
-
-    const { error } = await supabase.from("doctors").insert({
-      profile_id: activo.perfil.id,
-      full_name: datos.nombre,
-      specialties: datos.especialidades,
-      license_number: datos.matricula ?? null,
-      institution: datos.institucion ?? null,
-      phone: datos.telefono ?? null,
-      address: datos.direccion ?? null,
-      city: datos.ciudad ?? null,
-      province: datos.provincia ?? null,
-      latitude: latitud,
-      longitude: longitud,
-      notes: datos.notas ?? null,
-    })
+    const { error } = await insertarMedico(supabase, activo.perfil.id, validacion.datos)
 
     if (error) {
       console.error("[medicos] Fallo al crear un médico:", error)
@@ -195,6 +225,61 @@ export async function crearMedico(
   revalidatePath("/medicos")
   revalidatePath("/turnos/nuevo")
   redirect("/medicos?creado=1")
+}
+
+export interface EstadoCrearMedicoDesdeCruce {
+  error: string | null
+  /** El médico recién creado, listo para vincular como si se hubiera elegido del `<Select>` de siempre. `null` en error. */
+  medico: MedicoParaAutocompletar | null
+}
+
+/**
+ * Alta de médico desde un CRUCE INTELIGENTE (franja "¿Agregar a tus
+ * médicos?" de `components/medicos/franja-cotejo-medico.tsx`, usada por
+ * `FormularioTurno` y `FormularioRevision`): mismo `INSERT`, mismo permiso
+ * (`upload`) y mismo `validarMedico` que `crearMedico`, vía el núcleo
+ * compartido `insertarMedico` -no se duplica la escritura-, pero SIN
+ * `redirect()`: la persona está en medio de cargar un turno o revisar un
+ * documento, y un alta que la mande a `/medicos` le tiraría ese trabajo a la
+ * basura. Devuelve el médico recién creado para que quien llama lo vincule
+ * en el acto, como si lo hubiera elegido del `<Select>` de siempre.
+ */
+export async function crearMedicoDesdeCruce(
+  _estadoPrevio: EstadoCrearMedicoDesdeCruce,
+  formData: FormData,
+): Promise<EstadoCrearMedicoDesdeCruce> {
+  try {
+    const activo = await obtenerPerfilActivo()
+    if (!activo) {
+      return { error: SIN_PERFIL_ACTIVO, medico: null }
+    }
+
+    const { supabase } = await requerirPermiso(activo.perfil.id, "upload", {
+      siNoHaySesion: "lanzar",
+    })
+
+    const validacion = validarMedico(datosCrudosDelFormulario(formData))
+    if (!validacion.ok) {
+      return { error: validacion.error, medico: null }
+    }
+
+    const { error, medico } = await insertarMedico(supabase, activo.perfil.id, validacion.datos)
+
+    if (error || !medico) {
+      console.error("[medicos] Fallo al crear un médico desde un cruce inteligente:", error)
+      return { error: ERROR_INESPERADO_CREAR, medico: null }
+    }
+
+    revalidatePath("/medicos")
+    revalidatePath("/turnos/nuevo")
+    return { error: null, medico }
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return { error: error.message, medico: null }
+    }
+    console.error("[medicos] Fallo inesperado al crear un médico desde un cruce inteligente:", error)
+    return { error: ERROR_INESPERADO_CREAR, medico: null }
+  }
 }
 
 /** Edición de los datos de un médico YA cargado. No toca `is_active`/`deactivated_at`: eso lo hacen `darDeBajaMedico`/`reactivarMedico`. */

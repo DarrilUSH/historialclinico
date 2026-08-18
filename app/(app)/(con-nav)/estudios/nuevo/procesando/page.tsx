@@ -33,6 +33,7 @@ import { redirect } from "next/navigation"
 
 import { requerirSesion } from "@/lib/auth/guardas"
 import { fechaDeHoy } from "@/lib/documentos/ingesta"
+import { leerEstadoCatalogo } from "@/lib/lugares/consulta"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 import { PantallaProcesando } from "./pantalla-procesando"
@@ -73,6 +74,20 @@ export default async function PaginaProcesando({
     redirect("/estudios/nuevo")
   }
 
+  // Cruces inteligentes (agosto 2026): mismos dos datos que ya trae
+  // `/turnos/nuevo` -directorio de médicos activos + estado del catálogo
+  // REFES-, para que `FormularioRevision` pueda ofrecer "¿Es este lugar?" /
+  // "¿Es este médico?" bajo institución y médico.
+  const [{ data: medicos }, estadoCatalogo] = await Promise.all([
+    supabase
+      .from("doctors")
+      .select("id, full_name, specialties, institution, address, city, province, latitude, longitude")
+      .eq("profile_id", activo.perfil.id)
+      .eq("is_active", true)
+      .order("full_name", { ascending: true }),
+    leerEstadoCatalogo(supabase),
+  ])
+
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 chica:gap-4 chica:py-5">
       <div className="flex flex-col gap-2">
@@ -91,6 +106,8 @@ export default async function PaginaProcesando({
         categoriaProvisional={documento.category}
         fechaProvisional={documento.document_date}
         fechaMaximaIso={fechaDeHoy()}
+        medicos={medicos ?? []}
+        catalogoDisponible={estadoCatalogo.centros > 0}
       />
     </div>
   )

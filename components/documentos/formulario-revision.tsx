@@ -42,6 +42,34 @@
  * igual, en el campo oculto `numeroOrden` -no tiene campo propio en el
  * formulario, mismo criterio que las métricas-.
  *
+ * ## Cruces inteligentes: institución ↔ catálogo REFES, médico ↔ directorio (agosto 2026)
+ *
+ * "Institución" y "Médico" pasan de `defaultValue` (no controlados) a
+ * `value`/`onChange`: es lo único que hace falta para que las dos franjas de
+ * abajo -`FranjaCandidatoLugar`, `FranjaCotejoMedico`- puedan REEMPLAZAR el
+ * texto al tocar "Usar este"/"Vincular", igual que ya hace
+ * `components/turnos/formulario-turno.tsx`. El `name` del campo (heredado del
+ * `id`) no cambia, así que `confirmarDocumento` sigue leyendo estos dos
+ * campos del mismo `FormData` de siempre.
+ *
+ * A diferencia del formulario de turno, acá el cotejo se calcula UNA sola vez
+ * a partir de `extraccion` -esta pantalla no tiene un "Analizar de nuevo": la
+ * IA corrió una sola vez, al subir el documento-, así que no hace falta
+ * estado para "qué precargó la última pasada": `institucionInicial`/
+ * `medicoInicial` (más abajo) son la referencia fija contra la que cada
+ * franja decide si sigue vigente (el campo todavía dice lo que la IA detectó)
+ * o si ya se resolvió (la persona lo tipeó, o ya tocó "Usar este"/"Vincular").
+ *
+ * `documents` no tiene columnas propias de dirección/ciudad/provincia/
+ * coordenadas -a diferencia de `appointments`-, así que "Usar este" acá solo
+ * reemplaza el NOMBRE de la institución por el oficial del registro; no hay
+ * nada de geocodificación que ganar en esta pantalla. Y `documents.doctor_id`
+ * existe en el esquema pero ningún flujo de la app lo persiste todavía (solo
+ * `doctor_name`, texto): "Vincular" acá tampoco intenta escribirlo, solo
+ * normaliza el texto de "Médico" al nombre tal como está cargado en el
+ * directorio -mismo criterio de "no exagerar el alcance" que ya declaró esta
+ * tarea para el resto del cruce de lugares-.
+ *
  * ## La franja de duplicado SEMÁNTICO (Capas 2 y 3, hotfix sobre la huella)
  *
  * `duplicadoSemantico` llega ya resuelto desde `PantallaProcesando`
@@ -91,6 +119,8 @@ import { CampoTextarea } from "@/components/base/campo-textarea"
 import { DialogoConfirmacion } from "@/components/base/dialogo-confirmacion"
 import { Tarjeta } from "@/components/base/tarjeta"
 import { VeloEspera } from "@/components/base/velo-espera"
+import { FranjaCandidatoLugar } from "@/components/lugares/franja-candidato-lugar"
+import { FranjaCotejoMedico } from "@/components/medicos/franja-cotejo-medico"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -104,7 +134,11 @@ import {
   TEXTO_MOTIVO_DUPLICADO_SEMANTICO,
   type DuplicadoSemanticoParaCliente,
 } from "@/lib/documentos/duplicados-semanticos"
+import { mapearEspecialidadCatalogo } from "@/lib/especialidades/mapear-catalogo"
 import type { DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
+import type { LugarExtraidoParaCotejo } from "@/lib/lugares/candidatos"
+import type { CentroSugerido } from "@/lib/lugares/sugerencias"
+import type { MedicoParaAutocompletar } from "@/lib/turnos/autocompletar-medico"
 import type { CategoriaDocumento } from "@/types/dominio"
 
 export interface FormularioRevisionProps {
@@ -123,6 +157,10 @@ export interface FormularioRevisionProps {
   fechaProvisional: string
   /** Fecha de hoy en `YYYY-MM-DD`, hora de pared de Ushuaia — tope del input date. */
   fechaMaximaIso: string
+  /** Médicos activos del directorio del perfil, para el cruce "¿Es este médico que ya tenés?" (cruces inteligentes, agosto 2026). Vacío si todavía no cargó ninguno -en ese caso, `FranjaCotejoMedico` solo puede ofrecer "Agregar"-. */
+  medicos: MedicoParaAutocompletar[]
+  /** `true` si el catálogo REFES tiene centros cargados (cruces inteligentes, agosto 2026). Con `false`, la franja de institución nunca tiene nada que ofrecer. */
+  catalogoDisponible?: boolean
 }
 
 const ESTADO_INICIAL: EstadoConfirmacion = { error: null }
@@ -168,6 +206,8 @@ export function FormularioRevision({
   categoriaProvisional,
   fechaProvisional,
   fechaMaximaIso,
+  medicos,
+  catalogoDisponible = false,
 }: FormularioRevisionProps) {
   const [estadoConfirmar, enviarConfirmar, pendienteConfirmar] = useActionState(
     confirmarDocumento,
@@ -210,6 +250,34 @@ export function FormularioRevision({
 
   const metricas = extraccion?.metricas ?? []
   const numeroOrden = extraccion?.numero_orden ?? ""
+
+  // Cruces inteligentes (agosto 2026): "Institución" y "Médico" pasan a
+  // controlados -ver el comentario de cabecera del archivo- para que las
+  // franjas de abajo puedan reemplazar el texto al tocar "Usar
+  // este"/"Vincular". Arrancan con lo que detectó la IA, igual que antes.
+  const [institucion, setInstitucion] = React.useState(institucionInicial)
+  const [medico, setMedico] = React.useState(medicoInicial)
+
+  // Referencia fija de lo que la IA detectó (esta pantalla no tiene un
+  // "Analizar de nuevo": ver el comentario de cabecera). Cada franja se
+  // esconde sola apenas el campo deja de coincidir con esto -la persona lo
+  // tipeó de nuevo, o ya tocó "Usar este"/"Vincular"-.
+  const institucionParaFranja: LugarExtraidoParaCotejo | null =
+    catalogoDisponible && institucionInicial.length > 0 && institucion === institucionInicial
+      ? { nombre: institucionInicial, direccion: "", ciudad: "", provincia: "" }
+      : null
+  const medicoParaFranja =
+    medicoInicial.length > 0 && medico === medicoInicial ? medicoInicial : null
+
+  /** "Usar este" de la franja de institución: acá no hay dirección/ciudad/provincia/coordenadas que completar -`documents` no las tiene-, solo el nombre oficial. */
+  function usarInstitucionDelCatalogo(centro: CentroSugerido) {
+    setInstitucion(centro.nombre)
+  }
+
+  /** "Vincular"/"Agregar" de la franja de médico: normaliza "Médico" al nombre tal como está (o quedó) en el directorio. `documents.doctor_id` no se toca -ver el comentario de cabecera-. */
+  function usarMedicoDelDirectorio(doctor: MedicoParaAutocompletar) {
+    setMedico(doctor.full_name)
+  }
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -313,7 +381,8 @@ export function FormularioRevision({
           <CampoTexto
             id="institucion"
             label="Institución"
-            defaultValue={institucionInicial}
+            value={institucion}
+            onChange={(evento) => setInstitucion(evento.target.value)}
             maxLength={150}
             ayuda={institucionDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
           />
@@ -329,11 +398,33 @@ export function FormularioRevision({
           <CampoTexto
             id="medico"
             label="Médico"
-            defaultValue={medicoInicial}
+            value={medico}
+            onChange={(evento) => setMedico(evento.target.value)}
             maxLength={100}
             ayuda={medicoDetectado ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
           />
         </div>
+
+        {/*
+          Cruces inteligentes (agosto 2026): franjas discretas bajo
+          institución/médico -ver el comentario de cabecera del archivo-.
+          Cada una decide sola si tiene algo para ofrecer; sin coincidencia no
+          se renderiza nada.
+        */}
+        <FranjaCandidatoLugar extraido={institucionParaFranja} onUsar={usarInstitucionDelCatalogo} />
+        <FranjaCotejoMedico
+          nombreExtraido={medicoParaFranja}
+          directorio={medicos}
+          contexto={{
+            especialidad: mapearEspecialidadCatalogo(especialidadInicial),
+            institucion,
+            direccion: "",
+            ciudad: "",
+            provincia: "",
+          }}
+          onVincular={usarMedicoDelDirectorio}
+          onAgregado={usarMedicoDelDirectorio}
+        />
 
         <CampoTextarea
           id="resumen"

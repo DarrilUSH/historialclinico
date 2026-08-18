@@ -41,6 +41,7 @@ import { FormularioRevision } from "@/components/documentos/formulario-revision"
 import { VeloEspera } from "@/components/base/velo-espera"
 import type { DuplicadoSemanticoParaCliente } from "@/lib/documentos/duplicados-semanticos"
 import type { DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
+import type { MedicoParaAutocompletar } from "@/lib/turnos/autocompletar-medico"
 import type { CategoriaDocumento } from "@/types/dominio"
 
 export interface PantallaProcesandoProps {
@@ -53,6 +54,10 @@ export interface PantallaProcesandoProps {
   fechaProvisional: string
   /** Fecha de hoy en `YYYY-MM-DD`, hora de pared de Ushuaia — tope del input date del formulario. */
   fechaMaximaIso: string
+  /** Médicos activos del directorio del perfil (cruces inteligentes, agosto 2026) — pasa tal cual a `FormularioRevision`. */
+  medicos: MedicoParaAutocompletar[]
+  /** `true` si el catálogo REFES tiene centros cargados (cruces inteligentes, agosto 2026). */
+  catalogoDisponible: boolean
 }
 
 type Estado = "leyendo" | "revisando"
@@ -93,6 +98,8 @@ export function PantallaProcesando({
   categoriaProvisional,
   fechaProvisional,
   fechaMaximaIso,
+  medicos,
+  catalogoDisponible,
 }: PantallaProcesandoProps) {
   const [estado, setEstado] = React.useState<Estado>("leyendo")
   const [extraccion, setExtraccion] = React.useState<DocumentoMedicoExtraido | null>(null)
@@ -157,6 +164,8 @@ export function PantallaProcesando({
       categoriaProvisional={categoriaProvisional}
       fechaProvisional={fechaProvisional}
       fechaMaximaIso={fechaMaximaIso}
+      medicos={medicos}
+      catalogoDisponible={catalogoDisponible}
     />
   )
 }

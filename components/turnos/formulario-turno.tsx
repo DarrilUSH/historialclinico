@@ -138,6 +138,8 @@ import { CampoNumero } from "@/components/base/campo-numero"
 import { CampoTexto } from "@/components/base/campo-texto"
 import { CampoTextarea } from "@/components/base/campo-textarea"
 import { CampoLugar } from "@/components/lugares/campo-lugar"
+import { FranjaCandidatoLugar } from "@/components/lugares/franja-candidato-lugar"
+import { FranjaCotejoMedico } from "@/components/medicos/franja-cotejo-medico"
 import { AnalizadorMensajeTurno } from "@/components/turnos/analizador-mensaje-turno"
 import { PrecargaGmail } from "@/components/turnos/precarga-gmail"
 import { Label } from "@/components/ui/label"
@@ -149,6 +151,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { CATALOGO_ESPECIALIDADES } from "@/lib/especialidades/catalogo"
+import type { LugarExtraidoParaCotejo } from "@/lib/lugares/candidatos"
 import { precargaDesdeCentro, type CentroSugerido } from "@/lib/lugares/sugerencias"
 import { aplicarPrecarga, type CamposPrecargables } from "@/lib/turnos/aplicar-precarga"
 import {
@@ -255,6 +258,20 @@ export function FormularioTurno({
     Boolean(valoresIniciales?.latitud || valoresIniciales?.longitud),
   )
 
+  // Directorio local (cruces inteligentes, agosto 2026): arranca con los
+  // médicos que trajo el servidor, y crece en el momento cuando "Agregar" de
+  // `FranjaCotejoMedico` da de alta uno nuevo -así el `<Select>` de abajo lo
+  // muestra seleccionado sin esperar a un `revalidatePath` + navegación-.
+  const [medicosDisponibles, setMedicosDisponibles] = React.useState(medicos)
+
+  // Qué precargó la ÚLTIMA propuesta de IA para "Lugar"/"Médico" -y todavía
+  // sigue intacto en el campo-, para que las franjas de cruce sepan qué
+  // cotejar (`components/lugares/franja-candidato-lugar.tsx`,
+  // `components/medicos/franja-cotejo-medico.tsx`). `null` = nada que
+  // cotejar todavía.
+  const [lugarParaCotejo, setLugarParaCotejo] = React.useState<LugarExtraidoParaCotejo | null>(null)
+  const [medicoParaCotejo, setMedicoParaCotejo] = React.useState<string | null>(null)
+
   // Calle + ciudad + provincia combinadas (Sprint 16, tarea 16.1): mismo
   // armado que usa el deep link de "Cómo llegar" en pantalla
   // (`lib/ubicacion/formato.ts#direccionCompleta`), para que la búsqueda que
@@ -269,15 +286,17 @@ export function FormularioTurno({
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(direccionParaMaps)}`
     : "https://www.google.com/maps"
 
-  function elegirMedicoDelDirectorio(valor: string | null) {
-    if (!valor || valor === SENTINEL_NINGUN_MEDICO) {
-      setDoctorId("")
-      return
-    }
-
-    const doctor = medicos.find((candidato) => candidato.id === valor)
-    if (!doctor) return
-
+  /**
+   * Vincula `doctor` al turno -campo oculto `doctorId`- y completa lo que
+   * esté vacío, exactamente como si se hubiera elegido del `<Select>` de
+   * abajo. Factorizada de `elegirMedicoDelDirectorio` (cruces inteligentes,
+   * agosto 2026) para que `FranjaCotejoMedico` pueda vincular directo con el
+   * médico que YA tiene en mano -de un `find` en `medicosDisponibles`, o de
+   * la fila recién creada por "Agregar"- sin depender de un `id` que todavía
+   * podría no estar en el array de estado (los `set` de React no aplican en
+   * el momento).
+   */
+  function vincularMedico(doctor: MedicoParaAutocompletar) {
     setDoctorId(doctor.id)
 
     // Ver el criterio completo en el comentario de cabecera del archivo y en
@@ -305,6 +324,26 @@ export function FormularioTurno({
       setLongitud(cambios.longitud)
       setMostrarCoordenadas(true)
     }
+  }
+
+  function elegirMedicoDelDirectorio(valor: string | null) {
+    if (!valor || valor === SENTINEL_NINGUN_MEDICO) {
+      setDoctorId("")
+      return
+    }
+
+    const doctor = medicosDisponibles.find((candidato) => candidato.id === valor)
+    if (!doctor) return
+
+    vincularMedico(doctor)
+  }
+
+  /** Un médico nuevo, dado de alta desde "Agregar" de `FranjaCotejoMedico`: entra al directorio local y queda vinculado de una. */
+  function medicoAgregadoDesdeElCruce(doctor: MedicoParaAutocompletar) {
+    setMedicosDisponibles((previo) =>
+      [...previo, doctor].sort((a, b) => a.full_name.localeCompare(b.full_name, "es-AR")),
+    )
+    vincularMedico(doctor)
   }
 
   /**
@@ -373,7 +412,48 @@ export function FormularioTurno({
     setLugarCiudad(siguientes.lugarCiudad)
     setLugarProvincia(siguientes.lugarProvincia)
     setNotasPreparacion(siguientes.notasPreparacion)
+
+    // Cruces inteligentes (agosto 2026): solo se dispara un cotejo cuando ESTA
+    // pasada realmente puso un valor NUEVO en el campo -no en cada "Analizar",
+    // que puede dejar un campo intacto porque la persona ya lo corrigió a
+    // mano (ver `aplicarPrecarga` más arriba)-. Contra el catálogo REFES
+    // vacío (`catalogoDisponible === false`) directamente no se cotejará
+    // nada: nunca hay franja que mostrar.
+    //
+    // OJO: la desambiguación geográfica usa `propuesta.lugarCiudad`/
+    // `.lugarProvincia` -lo que ESTE mensaje trajo-, nunca `siguientes.*`. El
+    // formulario de `/turnos/nuevo` ya llega con ciudad/provincia precargadas
+    // con la ÚLTIMA UBICACIÓN USADA (tarea 16.1, `lib/ubicacion/ultima-usada.ts`)
+    // ANTES de analizar nada, y `aplicarPrecarga` nunca vacía esos campos
+    // cuando la propuesta no trae nada para ellos -así que `siguientes.lugarCiudad`
+    // puede decir "Ushuaia" aunque el mensaje jamás la haya mencionado (caso
+    // real: el fixture de la Clínica San Jorge). Cotejar contra un campo
+    // heredado de OTRA función sería, con datos, fabricar geografía que el
+    // mensaje nunca dio.
+    if (catalogoDisponible && siguientes.lugarNombre.length > 0 && siguientes.lugarNombre !== actuales.lugarNombre) {
+      setLugarParaCotejo({
+        nombre: propuesta.lugarNombre,
+        direccion: propuesta.lugarDireccion,
+        ciudad: propuesta.lugarCiudad,
+        provincia: propuesta.lugarProvincia,
+      })
+    }
+    if (siguientes.medico.length > 0 && siguientes.medico !== actuales.medico) {
+      setMedicoParaCotejo(propuesta.medico)
+    }
   }
+
+  // Las franjas de cruce se ocultan solas apenas el campo que las disparó
+  // deja de coincidir con lo que las disparó -sea porque la persona lo tipeó
+  // de nuevo, porque "Usar este"/"Vincular" ya lo reemplazó, o porque el
+  // médico ya quedó vinculado (`doctorId` dejó de estar vacío)-: no hace
+  // falta un estado de "descartado" aparte para estos casos, ver el
+  // comentario de cabecera de cada franja para el resto (el "No" explícito sí
+  // usa su propio estado, adentro de cada componente).
+  const lugarParaFranja =
+    lugarParaCotejo && lugarNombre === lugarParaCotejo.nombre ? lugarParaCotejo : null
+  const medicoParaFranja =
+    medicoParaCotejo && medico === medicoParaCotejo && doctorId === "" ? medicoParaCotejo : null
 
   return (
     <div className="flex flex-col gap-5">
@@ -412,7 +492,7 @@ export function FormularioTurno({
         <div
           className={cn(
             "flex flex-col gap-5",
-            medicos.length > 0 && "chica:grid chica:grid-cols-2 chica:items-start chica:gap-3",
+            medicosDisponibles.length > 0 && "chica:grid chica:grid-cols-2 chica:items-start chica:gap-3",
           )}
         >
           <CampoAutocompletar
@@ -426,13 +506,13 @@ export function FormularioTurno({
             ayuda="Empezá a escribir para ver sugerencias (ej: Cardiología, Clínica Médica, Oftalmología)."
           />
 
-          {medicos.length > 0 && (
+          {medicosDisponibles.length > 0 && (
             <div className="flex flex-col gap-2">
               <Label htmlFor="medico-directorio-trigger">Médico (opcional)</Label>
               <Select
                 items={[
                   { value: SENTINEL_NINGUN_MEDICO, label: "Ninguno" },
-                  ...medicos.map((doctor) => ({ value: doctor.id, label: doctor.full_name })),
+                  ...medicosDisponibles.map((doctor) => ({ value: doctor.id, label: doctor.full_name })),
                 ]}
                 value={doctorId || SENTINEL_NINGUN_MEDICO}
                 onValueChange={elegirMedicoDelDirectorio}
@@ -442,7 +522,7 @@ export function FormularioTurno({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={SENTINEL_NINGUN_MEDICO}>Ninguno</SelectItem>
-                  {medicos.map((doctor) => (
+                  {medicosDisponibles.map((doctor) => (
                     <SelectItem key={doctor.id} value={doctor.id}>
                       {doctor.full_name}
                       {doctor.specialties.length > 0 ? ` — ${doctor.specialties.join(" · ")}` : ""}
@@ -465,6 +545,27 @@ export function FormularioTurno({
           value={medico}
           onChange={(evento) => setMedico(evento.target.value)}
           ayuda="Opcional. Podés elegirlo de tu directorio arriba o escribirlo directo."
+        />
+
+        {/*
+          Cruces inteligentes (agosto 2026): "¿Es este médico que ya tenés?"
+          o "¿Agregar a tus médicos?" -bajo "Médico", el campo que la IA
+          acaba de precargar-. Se renderiza siempre: el componente decide
+          solo si tiene algo para mostrar (`nombreExtraido === null`, o ya
+          descartado, o ya vinculado → no pinta nada).
+        */}
+        <FranjaCotejoMedico
+          nombreExtraido={medicoParaFranja}
+          directorio={medicosDisponibles}
+          contexto={{
+            especialidad,
+            institucion: lugarNombre,
+            direccion: lugarDireccion,
+            ciudad: lugarCiudad,
+            provincia: lugarProvincia,
+          }}
+          onVincular={vincularMedico}
+          onAgregado={medicoAgregadoDesdeElCruce}
         />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 chica:grid-cols-2">
@@ -508,6 +609,15 @@ export function FormularioTurno({
             ayuda="Nombre de la clínica o el consultorio (opcional)."
           />
         )}
+
+        {/*
+          Cruces inteligentes (agosto 2026): franja discreta "¿Es este?"
+          contra el catálogo REFES, bajo el campo que la IA acaba de
+          precargar. Solo puede tener algo para mostrar cuando el catálogo
+          está sincronizado -`lugarParaFranja` nunca se setea si
+          `catalogoDisponible` es `false`, ver `aplicarPropuesta`-.
+        */}
+        <FranjaCandidatoLugar extraido={lugarParaFranja} onUsar={elegirCentroDelCatalogo} />
 
         <CampoTexto
           id="lugarDireccion"

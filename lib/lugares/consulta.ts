@@ -12,6 +12,7 @@ import "server-only"
 
 import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
 import { normalizarBusqueda } from "@/lib/lugares/normalizar"
+import type { CentroSugerido } from "@/lib/lugares/sugerencias"
 import {
   CATEGORIA_TODAS,
   TODAS_LAS_TIPOLOGIAS,
@@ -40,6 +41,28 @@ export interface CentroDelCatalogo {
   website: string | null
   latitude: number | null
   longitude: number | null
+}
+
+/**
+ * `CentroDelCatalogo` (fila cruda de la base) → `CentroSugerido`
+ * (`lib/lugares/sugerencias.ts`, lo que consume el cliente). Un solo mapeo,
+ * reusado por `buscarLugaresAction` (16.3) y por `candidatosLugarAction`
+ * (cruces inteligentes) para que las dos rutas de sugerencia hablen
+ * exactamente la misma forma.
+ */
+export function centroDelCatalogoASugerido(centro: CentroDelCatalogo): CentroSugerido {
+  return {
+    refesId: centro.refes_id,
+    nombre: centro.name,
+    direccion: centro.address,
+    localidad: centro.locality_name,
+    departamento: centro.department_name,
+    provincia: centro.province,
+    provinciaRefes: centro.province_refes,
+    latitud: centro.latitude,
+    longitud: centro.longitude,
+    tipo: centro.typology_name,
+  }
 }
 
 export interface FiltrosCatalogo {
@@ -130,6 +153,52 @@ export async function buscarCentros(
   }
 
   return { centros: data ?? [], total: count ?? (data?.length ?? 0) }
+}
+
+const LIMITE_CANDIDATOS = 80
+
+/**
+ * Busca centros candidatos para el cruce "¿es este lugar del catálogo?"
+ * (cruces inteligentes, agosto 2026): a diferencia de `buscarCentros`
+ * -pensada para una persona tecleando a propósito, exige que TODAS las
+ * palabras coincidan-, acá el texto viene de una extracción de IA (mezcla
+ * pistas reales con basura: "ANEXO", "DR", sufijos administrativos), así que
+ * alcanza con que CUALQUIERA de los tokens aparezca en el nombre/localidad/
+ * departamento O en la dirección. La decisión fina -cuál de los candidatos
+ * resultantes ofrecer, o si conviene silencio- la hace la lógica pura de
+ * `lib/lugares/candidatos.ts#elegirCandidatosLugar` sobre lo que esta función
+ * devuelve.
+ *
+ * `tokens` ya vienen normalizados y acotados por quien llama
+ * (`lib/lugares/candidatos.ts#tokensDeBusquedaLugar`): esta función solo arma
+ * el `.or()` de PostgREST y ejecuta. Los tokens son siempre `[a-z0-9ñ]+` -ver
+ * el tokenizador-, así que nunca necesitan el escape de `,`/`(`/`)` que sí
+ * hace falta para texto libre completo (`lib/estudios/filtros.ts#saneaTextoBusqueda`);
+ * igual se escapan los comodines de `LIKE` por las dudas.
+ */
+export async function buscarCentrosPorTokens(
+  supabase: ClienteSupabaseServidor,
+  tokens: string[],
+): Promise<CentroDelCatalogo[]> {
+  if (tokens.length === 0) return []
+
+  const condiciones = tokens
+    .map((token) => escaparComodines(token))
+    .flatMap((token) => [`search_text.ilike.%${token}%`, `address.ilike.%${token}%`])
+    .join(",")
+
+  const { data, error } = await supabase
+    .from("health_centers")
+    .select(COLUMNAS_CENTRO)
+    .or(condiciones)
+    .limit(LIMITE_CANDIDATOS)
+    .returns<CentroDelCatalogo[]>()
+
+  if (error) {
+    throw new Error(`No se pudo consultar candidatos del catálogo de centros de salud: ${error.message}`)
+  }
+
+  return data ?? []
 }
 
 /** Estado del catálogo que ve la pantalla: cuántos centros hay y de cuándo son. */

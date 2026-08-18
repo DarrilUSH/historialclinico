@@ -23,7 +23,13 @@
  */
 
 import { requerirSesion } from "@/lib/auth/guardas"
-import { buscarCentros } from "@/lib/lugares/consulta"
+import {
+  elegirCandidatosLugar,
+  tokensDeBusquedaLugar,
+  type LugarExtraidoParaCotejo,
+  type ResultadoCandidatosLugar,
+} from "@/lib/lugares/candidatos"
+import { buscarCentros, buscarCentrosPorTokens, centroDelCatalogoASugerido } from "@/lib/lugares/consulta"
 import type { CentroSugerido } from "@/lib/lugares/sugerencias"
 
 /** Cuántas sugerencias trae cada tecleo. Diez es lo que entra en pantalla sin scrollear el popup. */
@@ -48,19 +54,41 @@ export async function buscarLugaresAction(consulta: string): Promise<CentroSuger
       limite: LIMITE_SUGERENCIAS,
     })
 
-    return centros.map((centro) => ({
-      refesId: centro.refes_id,
-      nombre: centro.name,
-      direccion: centro.address,
-      localidad: centro.locality_name,
-      departamento: centro.department_name,
-      provincia: centro.province,
-      provinciaRefes: centro.province_refes,
-      latitud: centro.latitude,
-      longitud: centro.longitude,
-      tipo: centro.typology_name,
-    }))
+    return centros.map(centroDelCatalogoASugerido)
   } catch {
     return []
+  }
+}
+
+/**
+ * Cruce "¿es este lugar del catálogo?" (cruces inteligentes, agosto 2026):
+ * dado lo que la IA extrajo de un mensaje de turno o de un documento
+ * (`components/lugares/franja-candidato-lugar.tsx` es el único llamador),
+ * arma la consulta candidata (`buscarCentrosPorTokens`, insensible a tildes/
+ * mayúsculas y tolerante a texto de sobra) y deja que
+ * `lib/lugares/candidatos.ts#elegirCandidatosLugar` decida si corresponde
+ * ofrecer un único centro, una listita de 2-3, o silencio.
+ *
+ * Nunca lanza: sin nombre, sin tokens útiles, sin sesión o con la base caída,
+ * el resultado es `{ tipo: "ninguno" }` -el cruce es una AYUDA opcional, no
+ * puede tumbar el formulario que lo dispara-.
+ */
+export async function candidatosLugarAction(
+  extraido: LugarExtraidoParaCotejo,
+): Promise<ResultadoCandidatosLugar> {
+  const nombre = (extraido?.nombre ?? "").trim()
+  if (nombre.length === 0) return { tipo: "ninguno" }
+
+  try {
+    const tokens = tokensDeBusquedaLugar(extraido)
+    if (tokens.length === 0) return { tipo: "ninguno" }
+
+    const { supabase } = await requerirSesion({ siNoHaySesion: "lanzar" })
+    const filas = await buscarCentrosPorTokens(supabase, tokens)
+    const centros = filas.map(centroDelCatalogoASugerido)
+
+    return elegirCandidatosLugar(extraido, centros)
+  } catch {
+    return { tipo: "ninguno" }
   }
 }
