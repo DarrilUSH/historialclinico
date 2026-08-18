@@ -411,6 +411,7 @@ export type Database = {
           id: string
           institution: string | null
           mime_type: string | null
+          numero_orden: string | null
           profile_id: string
           raw_ocr_text: string | null
           specialty: string | null
@@ -434,6 +435,7 @@ export type Database = {
           id?: string
           institution?: string | null
           mime_type?: string | null
+          numero_orden?: string | null
           profile_id: string
           raw_ocr_text?: string | null
           specialty?: string | null
@@ -457,6 +459,7 @@ export type Database = {
           id?: string
           institution?: string | null
           mime_type?: string | null
+          numero_orden?: string | null
           profile_id?: string
           raw_ocr_text?: string | null
           specialty?: string | null
@@ -1640,6 +1643,7 @@ export type Database = {
           nueva_fecha: string
           nueva_institucion?: string
           nuevo_medico?: string
+          nuevo_numero_orden?: string
           nuevo_resumen: string
           nuevo_titulo: string
         }
@@ -1659,6 +1663,7 @@ export type Database = {
           id: string
           institution: string | null
           mime_type: string | null
+          numero_orden: string | null
           profile_id: string
           raw_ocr_text: string | null
           specialty: string | null
@@ -1732,6 +1737,7 @@ export type Database = {
           id: string
           institution: string | null
           mime_type: string | null
+          numero_orden: string | null
           profile_id: string
           raw_ocr_text: string | null
           specialty: string | null
@@ -1781,6 +1787,7 @@ export type Database = {
           p_correo: string
           p_fecha: string
           p_mime: string
+          p_numero_orden?: string
           p_resumen: string
           p_sha256: string
           p_storage_path: string

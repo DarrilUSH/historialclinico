@@ -28,20 +28,35 @@
  * esta app es más fácil de usar que un menú flotante dibujado por la página—.
  * El `Select` de `components/ui` es el correcto cuando hace falta contenido
  * rico en las opciones; acá las opciones son nombres de personas.
+ *
+ * ## "Evaluar pendientes" (hotfix de duplicados semánticos)
+ *
+ * Vive en el mismo panel, ABAJO del interruptor y solo cuando está prendido
+ * (`activa`): sin auto-carga encendida no hay compuerta que correr, y la
+ * Server Action (`lib/gmail/auto-carga.ts#evaluarPendientesGmail`) lo
+ * verifica igual del lado del servidor. Es un `useActionState` PROPIO -no
+ * comparte el del interruptor- porque son dos acciones independientes que
+ * pueden dispararse por separado, con su propio velo de progreso: la tanda
+ * puede tardar (hasta `LIMITE_EVALUAR_PENDIENTES_POR_TANDA` llamadas reales a
+ * Gemini), así que "Guardar" del interruptor no se puede quedar esperando a
+ * que termine.
  */
 
 import * as React from "react"
 import { useActionState } from "react"
 
-import { SparklesIcon } from "lucide-react"
+import { RefreshCwIcon, SparklesIcon } from "lucide-react"
 
 import { Alerta } from "@/components/base/alerta"
 import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
-import { guardarAutoCargaGmail } from "@/app/(app)/(con-nav)/perfil/gmail/actions"
+import { VeloEspera } from "@/components/base/velo-espera"
+import { evaluarPendientesGmail, guardarAutoCargaGmail } from "@/app/(app)/(con-nav)/perfil/gmail/actions"
 import {
   ESTADO_AUTO_CARGA_INICIAL,
+  ESTADO_EVALUAR_PENDIENTES_INICIAL,
   type EstadoAutoCargaGmail,
+  type EstadoEvaluarPendientesGmail,
 } from "@/lib/gmail/acciones"
 
 export interface PerfilElegibleAutoCarga {
@@ -69,6 +84,16 @@ export function PanelAutoCarga({
     guardarAutoCargaGmail,
     ESTADO_AUTO_CARGA_INICIAL,
   )
+
+  // "Evaluar pendientes" (hotfix de duplicados semánticos): acción PROPIA,
+  // ver el encabezado del archivo. `evaluarPendientesGmail` no necesita nada
+  // del FormData -mismo criterio que `desconectarGmail`
+  // (`components/gmail/panel-conexion-gmail.tsx`)-, así que el formulario
+  // que la dispara no tiene ni un campo.
+  const [estadoEvaluar, evaluarPendientes, evaluandoPendientes] = useActionState<
+    EstadoEvaluarPendientesGmail,
+    FormData
+  >(evaluarPendientesGmail, ESTADO_EVALUAR_PENDIENTES_INICIAL)
 
   /**
    * Estado local del interruptor, para mostrar u ocultar el selector de perfil
@@ -179,6 +204,37 @@ export function PanelAutoCarga({
           </Boton>
         </form>
       )}
+
+      {activa && (
+        <div className="flex flex-col gap-2 border-t border-border pt-4 chica:pt-3">
+          <p className="text-sm text-muted-foreground chica:text-xs">
+            ¿Prendiste esto con correos que ya estaban esperando? Pasalos por acá.
+          </p>
+
+          {estadoEvaluar.error && <Alerta variante="error">{estadoEvaluar.error}</Alerta>}
+          {!estadoEvaluar.error && estadoEvaluar.mensaje && (
+            <Alerta variante="exito">{estadoEvaluar.mensaje}</Alerta>
+          )}
+
+          <form action={evaluarPendientes}>
+            <Boton
+              type="submit"
+              variant="outline"
+              cargando={evaluandoPendientes}
+              className="w-fit"
+            >
+              <RefreshCwIcon aria-hidden="true" />
+              Evaluar pendientes
+            </Boton>
+          </form>
+        </div>
+      )}
+
+      <VeloEspera
+        visible={evaluandoPendientes}
+        mensaje="Revisando tus correos pendientes…"
+        submensaje="Esto puede tardar un momento. No cierres la aplicación."
+      />
 
       <details className="rounded-lg border border-border p-3 chica:p-2">
         <summary className="cursor-pointer text-base font-medium chica:text-sm">

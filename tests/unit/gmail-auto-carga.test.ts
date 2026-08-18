@@ -36,13 +36,19 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { barrerConexion } from "@/lib/gmail/barrido"
 import {
   cargarSolosLosQueNoTienenDudas,
+  evaluarPendientesGmail,
+  fraseDeEvaluacionPendientes,
   LIMITE_AUTO_POR_PASADA,
+  LIMITE_EVALUAR_PENDIENTES_POR_TANDA,
+  RESULTADO_EVALUAR_PENDIENTES_VACIO,
   type CorreoRecienRegistrado,
   type DependenciasAutoCarga,
+  type DependenciasEvaluarPendientes,
+  type ResultadoEvaluarPendientes,
 } from "@/lib/gmail/auto-carga"
 import type { ParametrosIngestaAutomatica } from "@/lib/documentos/ingesta-automatica"
 import type { TurnoAutomaticoParaIngresar } from "@/lib/gmail/auto-ingesta-admin"
-import type { MensajeParaRegistrar } from "@/lib/gmail/mensajes-admin"
+import type { MensajeParaRegistrar, PendienteSinEvaluar } from "@/lib/gmail/mensajes-admin"
 import { parsearMensajeGmail, type MensajeParseado } from "@/lib/gmail/mensaje"
 import type { DocumentoMedicoConPacienteExtraido } from "@/lib/gemini/schemas"
 import type { ResultadoAnalisisMensaje } from "@/lib/turnos/construir-propuestas"
@@ -227,6 +233,7 @@ interface Espia {
 function mundoFalso(opciones: {
   destino?: { perfilId: string; perfilNombre: string } | null
   huellaDuplicada?: boolean
+  duplicadoSemantico?: "mismo_numero_orden" | "datos_identicos" | null
   extraccion?: DocumentoMedicoConPacienteExtraido
   analisis?: ResultadoAnalisisMensaje
   resultadoCarga?: "creado" | "duplicado" | "ya_resuelto"
@@ -251,6 +258,7 @@ function mundoFalso(opciones: {
     obtenerDestino: async () => destino,
     huellaYaCargada: async () => opciones.huellaDuplicada === true,
     otrosPendientes: async () => [],
+    buscarDuplicadoSemantico: async () => opciones.duplicadoSemantico ?? null,
     leerDocumento: async () => {
       espia.lecturasDeDocumento += 1
       return opciones.extraccion ?? EXTRACCION_PERFECTA
@@ -423,6 +431,39 @@ describe("cada tipo de duda deja el correo a revisión, con su motivo", () => {
     })
     expect(espia.documentosCargados).toHaveLength(0)
     expect(espia.motivos[0].frase).toContain("de qué institución")
+  })
+
+  it("mismo laboratorio y mismo número de orden que un estudio ya confirmado (Capa 2): NO se carga solo", async () => {
+    const espia = mundoFalso({ duplicadoSemantico: "mismo_numero_orden" })
+    const resultado = await cargarSolosLosQueNoTienenDudas(
+      USUARIO,
+      [correoRegistrado(casilla.mensajes["m1"].cuerpo, "documento")],
+      "ya29.token",
+      { bases: bases(), dependencias: espia.deps, hoyIso: HOY },
+    )
+
+    expect(resultado.cargados).toBe(0)
+    expect(resultado.aRevision).toBe(1)
+    expect(espia.documentosCargados).toHaveLength(0)
+    // La lectura con Gemini SÍ corrió: el cotejo semántico necesita la
+    // extracción hecha, a diferencia de la huella (que corta ANTES).
+    expect(espia.lecturasDeDocumento).toBe(1)
+    expect(espia.motivos[0].frase).toContain("mismo número de orden")
+  })
+
+  it("todos los datos extraídos son exactamente iguales a un estudio ya confirmado (Capa 3): NO se carga solo", async () => {
+    const espia = mundoFalso({ duplicadoSemantico: "datos_identicos" })
+    const resultado = await cargarSolosLosQueNoTienenDudas(
+      USUARIO,
+      [correoRegistrado(casilla.mensajes["m1"].cuerpo, "documento")],
+      "ya29.token",
+      { bases: bases(), dependencias: espia.deps, hoyIso: HOY },
+    )
+
+    expect(resultado.cargados).toBe(0)
+    expect(resultado.aRevision).toBe(1)
+    expect(espia.documentosCargados).toHaveLength(0)
+    expect(espia.motivos[0].frase).toContain("exactamente los mismos datos")
   })
 
   it("el correo trae DOS archivos importables: cuál es una decisión humana", async () => {
@@ -641,5 +682,244 @@ describe("robustez de la pasada automática", () => {
     expect(segunda.nuevos).toBe(0)
     expect(segunda.auto.intentados).toBe(0)
     expect(espia.documentosCargados).toHaveLength(1)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ *  4. "Evaluar pendientes" (hotfix de duplicados semánticos): pasa
+ *     correos YA REGISTRADOS -no "recién registrados" por el barrido- por
+ *     la MISMA compuerta. Hallazgo real: 30 correos ya importados cuando
+ *     se prendió el interruptor, ninguno evaluado retroactivamente.
+ * ------------------------------------------------------------------ */
+
+describe("evaluarPendientesGmail", () => {
+  /** Un `PendienteSinEvaluar` de clase documento, con un adjunto que existe en `casilla.adjuntos`. */
+  function pendienteDocumento(id: string, attachmentId = "ATT_1"): PendienteSinEvaluar {
+    return {
+      id,
+      gmailMessageId: `gm-${id}`,
+      asunto: "Resultados",
+      remitenteEmail: "resultados@lab.com.ar",
+      remitenteNombre: "Lab",
+      fechaIso: "2026-08-15T00:00:00.000Z",
+      clase: "documento",
+      adjuntos: [
+        {
+          attachmentId,
+          filename: "resultado.pdf",
+          mimeType: "application/pdf",
+          mimeDeclarado: "application/pdf",
+          size: 24000,
+          apto: true,
+          motivo: null,
+        },
+      ],
+    }
+  }
+
+  function pendienteTurno(id: string): PendienteSinEvaluar {
+    return {
+      id,
+      gmailMessageId: `gm-${id}`,
+      asunto: "Turno",
+      remitenteEmail: "turnos@clinica.com.ar",
+      remitenteNombre: "Turnos",
+      fechaIso: "2026-08-15T00:00:00.000Z",
+      clase: "turno",
+      adjuntos: [],
+    }
+  }
+
+  /** Extiende `mundoFalso` con lo que `evaluarPendientesGmail` necesita de más. */
+  function mundoParaPendientes(opciones: Parameters<typeof mundoFalso>[0] & {
+    pendientes?: PendienteSinEvaluar[]
+    mensajeReobtenido?: MensajeParseado | null
+  } = {}) {
+    const base = mundoFalso(opciones)
+    const pendientes = opciones.pendientes ?? []
+    let llamadasListar = 0
+    const deps: Partial<DependenciasEvaluarPendientes> = {
+      ...base.deps,
+      listarPendientes: async (_userId, limite) => {
+        llamadasListar += 1
+        return pendientes.slice(0, limite)
+      },
+      reobtenerMensajeCompleto: async () =>
+        opciones.mensajeReobtenido !== undefined ? opciones.mensajeReobtenido : null,
+    }
+    return { ...base, deps, llamadasListar: () => llamadasListar }
+  }
+
+  it("un documento pendiente, nunca evaluado, se carga solo — igual que si el barrido lo viera de nuevo", async () => {
+    casilla.adjuntos["ATT_1"] = { estado: 200, cuerpo: { size: 8, data: b64("%PDF-1.4") } }
+
+    const mundo = mundoParaPendientes({ pendientes: [pendienteDocumento("correo-1")] })
+
+    const resultado = await evaluarPendientesGmail(USUARIO, "ya29.token", {
+      bases: bases(),
+      dependencias: mundo.deps,
+      hoyIso: HOY,
+    })
+
+    expect(resultado).toEqual<ResultadoEvaluarPendientes>({
+      intentados: 1,
+      cargados: 1,
+      documentos: 1,
+      turnos: 0,
+      aRevision: 0,
+      errores: 0,
+      hayMas: false,
+    })
+    expect(mundo.documentosCargados).toHaveLength(1)
+    expect(mundo.motivos).toHaveLength(0)
+  })
+
+  it("un turno pendiente necesita volver a pedirle el cuerpo a Gmail (nunca se persiste)", async () => {
+    const cuerpoRefetch = parsearMensajeGmail(
+      correoDeTurno(
+        "gm-correo-2",
+        "Turno",
+        "Turno confirmado\nPaciente: GOMEZ ROBERTO\nFecha: 25/08/2026 a las 14:30",
+      ).cuerpo,
+    ) as MensajeParseado
+
+    const mundo = mundoParaPendientes({
+      pendientes: [pendienteTurno("correo-2")],
+      mensajeReobtenido: cuerpoRefetch,
+    })
+
+    const resultado = await evaluarPendientesGmail(USUARIO, "ya29.token", {
+      bases: bases(),
+      dependencias: mundo.deps,
+      hoyIso: HOY,
+    })
+
+    expect(resultado.cargados).toBe(1)
+    expect(resultado.turnos).toBe(1)
+    expect(mundo.turnosCargados).toHaveLength(1)
+  })
+
+  it("Gmail ya no tiene el mensaje del turno (borrado, o movió de casilla): queda con motivo genérico, no revienta la tanda", async () => {
+    const mundo = mundoParaPendientes({
+      pendientes: [pendienteTurno("correo-3")],
+      mensajeReobtenido: null,
+    })
+
+    const resultado = await evaluarPendientesGmail(USUARIO, "ya29.token", {
+      bases: bases(),
+      dependencias: mundo.deps,
+      hoyIso: HOY,
+    })
+
+    expect(resultado.errores).toBe(1)
+    expect(resultado.cargados).toBe(0)
+    expect(mundo.motivos[0].correoId).toBe("correo-3")
+  })
+
+  it("una duda (mismo criterio que el barrido) deja el correo con su motivo, sin cargarlo", async () => {
+    casilla.adjuntos["ATT_1"] = { estado: 200, cuerpo: { size: 8, data: b64("%PDF-1.4") } }
+
+    const mundo = mundoParaPendientes({
+      pendientes: [pendienteDocumento("correo-4")],
+      extraccion: { ...EXTRACCION_PERFECTA, paciente: "" },
+    })
+
+    const resultado = await evaluarPendientesGmail(USUARIO, "ya29.token", {
+      bases: bases(),
+      dependencias: mundo.deps,
+      hoyIso: HOY,
+    })
+
+    expect(resultado.cargados).toBe(0)
+    expect(resultado.aRevision).toBe(1)
+    expect(mundo.motivos[0].frase).toContain("no dice a nombre de quién viene")
+  })
+
+  it("interruptor apagado (sin destino): no evalúa nada, ni siquiera lista los pendientes", async () => {
+    const mundo = mundoParaPendientes({ destino: null, pendientes: [pendienteDocumento("correo-5")] })
+
+    const resultado = await evaluarPendientesGmail(USUARIO, "ya29.token", {
+      bases: bases(),
+      dependencias: mundo.deps,
+      hoyIso: HOY,
+    })
+
+    expect(resultado).toEqual(RESULTADO_EVALUAR_PENDIENTES_VACIO)
+    expect(mundo.llamadasListar()).toBe(0)
+  })
+
+  it("sin ningún pendiente por evaluar: resultado vacío", async () => {
+    const mundo = mundoParaPendientes({ pendientes: [] })
+
+    const resultado = await evaluarPendientesGmail(USUARIO, "ya29.token", {
+      bases: bases(),
+      dependencias: mundo.deps,
+      hoyIso: HOY,
+    })
+
+    expect(resultado).toEqual(RESULTADO_EVALUAR_PENDIENTES_VACIO)
+  })
+
+  it("la tanda respeta LIMITE_EVALUAR_PENDIENTES_POR_TANDA y marca hayMas", async () => {
+    casilla.adjuntos["ATT_1"] = { estado: 200, cuerpo: { size: 8, data: b64("%PDF-1.4") } }
+
+    const muchosMasQueElLimite = Array.from(
+      { length: LIMITE_EVALUAR_PENDIENTES_POR_TANDA + 5 },
+      (_, i) => pendienteDocumento(`correo-${i}`),
+    )
+    const mundo = mundoParaPendientes({ pendientes: muchosMasQueElLimite })
+
+    const resultado = await evaluarPendientesGmail(USUARIO, "ya29.token", {
+      bases: bases(),
+      dependencias: mundo.deps,
+      hoyIso: HOY,
+    })
+
+    expect(resultado.intentados).toBe(LIMITE_EVALUAR_PENDIENTES_POR_TANDA)
+    expect(resultado.hayMas).toBe(true)
+  })
+})
+
+describe("fraseDeEvaluacionPendientes", () => {
+  function resultado(parcial: Partial<ResultadoEvaluarPendientes>): ResultadoEvaluarPendientes {
+    return { ...RESULTADO_EVALUAR_PENDIENTES_VACIO, ...parcial }
+  }
+
+  it("nada por evaluar", () => {
+    expect(fraseDeEvaluacionPendientes(resultado({}))).toBe("No había ningún correo pendiente sin evaluar.")
+  })
+
+  it("todo cargado solo", () => {
+    expect(fraseDeEvaluacionPendientes(resultado({ intentados: 3, cargados: 3, documentos: 3 }))).toBe(
+      "3 cargados solos.",
+    )
+  })
+
+  it("el ejemplo textual del encargo: algunos cargados, algunos a revisión", () => {
+    expect(
+      fraseDeEvaluacionPendientes(
+        resultado({ intentados: 8, cargados: 3, documentos: 3, aRevision: 5 }),
+      ),
+    ).toBe("3 cargados solos, 5 quedaron para vos con su motivo.")
+  })
+
+  it("un solo cargado y un solo a revisión: singular, no plural", () => {
+    expect(
+      fraseDeEvaluacionPendientes(resultado({ intentados: 2, cargados: 1, documentos: 1, aRevision: 1 })),
+    ).toBe("1 cargado solo, 1 quedó para vos con su motivo.")
+  })
+
+  it("con errores, además de cargados y a revisión", () => {
+    expect(
+      fraseDeEvaluacionPendientes(
+        resultado({ intentados: 3, cargados: 1, documentos: 1, aRevision: 1, errores: 1 }),
+      ),
+    ).toBe("1 cargado solo, 1 quedó para vos con su motivo, 1 no se pudo leer.")
+  })
+
+  it("hayMas agrega la invitación a tocar de nuevo", () => {
+    expect(
+      fraseDeEvaluacionPendientes(resultado({ intentados: 3, aRevision: 3, hayMas: true })),
+    ).toBe("3 quedaron para vos con su motivo. Tocá «Evaluar pendientes» de nuevo para seguir.")
   })
 })

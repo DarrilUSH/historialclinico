@@ -101,6 +101,52 @@ describe("emparejarPorNombreYTamano", () => {
     expect(emparejarPorNombreYTamano(correos).size).toBe(0)
   })
 
+  it("TOLERANCIA ±2% — 2 bytes de diferencia sobre un PDF regenerado (evidencia real: Sanatorio San Jorge) SÍ se marca", () => {
+    const correos = [
+      correo("correo-A", [{ attachmentId: "att-1", filename: "orden.pdf", size: 51234 }]),
+      correo("correo-B", [{ attachmentId: "att-2", filename: "orden.pdf", size: 51236 }]),
+    ]
+
+    const emparejados = emparejarPorNombreYTamano(correos)
+    expect(emparejados.get("correo-A:att-1")).toBe("correo-B")
+    expect(emparejados.get("correo-B:att-2")).toBe("correo-A")
+  })
+
+  it("TOLERANCIA ±2% — justo en el borde (2,00%) SÍ se marca", () => {
+    const base = 100000
+    const correos = [
+      correo("correo-A", [{ attachmentId: "att-1", filename: "orden.pdf", size: base }]),
+      correo("correo-B", [{ attachmentId: "att-2", filename: "orden.pdf", size: base * 1.02 }]),
+    ]
+
+    expect(emparejarPorNombreYTamano(correos).size).toBe(2)
+  })
+
+  it("TOLERANCIA ±2% — pasado el borde (5%) NO se marca: son archivos distintos", () => {
+    const base = 100000
+    const correos = [
+      correo("correo-A", [{ attachmentId: "att-1", filename: "orden.pdf", size: base }]),
+      correo("correo-B", [{ attachmentId: "att-2", filename: "orden.pdf", size: base * 1.05 }]),
+    ]
+
+    expect(emparejarPorNombreYTamano(correos).size).toBe(0)
+  })
+
+  it("TOLERANCIA ±2% — tres correos con tamaños escalonados dentro de tolerancia quedan todos agrupados", () => {
+    const correos = [
+      correo("correo-A", [{ attachmentId: "att-1", filename: "orden.pdf", size: 100000 }]),
+      correo("correo-B", [{ attachmentId: "att-2", filename: "orden.pdf", size: 100500 }]),
+      correo("correo-C", [{ attachmentId: "att-3", filename: "orden.pdf", size: 101000 }]),
+    ]
+
+    const emparejados = emparejarPorNombreYTamano(correos)
+    expect(emparejados.size).toBe(3)
+    for (const [clave, otroCorreoId] of emparejados) {
+      const [correoId] = clave.split(":")
+      expect(otroCorreoId).not.toBe(correoId)
+    }
+  })
+
   it("distintos adjuntos DENTRO del mismo correo no se emparejan entre sí", () => {
     const correos = [
       correo("correo-A", [

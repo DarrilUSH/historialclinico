@@ -83,6 +83,8 @@ export interface ParametrosIngestaAutomatica {
   fecha: string
   resumen: string
   textoOcr: string
+  /** Número de orden/protocolo detectado por Gemini (hotfix de duplicados semánticos), o `""` si no traía. */
+  numeroOrden: string
 }
 
 /** El archivo no se pudo ingerir por sí mismo (vacío, demasiado grande, tipo no soportado). */
@@ -163,6 +165,7 @@ export async function ingestarDocumentoAutomatico(
       fecha: parametros.fecha,
       resumen: parametros.resumen,
       textoOcr: parametros.textoOcr,
+      numeroOrden: parametros.numeroOrden,
     })
   } catch (error) {
     await compensar(storagePath)

@@ -39,6 +39,7 @@ import * as React from "react"
 
 import { FormularioRevision } from "@/components/documentos/formulario-revision"
 import { VeloEspera } from "@/components/base/velo-espera"
+import type { DuplicadoSemanticoParaCliente } from "@/lib/documentos/duplicados-semanticos"
 import type { DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
 import type { CategoriaDocumento } from "@/types/dominio"
 
@@ -78,6 +79,14 @@ function extraerDocumento(cuerpo: unknown): DocumentoMedicoExtraido | null {
   return null
 }
 
+/** `duplicadoSemantico` viaja en la misma respuesta que `extraccion` (Capas 2/3, ver `app/api/documentos/extraer/route.ts`). */
+function extraerDuplicadoSemantico(cuerpo: unknown): DuplicadoSemanticoParaCliente | null {
+  if (cuerpo && typeof cuerpo === "object" && "duplicadoSemantico" in cuerpo) {
+    return (cuerpo as { duplicadoSemantico: DuplicadoSemanticoParaCliente | null }).duplicadoSemantico
+  }
+  return null
+}
+
 export function PantallaProcesando({
   documentoId,
   tituloProvisional,
@@ -88,6 +97,9 @@ export function PantallaProcesando({
   const [estado, setEstado] = React.useState<Estado>("leyendo")
   const [extraccion, setExtraccion] = React.useState<DocumentoMedicoExtraido | null>(null)
   const [mensajeError, setMensajeError] = React.useState<string | null>(null)
+  const [duplicadoSemantico, setDuplicadoSemantico] = React.useState<DuplicadoSemanticoParaCliente | null>(
+    null,
+  )
   const disparado = React.useRef(false)
 
   React.useEffect(() => {
@@ -109,6 +121,7 @@ export function PantallaProcesando({
 
         if (extraida) {
           setExtraccion(extraida)
+          setDuplicadoSemantico(extraerDuplicadoSemantico(cuerpo))
         } else {
           setMensajeError(extraerMensajeError(cuerpo))
         }
@@ -139,6 +152,7 @@ export function PantallaProcesando({
       documentoId={documentoId}
       extraccion={extraccion}
       mensajeError={mensajeError}
+      duplicadoSemantico={duplicadoSemantico}
       tituloProvisional={tituloProvisional}
       categoriaProvisional={categoriaProvisional}
       fechaProvisional={fechaProvisional}

@@ -56,6 +56,7 @@ import "server-only"
 import { ingestarDocumentoAutomatico, ErrorIngestaAutomatica } from "@/lib/documentos/ingesta-automatica"
 import { calcularHuellaSha256 } from "@/lib/documentos/huella"
 import { sugerirTitulo } from "@/lib/documentos/sugerir-titulo"
+import type { DatosComparablesDocumento, MotivoDuplicadoSemantico } from "@/lib/documentos/duplicados-semanticos"
 import { extraerJson } from "@/lib/gemini/client"
 import { PROMPT_DOCUMENTO_MEDICO_CON_PACIENTE } from "@/lib/gemini/prompt-documento"
 import {
@@ -76,8 +77,13 @@ import {
   type ResultadoIngresoAutomatico,
 } from "@/lib/gmail/auto-ingesta-admin"
 import { emparejarPorNombreYTamano, type CorreoParaDeteccion } from "@/lib/gmail/deteccion-duplicados"
-import { descargarAdjunto, type OpcionesBases } from "@/lib/gmail/google-api"
-import type { MensajeParseado } from "@/lib/gmail/mensaje"
+import { buscarDuplicadoSemanticoEnPerfil } from "@/lib/gmail/duplicados-semanticos-admin"
+import { descargarAdjunto, obtenerMensajeCompleto, type OpcionesBases } from "@/lib/gmail/google-api"
+import { parsearMensajeGmail, type MensajeParseado } from "@/lib/gmail/mensaje"
+import {
+  listarPendientesSinEvaluarAutoCarga,
+  type PendienteSinEvaluar,
+} from "@/lib/gmail/mensajes-admin"
 import { huellaYaCargadaEnPerfil, otrosPendientesConAdjuntos } from "@/lib/gmail/pendientes-admin"
 import { analizarMensajeTurno } from "@/lib/turnos/analizar-mensaje"
 import { combinarFechaHoraUshuaia, hoyIsoUshuaia } from "@/lib/turnos/fecha"
@@ -129,6 +135,15 @@ export interface DependenciasAutoCarga {
   huellaYaCargada: (perfilId: string, huella: string) => Promise<boolean>
   /** Los OTROS correos pendientes de la cuenta, con sus adjuntos, para la marca de "posible duplicado". */
   otrosPendientes: (userId: string, exceptoCorreoId: string) => Promise<CorreoParaDeteccion[]>
+  /**
+   * Duplicados SEMÁNTICOS (Capas 2 y 3): ¿la extracción ya recién leída
+   * coincide con algún documento CONFIRMADO del perfil de destino? `null` si
+   * no coincide con ninguno.
+   */
+  buscarDuplicadoSemantico: (
+    perfilId: string,
+    datos: DatosComparablesDocumento,
+  ) => Promise<MotivoDuplicadoSemantico | null>
   /** Lee un documento con Gemini, pidiéndole además a nombre de quién está. */
   leerDocumento: (
     bytes: Uint8Array,
@@ -175,6 +190,7 @@ const DEPENDENCIAS_REALES: DependenciasAutoCarga = {
   obtenerDestino: obtenerDestinoAutoIngesta,
   huellaYaCargada: huellaYaCargadaEnPerfil,
   otrosPendientes: otrosPendientesConAdjuntos,
+  buscarDuplicadoSemantico: buscarDuplicadoSemanticoEnPerfil,
   leerDocumento: leerDocumentoConGemini,
   leerTurno: analizarMensajeTurno,
   cargarDocumento: ingestarDocumentoAutomatico,
@@ -201,8 +217,13 @@ export interface CorreoRecienRegistrado {
 /**
  * Intenta cargar solo UN correo. Devuelve los motivos por los que no se pudo
  * (vacío = se cargó), o lanza si algo falló de verdad.
+ *
+ * Exportada (y no `function` privada) porque `evaluarPendientesGmail`, más
+ * abajo, la reutiliza tal cual para los correos que YA estaban en la bandeja
+ * -es literalmente la misma decisión que toma el barrido para un correo
+ * "recién registrado", nada más que sobre un correo que llegó antes-.
  */
-async function intentarUno(
+export async function intentarUno(
   userId: string,
   destino: DestinoAutoIngesta,
   entrada: CorreoRecienRegistrado,
@@ -278,6 +299,23 @@ async function intentarDocumento(
   const extraccion = await deps.leerDocumento(bytes, adjunto.mimeType as string)
   const titulo = sugerirTitulo(extraccion)
 
+  // Duplicados SEMÁNTICOS (Capas 2 y 3): necesitan la extracción ya hecha, así
+  // que corren DESPUÉS de Gemini -a diferencia de la huella y la marca de
+  // "posible duplicado" de arriba, que se resuelven ANTES para no gastar la
+  // llamada al modelo si ya se puede cortar por bytes o por metadata-.
+  const duplicadoSemantico = await deps.buscarDuplicadoSemantico(destino.perfilId, {
+    fecha: extraccion.fecha,
+    categoria: extraccion.categoria,
+    institucion: extraccion.institucion,
+    medico: extraccion.medico,
+    numeroOrden: extraccion.numero_orden ?? "",
+    metricas: extraccion.metricas.map((metrica) => ({
+      nombre: metrica.nombre,
+      valor: metrica.valor,
+      unidad: metrica.unidad,
+    })),
+  })
+
   const veredicto = evaluarDocumentoParaAutoCarga({
     pacienteDetectado: extraccion.paciente,
     nombrePerfilDestino: destino.perfilNombre,
@@ -286,6 +324,7 @@ async function intentarDocumento(
     tituloDetectado: titulo.detectado,
     huellaDuplicada: false,
     marcadoPosibleDuplicado: false,
+    duplicadoSemantico,
     hoyIso,
   })
 
@@ -304,6 +343,7 @@ async function intentarDocumento(
     fecha: extraccion.fecha,
     resumen: extraccion.resumen,
     textoOcr: extraccion.texto_completo ?? "",
+    numeroOrden: extraccion.numero_orden ?? "",
   })
 
   return {
@@ -440,4 +480,208 @@ export async function cargarSolosLosQueNoTienenDudas(
   }
 
   return resultado
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  "EVALUAR PENDIENTES" — la compuerta, pero sobre correos que YA estaban
+ *  esperando (hotfix de duplicados semánticos)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * El barrido (arriba) solo mira correos NUEVOS de cada pasada -es lo que
+ * `recienRegistrados` significa en `barrerConexion`-. Eso deja un hueco real:
+ * alguien que prende el interruptor con correos que YA estaban en la bandeja
+ * (de antes de prender la auto-carga, o de una tanda que no alcanzó a
+ * evaluar) nunca los ve pasar por la compuerta -quedan pendientes para
+ * siempre, sin que el interruptor haga nada por ellos-. Hallazgo real: el
+ * usuario prendió la carga automática con 30 correos ya importados y ninguno
+ * se evaluó retroactivamente.
+ *
+ * La solución reutiliza `intentarUno` -la MISMA decisión que toma el
+ * barrido- sobre correos reconstruidos desde `gmail_messages` en vez de
+ * "recién registrados". La única asimetría real: el CUERPO del correo nunca
+ * se persiste (`docs/minimizacion-datos.md` §10.6), así que un pendiente de
+ * clase `turno` necesita volver a pedírselo a Gmail -un `documento` no, sus
+ * adjuntos ya están en `gmail_messages.attachments`-.
+ */
+
+/** Cuántos correos pendientes se evalúan por cada tanda -mismo límite que la pasada automática del barrido, mismo motivo de costo/tiempo. */
+export const LIMITE_EVALUAR_PENDIENTES_POR_TANDA = LIMITE_AUTO_POR_PASADA
+
+export interface ResultadoEvaluarPendientes extends ResultadoAutoCarga {
+  /** `true` si el backlog sin evaluar es más grande que la tanda que se acaba de procesar -"tocá de nuevo para seguir". */
+  hayMas: boolean
+}
+
+export const RESULTADO_EVALUAR_PENDIENTES_VACIO: ResultadoEvaluarPendientes = {
+  ...RESULTADO_AUTO_VACIO,
+  hayMas: false,
+}
+
+/** Lo que `evaluarPendientesGmail` necesita del mundo exterior, además de `DependenciasAutoCarga`. */
+export interface DependenciasEvaluarPendientes extends DependenciasAutoCarga {
+  listarPendientes: (userId: string, limite: number) => Promise<PendienteSinEvaluar[]>
+  /**
+   * Solo hace falta para los TURNOS: `gmail_messages` no persiste el cuerpo,
+   * así que se re-lee de Gmail con el mismo `gmail_message_id` guardado. `null`
+   * si Gmail ya no tiene ese mensaje (lo borraron, se movió de casilla).
+   */
+  reobtenerMensajeCompleto: (
+    accessToken: string,
+    gmailMessageId: string,
+    bases?: OpcionesBases,
+  ) => Promise<MensajeParseado | null>
+}
+
+async function reobtenerMensajeCompletoReal(
+  accessToken: string,
+  gmailMessageId: string,
+  bases?: OpcionesBases,
+): Promise<MensajeParseado | null> {
+  const crudo = await obtenerMensajeCompleto(accessToken, gmailMessageId, bases)
+  return parsearMensajeGmail(crudo)
+}
+
+const DEPENDENCIAS_EVALUAR_PENDIENTES_REALES: DependenciasEvaluarPendientes = {
+  ...DEPENDENCIAS_REALES,
+  listarPendientes: listarPendientesSinEvaluarAutoCarga,
+  reobtenerMensajeCompleto: reobtenerMensajeCompletoReal,
+}
+
+/**
+ * Pasa hasta `LIMITE_EVALUAR_PENDIENTES_POR_TANDA` correos YA PENDIENTES (sin
+ * evaluar nunca antes) por la compuerta automática, para la cuenta `userId`.
+ *
+ * Si la auto-carga está apagada (o nunca se configuró un destino) devuelve el
+ * resultado vacío sin tocar nada -mismo criterio que `cargarSolosLosQueNoTienenDudas`-:
+ * "Evaluar pendientes" no tiene sentido sin el interruptor prendido, y la
+ * pantalla ya no ofrece el botón en ese caso, pero esta función es la misma
+ * si igual se llama.
+ *
+ * Un correo que falla (Gmail no contesta, la RPC rechaza) no aborta la tanda:
+ * se cuenta como error, queda con un motivo genérico, y la persona puede
+ * tocar "Evaluar pendientes" de nuevo más tarde -mismo criterio de robustez
+ * que el resto del circuito de Gmail-.
+ */
+export async function evaluarPendientesGmail(
+  userId: string,
+  accessToken: string,
+  opciones: OpcionesAutoCarga & { dependencias?: Partial<DependenciasEvaluarPendientes> } = {},
+): Promise<ResultadoEvaluarPendientes> {
+  const deps: DependenciasEvaluarPendientes = {
+    ...DEPENDENCIAS_EVALUAR_PENDIENTES_REALES,
+    ...opciones.dependencias,
+  }
+  const resultado: ResultadoEvaluarPendientes = { ...RESULTADO_EVALUAR_PENDIENTES_VACIO }
+
+  const destino = await deps.obtenerDestino(userId)
+  if (!destino) return resultado
+
+  const hoyIso = opciones.hoyIso ?? hoyIsoUshuaia()
+  const limite = LIMITE_EVALUAR_PENDIENTES_POR_TANDA
+
+  const pendientes = await deps.listarPendientes(userId, limite)
+  if (pendientes.length === 0) return resultado
+
+  // Proxy barato de "queda más": si la tanda vino llena, lo más probable es
+  // que el backlog siga teniendo. No es exacto (podría ser que quedaran
+  // exactamente `limite`), pero el peor caso es "tocá de nuevo" una vez de
+  // más -no perder ni un correo, que sí sería grave-.
+  resultado.hayMas = pendientes.length >= limite
+
+  for (const pendiente of pendientes) {
+    resultado.intentados += 1
+
+    try {
+      let entrada: CorreoRecienRegistrado
+
+      if (pendiente.clase === "turno") {
+        const mensaje = await deps.reobtenerMensajeCompleto(accessToken, pendiente.gmailMessageId, opciones.bases)
+        if (!mensaje) {
+          throw new Error("Gmail ya no tiene ese mensaje.")
+        }
+        entrada = { correoId: pendiente.id, mensaje, clase: "turno" }
+      } else {
+        entrada = {
+          correoId: pendiente.id,
+          clase: "documento",
+          mensaje: {
+            id: pendiente.gmailMessageId,
+            remitenteEmail: pendiente.remitenteEmail,
+            remitenteNombre: pendiente.remitenteNombre,
+            asunto: pendiente.asunto,
+            fechaIso: pendiente.fechaIso,
+            adjuntos: pendiente.adjuntos,
+            // `intentarDocumento` no lo usa (a diferencia de `intentarTurno`):
+            // el cuerpo nunca se persistió, así que no hay de dónde traerlo,
+            // y no hace falta -ver el bloque de comentarios de arriba-.
+            cuerpoTexto: "",
+          },
+        }
+      }
+
+      const intento = await intentarUno(userId, destino, entrada, deps, opciones, accessToken, hoyIso)
+
+      if (intento.cargado) {
+        resultado.cargados += 1
+        if (intento.tipo === "documento") resultado.documentos += 1
+        else resultado.turnos += 1
+        continue
+      }
+
+      resultado.aRevision += 1
+      const frase = fraseDeMotivos(intento.motivos)
+      if (frase) {
+        await deps.anotarMotivo(userId, pendiente.id, frase)
+      }
+    } catch (error) {
+      resultado.errores += 1
+      await deps
+        .anotarMotivo(
+          userId,
+          pendiente.id,
+          "Quedó para que lo mires vos: no pudimos leerlo automáticamente.",
+        )
+        .catch(() => undefined)
+
+      console.error(
+        `${PREFIJO} no se pudo evaluar el correo pendiente ${pendiente.id} (queda para revisar):`,
+        error instanceof Error ? error.message : error,
+      )
+    }
+  }
+
+  return resultado
+}
+
+/**
+ * "3 cargados solos, 5 quedaron para vos con su motivo." — la frase que ve la
+ * persona después de tocar "Evaluar pendientes". Mismo espíritu que
+ * `fraseDeResultado` (`lib/gmail/barrido.ts`): lo que entró SOLO se dice
+ * primero y con esas palabras -"cargados solos", nunca "cargados" a secas-,
+ * porque es la novedad más importante.
+ */
+export function fraseDeEvaluacionPendientes(resultado: ResultadoEvaluarPendientes): string {
+  if (resultado.intentados === 0) {
+    return "No había ningún correo pendiente sin evaluar."
+  }
+
+  const partes: string[] = []
+  if (resultado.cargados > 0) {
+    partes.push(resultado.cargados === 1 ? "1 cargado solo" : `${resultado.cargados} cargados solos`)
+  }
+  if (resultado.aRevision > 0) {
+    partes.push(
+      resultado.aRevision === 1
+        ? "1 quedó para vos con su motivo"
+        : `${resultado.aRevision} quedaron para vos con su motivo`,
+    )
+  }
+  if (resultado.errores > 0) {
+    partes.push(resultado.errores === 1 ? "1 no se pudo leer" : `${resultado.errores} no se pudieron leer`)
+  }
+
+  const cuerpo = partes.length > 0 ? partes.join(", ") : "no hubo novedades"
+  const cola = resultado.hayMas ? " Tocá «Evaluar pendientes» de nuevo para seguir." : ""
+
+  return `${cuerpo}.${cola}`
 }

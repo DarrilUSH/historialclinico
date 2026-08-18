@@ -132,6 +132,17 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
         'leer el archivo. NO es una transcripción completa: omitir este campo si el documento es ' +
         'largo o si el resumen ya alcanza para representarlo.',
     },
+    numero_orden: {
+      type: Type.STRING,
+      description:
+        'OPCIONAL — el número de orden, protocolo o identificador del estudio tal como lo imprime ' +
+        'el laboratorio o la institución (por ejemplo "N° de Orden: 1446188", "Protocolo 24601", ' +
+        '"OP-3391"). Copiá solo el número/código, sin el rótulo ("1446188", no "N° de Orden: ' +
+        '1446188"). Es el dato que el detector de duplicados usa para reconocer el MISMO estudio ' +
+        'aunque el PDF se haya vuelto a generar con otros bytes -no lo confundas con el número de ' +
+        'afiliado, el DNI, ni ningún otro código del documento-. Cadena vacía si el documento no trae ' +
+        'ningún número de orden visible — no lo inventes.',
+    },
   },
   required: ['fecha', 'especialidad', 'institucion', 'medico', 'resumen', 'categoria', 'metricas'],
   propertyOrdering: [
@@ -143,6 +154,7 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
     'categoria',
     'metricas',
     'texto_completo',
+    'numero_orden',
   ],
 };
 
@@ -232,6 +244,13 @@ export interface DocumentoMedicoExtraido {
   categoria: CategoriaDocumentoExtraida;
   metricas: MetricaExtraida[];
   texto_completo?: string;
+  /**
+   * Número de orden/protocolo del estudio, tal como lo imprime el laboratorio
+   * (hotfix de duplicados semánticos). `?` porque NO está en `required` del
+   * schema -no todo documento lo trae (una receta o un informe de imágenes
+   * rara vez tiene uno)-, mismo criterio que `texto_completo`.
+   */
+  numero_orden?: string;
 }
 
 /**

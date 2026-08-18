@@ -120,9 +120,59 @@ fuerza la carga igual, porque puede ser una decisión legítima-.
 **Qué detecta y qué no:** archivos BYTE A BYTE idénticos. Un PDF que la
 clínica REGENERA -mismo contenido, pero el motor que lo arma le puso otra
 fecha de generación en los metadatos, o lo comprimió distinto- tiene bytes
-distintos y no matchea. No es un bug: es el límite de comparar por hash en vez
-de por contenido semántico, y se declara acá para no prometer más de lo que
-hace.
+distintos y no matchea. Este límite quedó DECLARADO como deuda hasta el
+primer día real de uso: al usuario le llegó un par de PDF del Sanatorio San
+Jorge con el MISMO N° DE ORDEN (1446188), contenido idéntico, 2 bytes de
+diferencia, y la huella no avisó nada. §2.4bis mitiga exactamente ese caso con
+dos capas adicionales sobre datos ya extraídos con Gemini.
+
+### 2.4bis Duplicados SEMÁNTICOS: cuando la huella no alcanza (hotfix sobre el hotfix)
+
+Dos capas más, `lib/documentos/duplicados-semanticos.ts` (puras, sin red),
+que cotejan la EXTRACCIÓN de Gemini en vez de los bytes:
+
+- **Capa 2 — mismo laboratorio + mismo N° de orden.** Gemini extrae ahora un
+  campo `numero_orden` (opcional, `lib/gemini/schemas.ts`) del documento -el
+  número de orden/protocolo que el laboratorio imprime-, y se persiste en
+  `documents.numero_orden` (`20260818180000_duplicados_semanticos.sql`): es
+  un dato clínico-administrativo del ESTUDIO, no de una persona, y sirve para
+  siempre (no solo para este cotejo). Si el nuevo documento coincide en
+  institución (normalizada) + número de orden con un documento YA CONFIRMADO
+  del perfil, es duplicado directo -exactamente el caso del Sanatorio San
+  Jorge-.
+- **Capa 3 — TODOS los datos extraídos exactamente iguales.** Fecha
+  (condición NECESARIA, se compara primero: fecha distinta = JAMÁS
+  duplicado, sin importar cuántas métricas coincidan -un estudio repetido en
+  otra fecha con el mismo resultado es un dato válido para Tendencias, no un
+  duplicado-), categoría, institución, médico y CADA métrica de laboratorio
+  con su valor y unidad. Institución/médico/nombres de métrica se normalizan
+  (tildes, mayúsculas, espacios) antes de comparar.
+
+**Dónde corre:** en `POST /api/documentos/extraer` -recién ahí existen datos
+estructurados con los que comparar-, justo después de validar la extracción
+de Gemini, contra los documentos YA CONFIRMADOS del mismo perfil
+(`lib/documentos/duplicados-semanticos-consulta.ts`, cliente del usuario). Es
+el mismo punto de choque para las TRES puertas de entrada -manual, Web Share
+Target, "Revisar este estudio" de Gmail-, porque las tres convergen en
+`/estudios/nuevo/procesando`, la misma pantalla de revisión. Si encuentra
+algo, `FormularioRevision` muestra la franja "Es un duplicado: [motivo] —
+idéntico a «X» del DD/MM" con **Ver ese estudio** y **Cargar igual** -esta
+última solo descarta el aviso: a diferencia de la huella, acá el documento YA
+existe (fue creado antes de la extracción), así que el único botón que
+persiste sigue siendo "Confirmar y guardar"-.
+
+**En la AUTO-INGESTA** (§9), la misma compuerta corre con
+`lib/gmail/duplicados-semanticos-admin.ts` (`service_role`, sin sesión):
+si hay sospecha de Capa 2 o Capa 3, el correo NO se carga solo -queda a
+revisión humana con el motivo escrito (`duplicado_numero_orden` /
+`duplicado_datos_identicos`, `lib/gmail/auto-ingesta.ts`)-.
+
+**Qué NO mitiga:** un documento que la persona nunca confirmó no participa
+como candidato -institución/médico/número de orden y `lab_metrics` solo
+existen después de `confirmar_documento_recien_subido`-, y los documentos
+anteriores a `20260818180000` no tienen `numero_orden` (sin backfill posible:
+no hay forma de derivarlo sin volver a llamar a Gemini), así que la Capa 2 no
+los alcanza -la Capa 3 sí, porque no depende de esa columna-.
 
 **Los documentos de ANTES de esta migración** nacen sin huella
 (`content_sha256 = NULL`): no hubo backfill en SQL porque los bytes viven en
@@ -136,11 +186,16 @@ subida en una corrida de minutos-, así que un perfil con historial viejo
 termina de backfillearse solo, a lo largo de varias cargas.
 
 **Una marca discreta y previa, en la bandeja de Gmail:** entre los correos
-PENDIENTES, si dos traen un adjunto con el mismo (nombre, tamaño) -la
-metadata que el barrido YA registra, sin bajar ningún byte-,
+PENDIENTES, si dos traen un adjunto con el mismo NOMBRE y un tamaño dentro
+del **±2%** -la metadata que el barrido YA registra, sin bajar ningún byte-,
 `lib/gmail/deteccion-duplicados.ts` marca a cada uno con "Posible duplicado
-del correo de las {hora}". No bloquea nada y no reemplaza al cotejo real: es
-un aviso ANTES de gastar la llamada a Gmail que baja el adjunto.
+del correo de las {hora}". La tolerancia de tamaño (antes exigía el tamaño
+EXACTO) es el mismo ajuste del hotfix de duplicados semánticos: un PDF
+regenerado por la clínica puede pesar unos pocos bytes distinto sin dejar de
+ser, a los ojos de cualquiera, "el mismo archivo" -exigir el tamaño exacto
+dejaba afuera justo el caso real que más costó (2 bytes de diferencia)-. No
+bloquea nada y no reemplaza al cotejo real: es un aviso ANTES de gastar la
+llamada a Gmail que baja el adjunto.
 
 ### 2.5 Los filtros se aprenden del uso, porque no hay catálogo que los tenga
 
@@ -261,7 +316,13 @@ select id, status_code, content from net._http_response order by created desc li
 | `lib/gmail/pendientes-admin.ts` | `service_role`: las dos consultas sin sesión que la pasada automática necesita (huella ya cargada, otros pendientes para la marca de posible duplicado). |
 | `lib/documentos/ingesta-automatica.ts` | Sube el adjunto a Storage con `service_role` y crea el documento automático, con compensación si la RPC no devuelve `creado`. |
 | `lib/gemini/schemas.ts` / `lib/gemini/prompt-documento.ts` | `SCHEMA_DOCUMENTO_MEDICO_CON_PACIENTE` / `PROMPT_DOCUMENTO_MEDICO_CON_PACIENTE`: el schema y el prompt derivados, exclusivos del camino automático. |
-| `components/gmail/panel-auto-carga.tsx` | El interruptor y el selector de perfil de destino en `/perfil/gmail`. |
+| `components/gmail/panel-auto-carga.tsx` | El interruptor, el selector de perfil de destino y "Evaluar pendientes" en `/perfil/gmail`. |
+| `supabase/migrations/20260818180000_duplicados_semanticos.sql` | Duplicados semánticos: `documents.numero_orden`, y los dos RPC extendidos (`confirmar_documento_recien_subido`, `ingresar_documento_automatico`). |
+| `lib/documentos/duplicados-semanticos.ts` | **Puro.** Capas 2 y 3 del detector: mismo N° de orden, o todos los datos exactamente iguales (fecha primero, condición necesaria). |
+| `lib/documentos/duplicados-semanticos-consulta.ts` | Cliente del usuario: candidatos (documentos confirmados del perfil + `lab_metrics`) para las tres puertas humanas — llamado desde `app/api/documentos/extraer/route.ts`. |
+| `lib/gmail/duplicados-semanticos-admin.ts` | `service_role`: mismo cotejo, sin sesión, para la compuerta de auto-ingesta. |
+| `lib/gmail/mensajes-admin.ts` (`listarPendientesSinEvaluarAutoCarga`) | Los correos pendientes que NUNCA pasaron por la compuerta -el backlog que "Evaluar pendientes" resuelve-. |
+| `lib/gmail/auto-carga.ts` (`evaluarPendientesGmail`) | Pasa correos YA pendientes por la MISMA compuerta que el barrido, de a tandas. |
 
 ## 7. Cómo se verifica
 
@@ -290,8 +351,15 @@ docker exec -i supabase_db_historialclinico psql -U postgres -d postgres \
   best-effort si falla el SELECT/la descarga/el UPDATE, escritura acotada por
   `profile_id`.
 - `tests/unit/gmail-deteccion-duplicados.test.ts` — el emparejamiento por
-  (nombre, tamaño), sin falsos positivos por nombre O tamaño solos, adjuntos
-  no aptos excluidos, la rueda de emparejamiento con 3+ coincidencias.
+  (nombre, tamaño ±2%), sin falsos positivos por nombre O tamaño solos,
+  adjuntos no aptos excluidos, la rueda de emparejamiento con 3+
+  coincidencias, el borde exacto del 2% (adentro sí, 5% no).
+- `tests/unit/duplicados-semanticos.test.ts` — Capas 2 y 3 puras: mismo N° de
+  orden + institución (evidencia real, Sanatorio San Jorge 1446188), fecha
+  distinta = cero avisos aunque todo lo demás coincida (regla 2 del usuario),
+  normalización de tildes/mayúsculas/espacios, métricas como conjunto
+  (orden no importa, sinónimos del diccionario cuentan igual, deduplica antes
+  de comparar), y el veredicto combinado con varios candidatos.
 - `tests/unit/gmail-detalle-correo.test.tsx` — el diálogo de detalle
   (ampliación en vivo): el disparador trunca pero el diálogo muestra el
   asunto ENTERO, el nombre accesible completo, los links a estudio/turno
@@ -347,18 +415,31 @@ en local hace que Google conteste `invalid_grant` y la conexión quede vencida.
    próxima vez que la persona abre la app. Sumar el aviso empujado es una tanda
    propia (reusaría `lib/push/servidor.ts`).
 5. **La huella digital (§2.4) detecta archivos IDÉNTICOS, no estudios
-   equivalentes.** Un PDF regenerado por la clínica -mismo contenido, otros
-   bytes- no matchea. No se intentó comparación semántica (OCR + similitud de
-   texto): es una técnica bastante más cara y con falsos positivos propios
-   (dos análisis de rutina del mismo laboratorio, mismo formato, se parecerían
-   mucho sin ser el mismo estudio), y el caso real reportado por el usuario
-   -el mismo PDF, dos veces- ya queda cubierto por la comparación de bytes.
+   equivalentes — MITIGADO por §2.4bis.** Un PDF regenerado por la clínica
+   -mismo contenido, otros bytes- no matchea por hash, pero desde el hotfix
+   de duplicados semánticos SÍ lo detectan la Capa 2 (mismo laboratorio +
+   mismo N° de orden) y la Capa 3 (todos los datos extraídos exactamente
+   iguales). No se intentó comparación semántica de IMÁGENES ni similitud de
+   texto libre -sigue siendo una técnica más cara y con falsos positivos
+   propios-: las dos capas nuevas comparan datos ESTRUCTURADOS ya extraídos
+   por Gemini, no el archivo en sí. Deuda que sigue abierta: un documento sin
+   número de orden impreso y sin ninguna métrica de laboratorio (una consulta
+   sin institución ni médico detectados, por ejemplo) puede seguir sin
+   detectarse si además el PDF se regeneró con bytes distintos.
 6. **El aviso de duplicado en `/compartir` (Web Share Target) es más austero**
    que en `/estudios/nuevo` y en la bandeja de Gmail: mismo título+fecha en el
    mensaje y el mismo "Ver ese estudio", pero "Cargar igual" es "tocá la
    tarjeta del perfil de nuevo" en vez de un botón dedicado -no se armó un
    tercer patrón de UI para un camino de entrada que no estaba en el pedido
-   original del hotfix-.
+   original del hotfix-. Esto sigue valiendo solo para la huella (Capa 1): la
+   franja de duplicados SEMÁNTICOS (Capas 2/3) vive en `FormularioRevision`,
+   la pantalla de revisión posterior por la que pasan los tres caminos de
+   entrada por igual -incluido `/compartir`-, así que ahí sí es una sola UI.
+7. **Un documento sin confirmar no es candidato de las Capas 2/3.**
+   `institution`/`doctor_name`/`numero_orden`/`lab_metrics` solo existen
+   después de `confirmar_documento_recien_subido`; un documento a medio
+   revisar en otra pestaña no participa del cotejo hasta que alguien lo
+   confirme.
 
 ## 9. La carga automática (opt-in, Sprint 17, tarea 17.3)
 
@@ -441,6 +522,8 @@ lee en `auto_review_reason` (`TEXTO_MOTIVO`, `lib/gmail/auto-ingesta.ts`):
 | `sin_datos_de_contexto` | "no dice de qué institución ni de qué especialidad es" |
 | `duplicado_exacto` | "ya tenías cargado un archivo idéntico" |
 | `posible_duplicado` | "puede estar repetido con otro correo" |
+| `duplicado_numero_orden` | "ya tenías cargado un estudio del mismo laboratorio con el mismo número de orden" (Capa 2, hotfix de duplicados semánticos) |
+| `duplicado_datos_identicos` | "ya tenías cargado un estudio con exactamente los mismos datos" (Capa 3) |
 | `varios_adjuntos` | "traía más de un archivo y hay que elegir cuál" |
 
 **Solo turnos:**
@@ -540,11 +623,15 @@ Detalle completo del puente con la matriz de permisos en
    quedan para carga manual**, con sus metadatos ya registrados: entran a la
    tanda automática recién en una pasada siguiente, si para entonces la
    cuenta sigue teniendo lugar en el cupo de esa corrida.
-3. **La huella (§2.4) solo detecta archivos BYTE A BYTE idénticos.** Un PDF
-   que la clínica regenera -mismo contenido, otros bytes en los metadatos del
-   motor que lo armó- no matchea y no se reconoce como duplicado; hereda el
-   mismo límite ya declarado para el camino manual, no es un límite nuevo de
-   la carga automática.
+3. **La huella (§2.4) solo detecta archivos BYTE A BYTE idénticos — MITIGADO
+   por §2.4bis también en el camino automático.** Un PDF que la clínica
+   regenera no matchea por hash, pero `lib/gmail/duplicados-semanticos-admin.ts`
+   corre las mismas Capas 2 y 3 DESPUÉS de leer con Gemini (antes de decidir
+   si se carga solo): mismo N° de orden, o todos los datos exactamente
+   iguales, contra los documentos ya confirmados del perfil de destino.
+   Hereda la misma deuda que el camino manual (§8.5): sin número de orden
+   impreso y sin métricas de laboratorio, un documento regenerado con bytes
+   distintos puede seguir sin detectarse.
 4. **Un error de Gemini, de la descarga o de la RPC deja el correo pendiente
    con un motivo genérico** ("no pudimos leerlo automáticamente") en vez de
    con el detalle real: el error se registra en el log del servidor
@@ -556,3 +643,43 @@ Detalle completo del puente con la matriz de permisos en
    (`can_upload OR can_manage`): es la lectura literal del encargo y lo que
    garantiza que "Deshacer" funcione siempre. Ver
    `docs/modelo-permisos.md` §7.5.
+
+### 9.8 "Evaluar pendientes" — el backlog de ANTES de prender el interruptor
+
+El barrido (§9.1) solo pasa por la compuerta los correos que ÉL MISMO acaba
+de registrar en esa pasada (`recienRegistrados` en `barrerConexion`). Hallazgo
+real de uso: el usuario prendió la carga automática con **30 correos que ya
+estaban esperando** en la bandeja, y ninguno se evaluó retroactivamente -la
+única forma de que entraran solos habría sido que el barrido los viera de
+nuevo como "nuevos", cosa que el dedup por diseño no permite-.
+
+El botón **"Evaluar pendientes"** (`/perfil/gmail`, dentro del panel de carga
+automática, visible solo con el interruptor prendido) resuelve esto pasando
+correos YA REGISTRADOS por la misma compuerta:
+
+1. `lib/gmail/mensajes-admin.ts#listarPendientesSinEvaluarAutoCarga` trae hasta
+   `LIMITE_EVALUAR_PENDIENTES_POR_TANDA` (= `LIMITE_AUTO_POR_PASADA`, hoy 3)
+   correos `pendiente_revision` con `auto_review_reason IS NULL` -es decir,
+   que NUNCA pasaron por la compuerta-, del más viejo al más nuevo.
+2. Para cada uno, `lib/gmail/auto-carga.ts#evaluarPendientesGmail` reconstruye
+   la entrada y llama a `intentarUno` -la MISMA función que usa el barrido-.
+   Los `documento` usan los adjuntos ya guardados en
+   `gmail_messages.attachments`; los `turno` necesitan volver a pedirle el
+   cuerpo a Gmail (`obtenerMensajeCompleto` + `parsearMensajeGmail`), porque
+   el cuerpo NUNCA se persiste (`docs/minimizacion-datos.md` §10.6).
+3. Lo que entra solo se cuenta como `cargados`; lo que no, queda con su motivo
+   escrito -exactamente igual que si el barrido lo hubiera visto de nuevo-.
+4. La pantalla muestra una frase (`fraseDeEvaluacionPendientes`): *"3 cargados
+   solos, 5 quedaron para vos con su motivo."* Si el backlog es más grande que
+   la tanda, agrega *"Tocá «Evaluar pendientes» de nuevo para seguir."* -mismo
+   patrón que "Buscar ahora" con `hayMas`-.
+
+**Por qué NO reprocesa correos que ya se evaluaron una vez:** el filtro
+`auto_review_reason IS NULL` es la clave. Un correo que quedó con un motivo
+escrito ya tiene su veredicto -evaluarlo de nuevo sin que cambie nada del
+contexto sería trabajo repetido-, y uno que entró solo dejó de estar
+`pendiente_revision`. Cada click de "Evaluar pendientes" avanza sobre
+correos NUEVOS del backlog, nunca sobre los mismos tres una y otra vez.
+
+**Con velo de progreso**, mismo componente (`VeloEspera`) que el resto del
+flujo de ingesta: la tanda puede tardar (hasta 3 llamadas reales a Gemini).

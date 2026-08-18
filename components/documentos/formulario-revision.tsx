@@ -38,7 +38,23 @@
  * `<form>`: `confirmarDocumento` (tarea 4.6 del roadmap) las normaliza con
  * `lib/laboratorio/normalizacion.ts` y las persiste en `lab_metrics` de forma
  * atómica con la confirmación del documento, vía el RPC
- * `confirmar_documento_recien_subido`.
+ * `confirmar_documento_recien_subido`. El NÚMERO DE ORDEN detectado viaja
+ * igual, en el campo oculto `numeroOrden` -no tiene campo propio en el
+ * formulario, mismo criterio que las métricas-.
+ *
+ * ## La franja de duplicado SEMÁNTICO (Capas 2 y 3, hotfix sobre la huella)
+ *
+ * `duplicadoSemantico` llega ya resuelto desde `PantallaProcesando`
+ * (`app/api/documentos/extraer/route.ts` cotejó mismo N° de orden o todos los
+ * datos exactamente iguales contra los documentos YA CONFIRMADOS del perfil).
+ * Si hay uno, se muestra una franja de advertencia -"Es un duplicado: …" con
+ * "Ver ese estudio" y "Cargar igual"- ARRIBA del formulario, sin bloquear
+ * nada: el documento YA fue creado (a diferencia de la huella byte-a-byte,
+ * que corre ANTES del `INSERT` y puede evitar crear la fila), así que
+ * "Cargar igual" acá es simplemente DESCARTAR el aviso -estado local, no una
+ * llamada al servidor- porque el único camino que persiste algo sigue siendo
+ * "Confirmar y guardar", que nunca estuvo deshabilitado. Regla de oro
+ * respetada: se avisa, nunca se bloquea.
  *
  * ## Velo de espera (Sprint 14, "Feedback de espera global")
  *
@@ -59,6 +75,7 @@
 
 import * as React from "react"
 import { useActionState } from "react"
+import Link from "next/link"
 
 import { CircleCheckIcon, FlaskConicalIcon } from "lucide-react"
 
@@ -83,6 +100,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { sugerirTitulo } from "@/lib/documentos/sugerir-titulo"
+import {
+  TEXTO_MOTIVO_DUPLICADO_SEMANTICO,
+  type DuplicadoSemanticoParaCliente,
+} from "@/lib/documentos/duplicados-semanticos"
 import type { DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
 import type { CategoriaDocumento } from "@/types/dominio"
 
@@ -92,6 +113,8 @@ export interface FormularioRevisionProps {
   extraccion: DocumentoMedicoExtraido | null
   /** Mensaje de error de la extracción, para mostrar cuando `extraccion` es `null`. */
   mensajeError?: string | null
+  /** Duplicado semántico (Capas 2/3) encontrado contra el historial del perfil, o `null`. */
+  duplicadoSemantico?: DuplicadoSemanticoParaCliente | null
   /** Título ya guardado en `documents.title` (provisional, derivado del nombre de archivo). */
   tituloProvisional: string
   /** Categoría ya guardada en `documents.category` (default `"other"`). */
@@ -140,6 +163,7 @@ export function FormularioRevision({
   documentoId,
   extraccion,
   mensajeError,
+  duplicadoSemantico = null,
   tituloProvisional,
   categoriaProvisional,
   fechaProvisional,
@@ -150,6 +174,13 @@ export function FormularioRevision({
     ESTADO_INICIAL,
   )
   const [estadoDescartar, enviarDescartar] = useActionState(descartarDocumento, ESTADO_INICIAL)
+
+  // "Cargar igual" de la franja semántica es puramente local: a diferencia
+  // de la huella byte-a-byte (que corre ANTES del INSERT y puede evitar
+  // crear la fila), acá el documento YA existe -"Cargar igual" solo descarta
+  // el aviso, "Confirmar y guardar" sigue siendo el único botón que persiste-.
+  const [avisoDuplicadoDescartado, setAvisoDuplicadoDescartado] = React.useState(false)
+  const mostrarAvisoDuplicado = Boolean(duplicadoSemantico) && !avisoDuplicadoDescartado
 
   const sugerido = extraccion ? sugerirTitulo(extraccion) : null
   const tituloInicial = sugerido?.titulo || tituloProvisional
@@ -178,6 +209,7 @@ export function FormularioRevision({
   const medicoDetectado = Boolean(medicoInicial)
 
   const metricas = extraccion?.metricas ?? []
+  const numeroOrden = extraccion?.numero_orden ?? ""
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -192,9 +224,37 @@ export function FormularioRevision({
         </Alerta>
       )}
 
+      {mostrarAvisoDuplicado && duplicadoSemantico && (
+        <div className="flex flex-col gap-3">
+          <Alerta variante="advertencia">
+            Es un duplicado: {TEXTO_MOTIVO_DUPLICADO_SEMANTICO[duplicadoSemantico.motivo]} — idéntico a «
+            {duplicadoSemantico.titulo}» del {duplicadoSemantico.fechaTexto}.
+          </Alerta>
+          <div className="flex flex-col gap-3 sm:flex-row-reverse">
+            <Boton
+              render={<Link href={`/estudios/${duplicadoSemantico.documentoId}`} />}
+              nativeButton={false}
+              variant="outline"
+              className="sm:flex-1"
+            >
+              Ver ese estudio
+            </Boton>
+            <Boton
+              type="button"
+              variant="ghost"
+              className="sm:flex-1"
+              onClick={() => setAvisoDuplicadoDescartado(true)}
+            >
+              Cargar igual
+            </Boton>
+          </div>
+        </div>
+      )}
+
       <form id={ID_FORMULARIO} action={enviarConfirmar} className="flex flex-col gap-5">
         <input type="hidden" name="documentoId" value={documentoId} />
         <input type="hidden" name="metricas" value={JSON.stringify(metricas)} />
+        <input type="hidden" name="numeroOrden" value={numeroOrden} />
 
         <CampoTexto
           id="titulo"

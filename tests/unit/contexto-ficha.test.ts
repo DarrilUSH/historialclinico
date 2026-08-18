@@ -135,6 +135,9 @@ function documentoDe(parcial: Partial<Documento>): Documento {
     mime_type: "application/pdf",
     raw_ocr_text: OCR_CRUDO,
     storage_path: "660e8400/2026/analisis.pdf",
+    // Hotfix de duplicados semánticos (20260818180000): la ficha no lo mira,
+    // pero la fila del fixture tiene que ser una fila COMPLETA de `documents`.
+    numero_orden: null,
     ...parcial,
   }
 }

@@ -64,6 +64,8 @@ Sos un asistente que lee documentos médicos argentinos (análisis de laboratori
 
 8. TEXTO ADICIONAL (opcional): si hay texto relevante del documento que no quedó reflejado en los campos anteriores (por ejemplo indicaciones textuales de una receta, observaciones de un informe), podés incluir un extracto BREVE — no más de 500 caracteres — en el campo "texto_completo". No es obligatorio: si el resumen ya cubre lo importante, dejalo sin usar.
 
+9. NÚMERO DE ORDEN (opcional): si el documento imprime un número de orden, protocolo o identificador del estudio (rotulado típicamente "N° de Orden", "Protocolo", "N° de Solicitud" o similar, generalmente cerca del membrete o de los datos del paciente), copialo en el campo "numero_orden" — SOLO el número o código, sin el rótulo (por ejemplo "1446188", no "N° de Orden: 1446188"). Es el identificador administrativo que el laboratorio le puso a ESTE estudio, no el número de afiliado, no el DNI del paciente, no ningún otro código. Si el documento no trae un número de orden visible, dejá el campo vacío — no lo inventes ni uses otro número como reemplazo.
+
 Es un documento de prueba o real de una persona que usa la aplicación para su propio historial médico o el de un familiar a su cargo. Devolvé exclusivamente el JSON pedido por el schema, en español, sin texto adicional fuera del JSON.
 `.trim()
 
@@ -89,5 +91,5 @@ Es un documento de prueba o real de una persona que usa la aplicación para su p
  */
 export const PROMPT_DOCUMENTO_MEDICO_CON_PACIENTE = `${PROMPT_DOCUMENTO_MEDICO}
 
-9. PACIENTE: además de todo lo anterior, devolvé en el campo "paciente" el nombre y apellido de la persona A CUYO NOMBRE está emitido el documento, tal como figura impreso (suele estar rotulado "Paciente:", "Apellido y Nombre:", "Afiliado:", o en el encabezado del informe). NO pongas ahí el médico que firma, ni quien solicitó el estudio, ni el nombre de la obra social. Copialo LITERAL: no reordenes "Apellido, Nombre", no le agregues nombres que no estén, no le saques ninguno. Si el documento NO trae ningún nombre de paciente, o no podés leerlo con seguridad, devolvé cadena vacía — es preferible el campo vacío antes que un nombre supuesto.
+10. PACIENTE: además de todo lo anterior, devolvé en el campo "paciente" el nombre y apellido de la persona A CUYO NOMBRE está emitido el documento, tal como figura impreso (suele estar rotulado "Paciente:", "Apellido y Nombre:", "Afiliado:", o en el encabezado del informe). NO pongas ahí el médico que firma, ni quien solicitó el estudio, ni el nombre de la obra social. Copialo LITERAL: no reordenes "Apellido, Nombre", no le agregues nombres que no estén, no le saques ninguno. Si el documento NO trae ningún nombre de paciente, o no podés leerlo con seguridad, devolvé cadena vacía — es preferible el campo vacío antes que un nombre supuesto.
 `.trim()

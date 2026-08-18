@@ -1242,6 +1242,114 @@ select pruebas_rls.registrar('8c. institución/especialidad/médico',
 
 
 -- =============================================================================
+-- BLOQUE 8d — parámetro `nuevo_numero_orden` del RPC (hotfix de duplicados
+-- semánticos, 20260818180000_duplicados_semanticos.sql)
+-- -----------------------------------------------------------------------------
+-- `confirmar_documento_recien_subido` se extendió con un DÉCIMO parámetro
+-- `nuevo_numero_orden text DEFAULT NULL` que persiste en
+-- `documents.numero_orden` -la columna que alimenta la Capa 2 del detector de
+-- duplicados semánticos-. Este bloque prueba lo que 8/8b/8c no cubren: que el
+-- caso feliz persiste el número de orden (guarda 6 extendida), y que un valor
+-- demasiado largo aborta la llamada COMPLETA -mismo criterio de atomicidad
+-- que las guardas 5 y 6 de institución/especialidad/médico-. Que BLOQUE
+-- 8/8b/8c sigan pasando sin cambios (llaman con 5, 6 y 9 argumentos) confirma
+-- la compatibilidad posicional: el parámetro nuevo va al FINAL, con DEFAULT.
+-- =============================================================================
+\echo '### BLOQUE 8d — parámetro numero_orden del RPC de confirmación'
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+insert into public.documents (id, profile_id, title, category, document_date, storage_path) values
+    ('50505050-5050-4505-8505-505050505050', :p_a, 'Análisis con número de orden (sin revisar)',            'other', '2026-08-11', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8d-ok.pdf'),
+    ('60606060-6060-4606-8606-606060606060', :p_a, 'Análisis con número de orden demasiado largo (sin revisar)', 'other', '2026-08-12', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8d-mal.pdf');
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '50505050-5050-4505-8505-505050505050',
+            'Análisis con número de orden — agosto', 'laboratory', '2026-08-11', null, null,
+            'Sanatorio San Jorge', 'Clínica médica', 'Dra. Pérez',
+            '1446188');
+        v := coalesce((select numero_orden from public.documents
+                        where id = '50505050-5050-4505-8505-505050505050'),
+                      'NO ENCONTRADO');
+    exception when others then v := 'error ' || sqlstate || ' ' || sqlerrm;
+    end;
+    perform pruebas_rls.registrar('8d. número de orden',
+        'A confirma CON número de orden: queda persistido en documents.numero_orden',
+        '1446188', v);
+end $$;
+
+commit;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '50505050-5050-4505-8505-505050505050',
+            'Segundo intento', 'laboratory', '2026-08-11', null);
+        v := 'confirmado de nuevo';
+    exception when insufficient_privilege then v := 'rechazado (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8d. número de orden',
+        'Llamando SIN el parámetro nuevo (5 argumentos) sigue resolviendo contra la MISMA función -guarda 3, doble confirmación-',
+        'rechazado (42501)', v);
+end $$;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text; orden_largo text;
+begin
+    orden_largo := rpad('9', 61, '9');
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '60606060-6060-4606-8606-606060606060',
+            'Análisis con número de orden demasiado largo', 'laboratory', '2026-08-12', null, null,
+            null, null, null, orden_largo);
+        v := 'confirmado (no debería)';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                   then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8d. número de orden',
+        'A confirma con NÚMERO DE ORDEN de 61 caracteres (guarda 6 extendida): se rechaza la llamada completa',
+        'rechazado (22023)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8d. número de orden',
+       'El rechazo por guarda 6 es atómico: el documento sigue SIN confirmar y sin número de orden',
+       'sin confirmar, sin numero_orden',
+       case when exists (
+                 select 1 from public.documents
+                  where id = '60606060-6060-4606-8606-606060606060'
+                    and confirmed_at is null
+                    and numero_orden is null
+                    and title = 'Análisis con número de orden demasiado largo (sin revisar)')
+            then 'sin confirmar, sin numero_orden'
+            else 'estado inesperado' end);
+
+-- Los dos documentos de este bloque no se borran acá a propósito, mismo
+-- criterio que el cierre de BLOQUE 8/8b/8c: la limpieza final del script los
+-- arrastra por CASCADE al borrar auth.users.
+
+
+-- =============================================================================
 -- BLOQUE 9 — recordatorios de turnos: infraestructura cerrada (tarea 6.4)
 -- -----------------------------------------------------------------------------
 -- `appointment_reminders` y sus funciones son INFRAESTRUCTURA: las escriben
@@ -7716,7 +7824,10 @@ begin
         'f2400d00-2222-4222-8222-222222222222/2026/auto-doc-feliz.pdf',
         'application/pdf', 51200, repeat('a1', 32),
         'Análisis de sangre — Laboratorio Austral', 'laboratory', current_date - 1,
-        'Resumen generado por IA', 'texto OCR de prueba') into r;
+        'Resumen generado por IA', 'texto OCR de prueba',
+        -- Duodécimo parámetro (hotfix de duplicados semánticos,
+        -- 20260818180000): número de orden detectado por Gemini.
+        '778899') into r;
     perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
         'Camino feliz: crea el documento y devuelve "creado"',
         'creado', coalesce(r->>'estado', 'nulo'));
@@ -7729,6 +7840,10 @@ begin
     perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
         'El documento nace marcado, confirmado y sin creador humano',
         'source=gmail/confirmed=con fecha/creador=null', v);
+
+    perform pruebas_rls.registrar('25. Auto-ingesta Gmail',
+        'El número de orden (hotfix de duplicados semánticos) queda persistido en documents.numero_orden',
+        '778899', coalesce(d.numero_orden, 'NULL'));
 
     select * into m from public.gmail_messages where id = 'f2400100-0000-4000-8000-000000000001';
     v := 'status=' || m.status || '/documento=' ||

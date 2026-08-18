@@ -200,6 +200,8 @@ export interface DocumentoAutomaticoParaIngresar {
   resumen: string
   /** Extracto acotado del documento (`raw_ocr_text`). Puede ir vacío. */
   textoOcr: string
+  /** Número de orden/protocolo detectado por Gemini (hotfix de duplicados semánticos), o `""` si no traía. */
+  numeroOrden: string
 }
 
 /**
@@ -227,6 +229,10 @@ export async function ingresarDocumentoAutomatico(
     p_fecha: datos.fecha,
     p_resumen: datos.resumen,
     p_texto_ocr: datos.textoOcr,
+    // Mismo motivo que `p_perfil` en `configurarAutoIngesta`: el tipo generado
+    // no expresa "text nullable" para un parámetro de RPC, aunque Postgres sí
+    // acepte NULL (el RPC lo normaliza con `nullif(btrim(coalesce(...)), '')`).
+    p_numero_orden: (datos.numeroOrden.length > 0 ? datos.numeroOrden : null) as string,
   })
 
   if (error) {

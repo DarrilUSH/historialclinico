@@ -86,3 +86,25 @@ export const ESTADO_AUTO_CARGA_INICIAL: EstadoAutoCargaGmail = {
   error: null,
   mensaje: null,
 }
+
+/**
+ * Estado de "Evaluar pendientes" (hotfix de duplicados semánticos): pasa los
+ * correos que YA estaban esperando en la bandeja -de antes de prender el
+ * interruptor, o de una tanda anterior que no alcanzó- por la MISMA compuerta
+ * que corre el barrido automático. Hallazgo real: alguien prendió la carga
+ * automática con 30 correos ya importados y ninguno se evaluó retroactivamente
+ * -el barrido solo mira los correos NUEVOS de cada pasada-.
+ *
+ * Mismo criterio que `EstadoBusquedaGmail`: una frase lista para mostrar, sin
+ * que el componente tenga que interpretar números sueltos.
+ */
+export interface EstadoEvaluarPendientesGmail {
+  error: string | null
+  /** Frase en castellano con el resultado de la tanda (`fraseDeEvaluacionPendientes`). */
+  mensaje: string | null
+}
+
+export const ESTADO_EVALUAR_PENDIENTES_INICIAL: EstadoEvaluarPendientesGmail = {
+  error: null,
+  mensaje: null,
+}

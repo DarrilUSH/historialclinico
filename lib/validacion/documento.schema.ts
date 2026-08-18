@@ -180,6 +180,16 @@ export const schemaExtraccionDocumento = z
       .trim()
       .max(500, 'El extracto de texto es demasiado largo (máx. 500 caracteres)')
       .optional(),
+
+    // Número de orden/protocolo del estudio (hotfix de duplicados semánticos):
+    // mismo patrón opcional que `texto_completo` — no todo documento lo trae.
+    // El tope de 60 caracteres refleja el CHECK de
+    // `documents_numero_orden_valido` (20260818180000_duplicados_semanticos.sql).
+    numero_orden: z
+      .string({ message: 'El número de orden debe ser texto' })
+      .trim()
+      .max(60, 'El número de orden es demasiado largo (máx. 60 caracteres)')
+      .optional(),
   })
   .strict()
 

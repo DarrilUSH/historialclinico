@@ -365,3 +365,91 @@ export async function remitentesConFiltro(userId: string): Promise<Set<string>> 
   const filtros = await listarFiltrosDeLaCuenta(userId)
   return new Set(filtros.map((filtro) => filtro.remitente))
 }
+
+/* ------------------------------------------------------------------ *
+ *  "Evaluar pendientes" (hotfix de duplicados semánticos)
+ * ------------------------------------------------------------------ */
+
+/** Un correo pendiente, con lo mínimo que hace falta para volver a pasarlo por la compuerta automática. */
+export interface PendienteSinEvaluar {
+  /** `gmail_messages.id` — la fila, no el id de Gmail. */
+  id: string
+  gmailMessageId: string
+  asunto: string | null
+  remitenteEmail: string
+  remitenteNombre: string | null
+  fechaIso: string | null
+  clase: "documento" | "turno"
+  adjuntos: AdjuntoGmail[]
+}
+
+/**
+ * Hasta `limite` correos PENDIENTES que NUNCA pasaron por la compuerta
+ * automática, del más viejo al más nuevo -mismo criterio de "primero lo que
+ * esperó más" que ya usa el resto del producto-.
+ *
+ * `auto_review_reason is null` es la clave de todo el filtro: es lo que
+ * distingue "nunca se evaluó" (el caso real que motiva este botón: 30
+ * correos que ya estaban en la bandeja cuando se prendió el interruptor) de
+ * "se evaluó y quedó con un motivo escrito" -esos YA tienen su veredicto, y
+ * evaluarlos de nuevo sería trabajo repetido sin ningún cambio de contexto
+ * que lo justifique-. Un correo que SÍ entró solo deja de estar
+ * `pendiente_revision` (pasa a `ingresado`), así que tampoco vuelve a
+ * aparecer acá. El resultado: cada "Evaluar pendientes" avanza sobre correos
+ * NUEVOS del backlog, nunca reprocesa los mismos tres una y otra vez.
+ *
+ * Solo `kind in ('documento', 'turno')`: un correo `kind = 'nada'` nace ya
+ * `descartado` y nunca fue `pendiente_revision`, así que el filtro de estado
+ * ya lo excluye -el `in` es documentación, no una guarda adicional-.
+ */
+export async function listarPendientesSinEvaluarAutoCarga(
+  userId: string,
+  limite: number,
+): Promise<PendienteSinEvaluar[]> {
+  const { data, error } = await clienteAdmin()
+    .from("gmail_messages")
+    .select("id, gmail_message_id, subject, from_email, from_name, message_date, kind, attachments")
+    .eq("user_id", userId)
+    .eq("status", "pendiente_revision")
+    .is("auto_review_reason", null)
+    .in("kind", ["documento", "turno"])
+    .order("detected_at", { ascending: true })
+    .limit(limite)
+
+  if (error) {
+    throw new Error(`No se pudieron listar los correos pendientes sin evaluar: ${error.message}`)
+  }
+
+  return (data ?? []).map((fila) => ({
+    id: fila.id,
+    gmailMessageId: fila.gmail_message_id,
+    asunto: fila.subject,
+    remitenteEmail: fila.from_email,
+    remitenteNombre: fila.from_name,
+    fechaIso: fila.message_date,
+    clase: fila.kind as "documento" | "turno",
+    adjuntos: adjuntosDesdeJson(fila.attachments),
+  }))
+}
+
+/**
+ * ¿Cuántos correos pendientes NUNCA pasaron por la compuerta automática?
+ * Mismo filtro que `listarPendientesSinEvaluarAutoCarga`, sin traer filas —lo
+ * usa la pantalla para decidir si vale la pena mostrar el botón "Evaluar
+ * pendientes" y para decirle a la persona cuántos quedan antes de tocarlo.
+ */
+export async function contarPendientesSinEvaluarAutoCarga(userId: string): Promise<number> {
+  const { count, error } = await clienteAdmin()
+    .from("gmail_messages")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", userId)
+    .eq("status", "pendiente_revision")
+    .is("auto_review_reason", null)
+    .in("kind", ["documento", "turno"])
+
+  if (error) {
+    throw new Error(`No se pudo contar los correos pendientes sin evaluar: ${error.message}`)
+  }
+
+  return count ?? 0
+}

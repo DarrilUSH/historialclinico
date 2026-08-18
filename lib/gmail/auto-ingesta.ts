@@ -71,6 +71,10 @@ export type MotivoRevision =
   | "duplicado_exacto"
   /** Otro correo pendiente trae un adjunto con el mismo nombre y tamaño. */
   | "posible_duplicado"
+  /** El perfil ya tiene un documento CONFIRMADO del mismo laboratorio con el mismo N° de orden (Capa 2). */
+  | "duplicado_numero_orden"
+  /** El perfil ya tiene un documento CONFIRMADO con exactamente los mismos datos extraídos (Capa 3). */
+  | "duplicado_datos_identicos"
   /** El correo trae más de un archivo importable: cuál (o cuáles) es una decisión. */
   | "varios_adjuntos"
   /* --- Turnos --- */
@@ -97,6 +101,8 @@ export const TEXTO_MOTIVO: Record<MotivoRevision, string> = {
   sin_datos_de_contexto: "no dice de qué institución ni de qué especialidad es",
   duplicado_exacto: "ya tenías cargado un archivo idéntico",
   posible_duplicado: "puede estar repetido con otro correo",
+  duplicado_numero_orden: "ya tenías cargado un estudio del mismo laboratorio con el mismo número de orden",
+  duplicado_datos_identicos: "ya tenías cargado un estudio con exactamente los mismos datos",
   varios_adjuntos: "traía más de un archivo y hay que elegir cuál",
   aviso_del_analizador: "faltaban datos del turno",
   varios_mensajes: "el correo traía más de un turno",
@@ -175,6 +181,15 @@ export interface EntradaDocumentoAutoCarga {
   huellaDuplicada: boolean
   /** Otro correo PENDIENTE trae un adjunto con el mismo nombre y tamaño. */
   marcadoPosibleDuplicado: boolean
+  /**
+   * Resultado del cotejo de duplicados SEMÁNTICOS (Capas 2 y 3,
+   * `lib/gmail/duplicados-semanticos-admin.ts`): `null` si no coincide con
+   * ningún documento confirmado del perfil, o el motivo de la capa que sí
+   * coincidió. A diferencia de `huellaDuplicada` (Capa 1, cotejo por bytes
+   * ANTES de gastar la llamada a Gemini), este cotejo necesita la extracción
+   * ya hecha, así que corre DESPUÉS -mismo orden que el camino humano-.
+   */
+  duplicadoSemantico: "mismo_numero_orden" | "datos_identicos" | null
   /** Hoy en `YYYY-MM-DD`, hora de pared de Ushuaia. Inyectable para los tests. */
   hoyIso: string
 }
@@ -229,6 +244,11 @@ export function evaluarDocumentoParaAutoCarga(
   }
   if (entrada.marcadoPosibleDuplicado) {
     motivos.push("posible_duplicado")
+  }
+  if (entrada.duplicadoSemantico === "mismo_numero_orden") {
+    motivos.push("duplicado_numero_orden")
+  } else if (entrada.duplicadoSemantico === "datos_identicos") {
+    motivos.push("duplicado_datos_identicos")
   }
 
   return veredicto(motivos)

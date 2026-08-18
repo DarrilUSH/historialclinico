@@ -39,6 +39,7 @@ const DOCUMENTO_PERFECTO: EntradaDocumentoAutoCarga = {
   tituloDetectado: true,
   huellaDuplicada: false,
   marcadoPosibleDuplicado: false,
+  duplicadoSemantico: null,
   hoyIso: HOY,
 }
 
@@ -107,6 +108,16 @@ describe("evaluarDocumentoParaAutoCarga — cada duda, por separado", () => {
         nombre: "hay otro correo pendiente con el mismo adjunto",
         cambio: { marcadoPosibleDuplicado: true },
         motivo: "posible_duplicado",
+      },
+      {
+        nombre: "mismo laboratorio y mismo número de orden que un estudio ya confirmado (Capa 2)",
+        cambio: { duplicadoSemantico: "mismo_numero_orden" },
+        motivo: "duplicado_numero_orden",
+      },
+      {
+        nombre: "todos los datos extraídos son exactamente iguales a un estudio ya confirmado (Capa 3)",
+        cambio: { duplicadoSemantico: "datos_identicos" },
+        motivo: "duplicado_datos_identicos",
       },
     ]
 

@@ -49,10 +49,12 @@ import type {
   EstadoAutoCargaGmail,
   EstadoBusquedaGmail,
   EstadoCorreoGmail,
+  EstadoEvaluarPendientesGmail,
 } from "@/lib/gmail/acciones"
 import { configurarAutoIngesta, revertirCargaAutomatica } from "@/lib/gmail/auto-ingesta-admin"
 import { ingerirAdjuntoDeGmail, ErrorAdjuntoGmail } from "@/lib/gmail/adjunto"
 import { barrerConexion, fraseDeResultado } from "@/lib/gmail/barrido"
+import { evaluarPendientesGmail as evaluarPendientesGmailLib, fraseDeEvaluacionPendientes } from "@/lib/gmail/auto-carga"
 import type { EstadoGmailAccion } from "@/lib/gmail/conexion"
 import { obtenerConexionGmail } from "@/lib/gmail/conexion"
 import {
@@ -61,6 +63,7 @@ import {
   ErrorGmailSinConfigurar,
   ErrorSinConexionGmail,
   leerRefreshTokenGmail,
+  obtenerAccessTokenGmail,
   olvidarAccessTokenGmail,
 } from "@/lib/gmail/conexiones-admin"
 import { aprenderRemitente as aprenderRemitenteEnGmail, olvidarFiltro } from "@/lib/gmail/filtros"
@@ -495,6 +498,57 @@ export async function guardarAutoCargaGmail(
     mensaje: activar
       ? "Listo. Los correos que se lean sin ninguna duda van a entrar solos, y los vas a ver acá abajo."
       : "Apagamos la carga automática. Todo vuelve a esperar tu revisión.",
+  }
+}
+
+/**
+ * "Evaluar pendientes" (hotfix de duplicados semánticos): pasa los correos
+ * que YA estaban en la bandeja -de antes de prender la carga automática, o
+ * de una tanda que no alcanzó- por la MISMA compuerta que corre el barrido.
+ *
+ * Hallazgo real: alguien prendió el interruptor con 30 correos ya
+ * importados y ninguno se evaluó retroactivamente -el barrido solo mira los
+ * correos NUEVOS de cada pasada (`lib/gmail/barrido.ts`), así que ese
+ * backlog quedaba fuera del alcance de la función para siempre-.
+ *
+ * Sin parámetros: no hay nada que la persona elija -a diferencia de
+ * `ingerirAdjuntoDeCorreo`, que apunta a UN correo puntual-, "evaluar
+ * pendientes" es sobre el backlog entero de la cuenta, de a tandas
+ * (`LIMITE_EVALUAR_PENDIENTES_POR_TANDA`, `lib/gmail/auto-carga.ts`). Igual
+ * que "Buscar ahora", puede hacer falta tocarlo más de una vez si el backlog
+ * es grande -la frase de resultado lo dice-.
+ *
+ * Sin parámetros, mismo criterio que `desconectarGmail` (ver su comentario):
+ * `useActionState` la invoca con `(estadoPrevio, formData)` y JavaScript
+ * ignora los argumentos de más -no hay ningún campo que este formulario
+ * necesite mandar-.
+ */
+export async function evaluarPendientesGmail(): Promise<EstadoEvaluarPendientesGmail> {
+  try {
+    const { usuario, supabase } = await requerirSesion({ siNoHaySesion: "lanzar" })
+
+    const conexion = await obtenerConexionGmail(supabase, usuario.id)
+    if (!conexion) return { error: SIN_CONEXION, mensaje: null }
+    if (conexion.estado === "vencida") return { error: VENCIDA, mensaje: null }
+
+    const accessToken = await obtenerAccessTokenGmail(usuario.id)
+    const resultado = await evaluarPendientesGmailLib(usuario.id, accessToken)
+
+    revalidatePath("/perfil/gmail")
+    revalidatePath("/estudios")
+    revalidatePath("/turnos")
+    revalidatePath("/inicio")
+
+    return { error: null, mensaje: fraseDeEvaluacionPendientes(resultado) }
+  } catch (error) {
+    console.error(
+      "[gmail] falló «Evaluar pendientes»:",
+      error instanceof Error ? error.message : error,
+    )
+    return {
+      error: mensajeDeError(error, "No pudimos evaluar tus correos pendientes. Probá de nuevo en un rato."),
+      mensaje: null,
+    }
   }
 }
 

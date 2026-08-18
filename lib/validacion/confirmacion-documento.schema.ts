@@ -115,6 +115,19 @@ export const schemaConfirmacionDocumento = z.object({
     .max(100, 'El nombre del médico es demasiado largo (máx. 100 caracteres).')
     .optional()
     .transform((valor) => (valor && valor.length > 0 ? valor : undefined)),
+
+  // Número de orden/protocolo (hotfix de duplicados semánticos): mismo
+  // patrón opcional que institución/especialidad/médico, viaja como campo
+  // OCULTO (la persona no lo edita a mano, igual que las métricas) desde
+  // `components/documentos/formulario-revision.tsx`. Tope de 60 caracteres,
+  // calcado del CHECK `documents_numero_orden_valido`
+  // (`20260818180000_duplicados_semanticos.sql`).
+  numeroOrden: z
+    .string({ message: 'El número de orden debe ser texto.' })
+    .trim()
+    .max(60, 'El número de orden es demasiado largo (máx. 60 caracteres).')
+    .optional()
+    .transform((valor) => (valor && valor.length > 0 ? valor : undefined)),
 })
 
 export type ConfirmacionDocumento = z.infer<typeof schemaConfirmacionDocumento>

@@ -67,6 +67,21 @@
  * (`can_manage` incluido), así que el `UPDATE` sí se aplica en el flujo real
  * de verificación de esta tarea.
  *
+ * ## Duplicados SEMÁNTICOS (Capas 2 y 3, hotfix sobre la huella byte-a-byte)
+ *
+ * Justo después de validar la extracción -y antes de devolver la respuesta-
+ * este handler coteja los datos recién leídos contra los documentos YA
+ * CONFIRMADOS del mismo perfil (`lib/documentos/duplicados-semanticos-consulta.ts`):
+ * mismo laboratorio + mismo N° de orden (Capa 2), o TODOS los datos
+ * extraídos exactamente iguales -fecha primero, es condición necesaria- (Capa
+ * 3). Es el único momento del flujo humano en el que existen datos
+ * estructurados con los que comparar: la huella (Capa 1) corre ANTES, dentro
+ * de `ingestarDocumento`, sobre los bytes crudos. Si encuentra uno,
+ * `duplicadoSemantico` viaja en la respuesta con la fecha YA FORMATEADA
+ * (`formatearFechaDuplicado`, servidor) para que `FormularioRevision` solo
+ * tenga que mostrarla. Es best-effort: un error en el cotejo se loguea y no
+ * bloquea la extracción ya conseguida.
+ *
  * ## Errores de Gemini: mensajes en español, nunca un 500 sin cuerpo
  *
  * `extraerJson` (`lib/gemini/client.ts`) ya resuelve el timeout y el único
@@ -89,11 +104,19 @@ import {
 import { PROMPT_DOCUMENTO_MEDICO } from "@/lib/gemini/prompt-documento"
 import { SCHEMA_DOCUMENTO_MEDICO, type DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
 import { type ErrorGuarda, esErrorDeGuarda, requerirPermiso, requerirSesion } from "@/lib/auth/guardas"
+import { formatearFechaDuplicado } from "@/lib/documentos/huella"
+import { buscarDuplicadoSemantico } from "@/lib/documentos/duplicados-semanticos-consulta"
+import type { DuplicadoSemanticoParaCliente } from "@/lib/documentos/duplicados-semanticos"
 import { BUCKETS } from "@/lib/storage-admin"
 import { validarExtraccion } from "@/lib/validacion/documento.schema"
 
 export interface RespuestaExtraccionOk {
   extraccion: DocumentoMedicoExtraido
+  /**
+   * `null` si no se encontró ningún duplicado semántico (Capas 2/3), o si el
+   * cotejo falló -es best-effort, nunca bloquea la extracción-.
+   */
+  duplicadoSemantico: DuplicadoSemanticoParaCliente | null
 }
 
 export interface RespuestaExtraccionError {
@@ -288,7 +311,42 @@ export async function POST(request: Request): Promise<Response> {
       console.error(`[extraccion] Fallo inesperado guardando la extracción de ${documentoId}:`, error)
     }
 
-    return json({ extraccion }, 200)
+    // Duplicados SEMÁNTICOS (Capas 2 y 3, hotfix sobre la huella byte-a-byte):
+    // recién acá existen datos estructurados con los que cotejar. Best-effort
+    // -igual que el backfill de huellas de `ingestarDocumento`-: si la
+    // consulta falla, la pantalla de revisión simplemente no muestra la
+    // franja, nunca bloquea la extracción ya conseguida.
+    let duplicadoSemantico: DuplicadoSemanticoParaCliente | null = null
+    try {
+      const encontrado = await buscarDuplicadoSemantico(supabase, documento.profile_id, documentoId, {
+        fecha: extraccion.fecha,
+        categoria: extraccion.categoria,
+        institucion: extraccion.institucion,
+        medico: extraccion.medico,
+        numeroOrden: extraccion.numero_orden ?? "",
+        metricas: extraccion.metricas.map((metrica) => ({
+          nombre: metrica.nombre,
+          valor: metrica.valor,
+          unidad: metrica.unidad,
+        })),
+      })
+
+      if (encontrado) {
+        duplicadoSemantico = {
+          documentoId: encontrado.documentoId,
+          titulo: encontrado.titulo,
+          fechaTexto: formatearFechaDuplicado(encontrado.fecha),
+          motivo: encontrado.motivo,
+        }
+      }
+    } catch (error) {
+      console.error(
+        `[extraccion] No se pudo cotejar duplicados semánticos de ${documentoId} (se sigue sin la franja de aviso):`,
+        error instanceof Error ? error.message : error,
+      )
+    }
+
+    return json({ extraccion, duplicadoSemantico }, 200)
   } catch (error) {
     if (esErrorDeGuarda(error)) {
       return json({ error: error.message }, estadoDeErrorGuarda(error))

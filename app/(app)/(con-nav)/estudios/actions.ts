@@ -229,6 +229,7 @@ export async function confirmarDocumento(
     institucion: formData.get("institucion"),
     especialidad: formData.get("especialidad"),
     medico: formData.get("medico"),
+    numeroOrden: formData.get("numeroOrden"),
   }
 
   const validacion = validarConfirmacionDocumento(crudo)
@@ -236,8 +237,17 @@ export async function confirmarDocumento(
     return { error: validacion.error }
   }
 
-  const { documentoId, titulo, categoria, fecha, resumen, institucion, especialidad, medico } =
-    validacion.datos
+  const {
+    documentoId,
+    titulo,
+    categoria,
+    fecha,
+    resumen,
+    institucion,
+    especialidad,
+    medico,
+    numeroOrden,
+  } = validacion.datos
 
   // Las métricas son best-effort: un campo oculto roto o con forma inesperada
   // NUNCA bloquea la confirmación del documento -la regla de oro del roadmap
@@ -295,6 +305,10 @@ export async function confirmarDocumento(
       nueva_institucion: institucion ?? "",
       nueva_especialidad: especialidad ?? "",
       nuevo_medico: medico ?? "",
+      // Mismo criterio que institución/especialidad/médico: string vacía en
+      // vez de `null` (el tipo generado del parámetro no lleva `| null`),
+      // aunque el RPC trata las dos formas igual.
+      nuevo_numero_orden: numeroOrden ?? "",
     })
 
     if (error) {
