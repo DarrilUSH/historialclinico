@@ -6,7 +6,7 @@
 
 - **Motor verificado:** PostgreSQL 17.6 (Supabase local, contenedor `supabase_db_historialclinico`).
 - **Cobertura (verificada contra el catálogo el 2026-08-14, Sprint 11):** **19 tablas** con RLS habilitada, **60 políticas** de tabla, **4 buckets privados** con 5 políticas de `storage.objects`, **39 funciones** en `public` (todas con `search_path` fijado) y **28 triggers** que cubren lo que RLS no puede expresar. Una sola vista, `v_medicacion_estado`, en `security_invoker`.
-- **Estado de las pruebas:** `scripts/test-rls.sql` — **253 casos, 253 PASS, 0 FAIL**; `scripts/test-storage-rls.sh` — **27 casos, 27 PASS, 0 FAIL**.
+- **Estado de las pruebas:** `scripts/test-rls.sql` — **541 casos, 541 PASS, 0 FAIL** (verificado el 2026-08-18 en los DOS regímenes de privilegios por defecto: el del CLI local y el de Supabase cloud, ver [§9](#9-security-advisor-los-104-avisos-revisados-uno-por-uno)); `scripts/test-storage-rls.sh` — **27 casos, 27 PASS, 0 FAIL**.
 - **Auditoría:** [`auditoria-seguridad.md`](./auditoria-seguridad.md) (Sprint 11, tarea 11.4) es el informe completo, objeto por objeto, con los hallazgos y su estado. Los números de arriba salieron de ahí. **Este resumen quedó tres sprints atrás una vez** (hallazgo A-04): si volvés a tocar el esquema, actualizalo o volvé a dejar un mapa que miente sobre cuánto hay que auditar.
 
 ---
@@ -474,3 +474,136 @@ RLS filtra filas de Postgres. Tres cosas quedan afuera **por construcción** y n
 1. ~~**Los archivos.**~~ **Ya cubierto:** ver [§7, Storage](#7-storage-buckets-privados-y-políticas-de-objetos). Los cuatro buckets son privados. Tres de ellos tienen políticas de `storage.objects` que invocan las mismas funciones auxiliares que las tablas; el cuarto, `compartidos-temp` (11.2), no tiene ninguna a propósito: sin una política que lo nombre, el cliente no puede leerlo ni escribirlo.
 2. **La ventana post-revocación.** Borrar la fila de `family_permissions` corta el acceso **de inmediato** para toda consulta nueva, pero las signed URLs ya emitidas siguen sirviendo el archivo hasta que expiren, y el cache del service worker sigue en el dispositivo. De ahí el TTL corto (60–300 s) y la purga de cache al perder el permiso ([§8.1](./modelo-permisos.md#81-revocación)).
 3. **`service_role`.** Tiene `BYPASSRLS`: para él estas políticas no existen. Toda la protección es que la `SERVICE_ROLE_KEY` no salga del servidor. **Auditado** en el Sprint 11 (tarea 11.4): ver [`auditoria-seguridad.md`](./auditoria-seguridad.md) §5 — cero apariciones en `components/`, cero en el bundle del cliente, y una guarda que lanza en los seis módulos que la usan si se los carga en el navegador.
+
+---
+
+## 9. Security Advisor: los 104 avisos, revisados uno por uno
+
+**Fecha de la auditoría: 2026-08-18.** Migración de hardening: [`20260818190000_hardening_advisor.sql`](../supabase/migrations/20260818190000_hardening_advisor.sql). Arnés: `scripts/test-rls.sql`, BLOQUE 27.
+
+El Security Advisor del proyecto de producción mostraba **0 errores, 104 warnings y 2 info**. Este capítulo dice qué era cada uno.
+
+### 9.1 El hallazgo: el arnés probaba una base que no era la de producción
+
+**Los 100 warnings de SECURITY DEFINER no eran ruido del linter: eran reales, y varios eran graves.** En producción, cualquier persona con sesión iniciada podía llamar por `/rest/v1/rpc/<nombre>` a las 50 funciones `SECURITY DEFINER` de `public`. Entre ellas:
+
+| Función | Qué permitía a un usuario cualquiera |
+|---|---|
+| `leer_refresh_token_gmail(uuid)` | leer el **refresh token de Gmail de otra cuenta** — acceso a la casilla de la víctima |
+| `configurar_cron_recordatorios(text, text)` | reapuntar el cron a una URL propia y escribir el secreto en el Vault |
+| `configurar_cron_gmail(text)`, `configurar_cron_alertas_medicacion(text)` | ídem para los otros dos jobs |
+| `guardar_conexion_gmail`, `borrar_conexion_gmail`, `marcar_conexion_gmail_*` | pisar o borrar la conexión de Gmail de otra cuenta |
+| `configurar_auto_ingesta_gmail(uuid, boolean, uuid)` | encender la auto-ingesta ajena apuntándola a un perfil propio |
+| `destinatarios_de_avisos(uuid)` | enumerar `user_id` de terceros |
+| `reclamar_recordatorios_turnos(int)`, `reclamar_alertas_medicacion(int)` | apropiarse del lote de avisos de otros y dejarlos sin enviar |
+| `generar_tomas_del_dia(date)`, `generar_alertas_medicacion()`, `generar_recordatorios_pendientes()` | barrer la base entera |
+| `completar_alta_de_cuenta(uuid)`, `vincular_perfil_graduado(uuid, text)` | tocar el alta de cuentas ajenas |
+
+**La causa.** El proyecto de Supabase cloud arrastra, de cuando `public` se auto-exponía a la Data API, un `alter default privileges in schema public grant execute on functions to anon, authenticated, service_role`. Cada `create function` nacía con EXECUTE otorgado a `anon` y `authenticated` como entradas **explícitas** del ACL. Nuestro patrón de siempre —`revoke all on function X from public`— no las tocaba: PUBLIC es el pseudo-rol "todos"; `anon` y `authenticated` son roles de verdad, con su propia entrada en el ACL. Revocar de PUBLIC las deja intactas.
+
+**Por qué no se veía.** El CLI local ya defaultea al comportamiento nuevo ("nada se auto-expone", ver el comentario de `auto_expose_new_tables` en `supabase/config.toml`), así que esos grants nunca se creaban en local y el arnés pasaba 521/521. La comprobación fue poner `auto_expose_new_tables = true`, correr `supabase db reset` y volver a correr todo:
+
+| Medición sobre base local en régimen de cloud | Antes del hardening | Después |
+|---|---|---|
+| splinter, warnings de SECURITY | **100** | **17** |
+| splinter, INFO de SECURITY | 2 | 2 |
+| splinter, errores | 0 | 0 |
+| `scripts/test-rls.sql` | **521 casos, 489 PASS, 32 FAIL** | **541 casos, 541 PASS, 0 FAIL** |
+
+Los 32 casos que fallaban no eran nuevos: eran los que el arnés ya tenía escritos desde el Sprint 6 ("Elena ejecuta `leer_refresh_token_gmail` sobre la cuenta de Rubén" → esperado `denegada (42501)`, obtenido `ejecutada: RUBEN-REFRESH-TOKEN`). **El arnés estaba bien; el entorno donde se lo corría, no.**
+
+### 9.2 Tabla de veredictos
+
+| Lint | Nivel | Cant. | Veredicto |
+|---|---|---|---|
+| 0028 `anon_security_definer_function_executable` ("Public Can Execute SECURITY DEFINER Function") | WARN | **50** | **ENDURECIDO** — las 50 funciones `SECURITY DEFINER` de `public`. §2 de la migración revoca EXECUTE de PUBLIC, `anon`, `authenticated` y `service_role` sobre todas, y §3–§4 reponen la lista blanca. Queda en **0**. Arnés: "Ninguna función de public es ejecutable por anon" y "Lint 0028: sin hallazgos" |
+| 0029 `authenticated_security_definer_function_executable` | WARN | **50** | **33 ENDURECIDAS, 17 DELIBERADAS** (ver 9.3). Queda en **17** |
+| 0014 `extension_in_public` (`public.pg_net`) | WARN | **1** | **DELIBERADO — no se mueve** (ver 9.4) |
+| 0006 `multiple_permissive_policies` | WARN | **3** | **DELIBERADO.** `family_permissions` DELETE (`_autoridad` + `_renuncia`) e INSERT (`_autoridad` + `_arranque_gestionado`), y `medication_intakes` UPDATE (`_administrador` + `_registrar_toma`). En los tres son dos caminos legítimos y distintos que Postgres combina con OR; unificarlos daría una expresión ilegible y un único punto donde equivocarse. Es un lint de PERFORMANCE, y el costo es de microsegundos sobre tablas chicas |
+| 0008 `rls_enabled_no_policy` | INFO | **2** | **DELIBERADO.** `appointment_reminders` y `storage_purge_queue`: infraestructura que solo tocan triggers `SECURITY DEFINER`, `pg_cron` y `service_role`. Ya documentado en [§1](#1-qué-se-habilitó-y-qué-no); el BLOQUE 7 del arnés verifica que sigan siendo **exactamente esas dos** |
+| 0011 `function_search_path_mutable` | WARN | **0** | **SIN HALLAZGOS.** Las 62 funciones de `public` llevan `set search_path = ''`. Ahora está medido en el arnés ("Lint 0011: ninguna función de public se escapó"), no solo en la convención |
+| 0010 `security_definer_view` | ERROR | **0** | Sin hallazgos: la única vista, `v_medicacion_estado`, es `security_invoker` |
+| resto de los 28 lints de splinter | — | **0** | Sin hallazgos: `rls_disabled_in_public`, `auth_users_exposed`, `policy_exists_rls_disabled`, `rls_policy_always_true`, `rls_references_user_metadata`, `sensitive_columns_exposed`, `public_bucket_allows_listing`, `pg_graphql_anon_table_exposed`, `pg_graphql_authenticated_table_exposed`, `insecure_queue_exposed_in_api`, `materialized_view_in_api`, `foreign_table_in_api`, `fkey_to_auth_unique`, `no_primary_key`, `auth_rls_initplan`, `duplicate_index`, `unsupported_reg_types` |
+
+> **Sobre la aritmética.** 50 + 50 + 1 + 3 = **104**, y los INFO de SECURITY dan **2**: los tres números del Advisor cierran exactos contra la medición local en régimen de cloud. La salvedad es que splinter etiqueta `multiple_permissive_policies` como PERFORMANCE. Si el Advisor de producción no los estuviera contando ahí, los 3 restantes serían casi con seguridad **sobrecargas de función acumuladas** en producción que un `db reset` local no reproduce. Conviene mirar el Advisor después del push y, si aparecen, borrarlas con `drop function`.
+
+### 9.3 Las 17 que quedan, y por qué quedan
+
+Siguen apareciendo en el lint 0029 **a propósito**: son la superficie de escritura de la app. Dos familias:
+
+**a) Predicados que invocan las políticas RLS** ([§2](#2-funciones-auxiliares-y-por-qué-no-recursan)). Son `SECURITY DEFINER` justamente para no recursar; si `authenticated` no pudiera ejecutarlas, no habría política que evaluar y la app entera devolvería `42501`: `es_titular` · `es_perfil_gestionado` · `puede_ver_perfil` · `puede_cargar_en_perfil` · `puede_administrar_perfil` · `puede_otorgar_permisos` · `puede_arrancar_administracion` · `puede_graduar_perfil` · `perfil_actor` · `nombres_de_perfiles_vinculados` · `perfil_id_por_email`.
+
+**b) RPC que la app llama con la sesión del usuario**, cada una con su propio control de autorización adentro y sus casos hostiles en el arnés: `confirmar_documento_recien_subido` · `descartar_documento_recien_subido` · `crear_perfil_gestionado` · `registrar_toma` · `revertir_toma` · `registrar_suscripcion_push`.
+
+Las otras dos de la lista blanca de 19 —`es_sesion_de_usuario` y `perfil_de_objeto_storage`— son `SECURITY INVOKER` y por eso el lint no las cuenta.
+
+El arnés fija la lista **por nombre**: el caso "La lista de funciones que `authenticated` ejecuta es EXACTAMENTE la prevista" compara la enumeración completa. Una función nueva que se exponga sin querer rompe ese caso; no hay que acordarse de escribirle su caso hostil.
+
+### 9.4 `pg_net` en `public`: se documenta, no se mueve
+
+`20260812190000_extensiones.sql` dice `create extension if not exists pg_net;` sin `with schema`. En local no importa (el CLI ya la trae en `extensions`); en un proyecto de cloud nuevo la crea en el primer esquema del `search_path`, que es `public`. De ahí el aviso.
+
+**Se decidió no moverla**, por tres razones:
+
+1. **No cambia la superficie de ataque.** `pg_net` declara `relocatable = false` y crea todos sus objetos en un esquema propio, `net`, esté la extensión registrada donde esté. En `public` no queda ni una función suya: lo único que vive ahí es la anotación de `pg_extension.extnamespace`. El lint es correcto como regla general y es un falso positivo para este caso.
+2. **Moverla es peligroso para los crons.** Al no ser relocalizable, `alter extension pg_net set schema extensions` **falla**. El único camino es `drop extension` + `create extension ... with schema extensions`, y el `drop` se lleva el esquema `net` con la cola de pedidos HTTP adentro; además hay que reiniciar a mano el background worker (`net.worker_restart()`). Si eso no sale bien, `net.http_post` acepta la escritura y no dispara nunca: los cuatro crons dejan de mandar recordatorios, alertas y el barrido de Gmail **en silencio**. No vale ese riesgo por una anotación cosmética.
+3. **Para proyectos nuevos la corrección es gratis:** `create extension if not exists pg_net with schema extensions;`. No se editó `20260812190000_extensiones.sql` porque en producción ya está aplicada y reescribir una migración aplicada no la vuelve a correr.
+
+### 9.5 Deuda conocida: los grants de `pg_net` sobre el esquema `net`
+
+`pg_net` otorga por su cuenta USAGE sobre `net` y EXECUTE sobre `net.http_post` / `net.http_get` a **`anon` y `authenticated`**. En potencia es un SSRF con la identidad del servidor de base de datos.
+
+La migración traía los `revoke` correspondientes y **hubo que sacarlos: no se puede**. `net` y sus funciones son de `supabase_admin`, y `postgres` no es miembro suyo ni superusuario (ni en cloud ni en el stack local, donde `rolsuper = false` para `postgres`). El `revoke` se ejecuta, no revoca nada y deja un `WARNING: no privileges could be revoked` que en un `db push` no ve nadie. Se sacaron en vez de dejarlos "por las dudas", que es exactamente el problema que esta auditoría vino a arreglar.
+
+**Se acepta** porque `net` no está entre los esquemas que expone PostgREST (`public, graphql_public`): no hay `/rest/v1/rpc/http_post`. Llegar requiere ejecución de SQL arbitrario, y con eso `pg_net` ya es lo de menos.
+
+Queda **medido** en el arnés (casos "El esquema net es de supabase_admin…" y "DEUDA CONOCIDA: anon/authenticated conservan EXECUTE sobre net.http_get y net.http_post"). Si Supabase cambia ese default, o si alguien suma `net` a los esquemas expuestos, los casos cambian de valor y el tema vuelve a la mesa.
+
+### 9.6 La trampa que queda abierta, y por qué hay un caso que la mide
+
+`alter default privileges in schema public revoke execute on functions from public` **no alcanza**. Se midió, en los dos regímenes, con la fila de `pg_default_acl` ya en `{postgres=X/postgres}`:
+
+```sql
+create function public.zz() returns int language sql as $$ select 1 $$;
+-- proacl                                                   -> NULL
+-- has_function_privilege('anon', 'public.zz()', 'EXECUTE')  -> true
+```
+
+`proacl = NULL` significa "el default interno de Postgres", que para una función es `{=X/dueño, dueño=X/dueño}` — y ese `=X` es PUBLIC. El EXECUTE de PUBLIC **reaparece en cada `create function`**, y `anon` lo hereda por ser parte de PUBLIC.
+
+**Consecuencia práctica: toda migración futura que cree una función en `public` tiene que revocarla a mano.** No hay red automática. La red es el arnés: el caso "Ninguna función de public es ejecutable por anon" exige 0, y el caso "TRAMPA MEDIDA: una función NUEVA en public nace ABIERTA a PUBLIC" deja el comportamiento de Postgres documentado **corriéndolo**, para que nadie vuelva a suponer que el default lo resuelve. Si algún día Postgres o Supabase lo cambian, ese caso pasa a FAIL y la nota se actualiza en vez de quedar mintiendo acá.
+
+### 9.7 Los crons, verificados después del hardening
+
+La migración no toca ni un privilegio de `postgres`, `supabase_admin` o `supabase_auth_admin`. Los cuatro jobs corren con `cron.job.username = 'postgres'`, que es el **dueño** de las funciones. Verificado en local, en los dos regímenes, disparando cada job a mano tal cual lo invoca `pg_cron`:
+
+| Job | `cron.job` | Ejecución manual |
+|---|---|---|
+| `recordatorios-turnos` (`*/15 * * * *`) | activo, `postgres` | `generados=0 pendientes=2 request_id=1` |
+| `generar-tomas-del-dia` (`5 3 * * *`) | activo, `postgres` | `3 tomas` |
+| `alertas-medicacion` (`10 12,21 * * *`) | activo, `postgres` | `generadas=0 pendientes=0 http=innecesario` |
+| `barrido-gmail` (`*/30 * * * *`) | activo, `postgres` | `conectadas=1 request_id=2` |
+
+Los `request_id` son de `pg_net`: los dos jobs que tenían trabajo encolaron su `net.http_post` correctamente (`net.http_request_queue` = 2 pedidos). El arnés además fija el invariante: "Los cuatro jobs de pg_cron siguen activos y corriendo como postgres".
+
+> **Son cuatro, no cinco.** `configurar_cron_*` son tres funciones, pero el módulo de recordatorios programa dos jobs (`recordatorios-turnos` y `generar-tomas-del-dia`), así que el total es cuatro.
+
+### 9.8 Cómo reproducir esta auditoría
+
+```bash
+# 1. Traer el linter (es SQL abierto: github.com/supabase/splinter)
+curl -sL -o /tmp/splinter.sql \
+  https://raw.githubusercontent.com/supabase/splinter/main/splinter.sql
+
+# 2. Correrlo contra la base local, con los esquemas que expone producción
+docker exec -i supabase_db_historialclinico psql -U postgres -d postgres <<'SQL'
+begin;
+set local pgrst.db_schemas = 'public, graphql_public';
+\i /tmp/splinter.sql
+rollback;
+SQL
+
+# 3. Para reproducir el régimen de PRODUCCIÓN (no el default del CLI):
+#    poner  auto_expose_new_tables = true  en supabase/config.toml,
+#    correr  npx supabase db reset,  repetir 2, y ACORDARSE DE REVERTIRLO.
+```
