@@ -34,7 +34,7 @@ De ahí se derivan tres reglas operativas:
 3. **Los identificadores estables no viajan, ni siquiera los internos.** Los
    `uuid` no aportan nada al resumen y permitirían correlacionar dos requests
    distintos como "de la misma persona". Cuando la ficha necesita referirse a
-   un estudio usa un **índice posicional** (`EstudioContexto.indice`, 1..N),
+   un estudio usa un **índice posicional** (`DocumentoContexto.indice`, 1..N),
    válido solo dentro de ese contexto.
 
 ---
@@ -111,16 +111,65 @@ solo con lo vigente hoy (`vigente_hoy !== false`).
 | `necesitaRenovacion` | `v_medicacion_estado.necesita_renovacion` | El umbral de 5 días está definido una sola vez, en la vista. |
 | `indicaciones` | `medications.notes` | "Tomar con las comidas", "no suspender sin consultar": adherencia. Texto libre, ver §5. |
 
-### 3.3 `estudiosRecientes` (máximo 5)
+### 3.3 `episodios` — el historial agrupado (versión 2 del contexto)
+
+Hasta la versión 1 este campo se llamaba `estudiosRecientes` y traía **los 5
+documentos más nuevos**. Se cambió al probar la ficha contra un historial real
+de 47 documentos: los 5 más nuevos eran cinco laboratorios de rutina, y la
+internación de dieciséis días por un absceso hepático —el hecho clínico más
+importante de esa persona— **no aparecía en la ficha en absoluto**, porque sus
+18 archivos tenían nueve meses de antigüedad. Un recorte por fecha no es un
+recorte por pertinencia.
+
+Desde la versión 2 viajan los documentos **agrupados por episodio** (por
+cercanía de fecha, `DIAS_CORTE_EPISODIO`), sin recorte por antigüedad, y sin
+los que no aportan ningún hecho clínico.
 
 | Campo | Origen | Por qué |
 |---|---|---|
-| `indice` | posición, 1..N | Permite que la ficha diga "ver estudio 2" **sin que viaje ningún uuid**. |
-| `fecha` | `documents.document_date` | Ubica el hallazgo en el tiempo. |
-| `categoria` | `documents.category` → etiqueta en castellano | Un laboratorio y una receta se leen distinto. |
-| `titulo` | `documents.title` | Qué estudio es. Texto libre, ver §5. |
-| `especialidad` | `documents.specialty` | El **área** ("Cardiología"), no la persona. |
-| `resumenIa` | `documents.ai_summary` | El resumen en lenguaje claro que ya generó el Sprint 4, y el insumo principal de la ficha. |
+| `indice` | posición, 1..N | Ordinal del episodio dentro de este contexto. **Ningún uuid.** |
+| `desde` / `hasta` | `documents.document_date` (mín. y máx. del grupo) | El tramo de tiempo del episodio. |
+| `adjuntosSinContenidoClinico` | conteo | Cuántos archivos del episodio quedaron afuera por no aportar nada. Viaja el **número**, nunca su texto: es para que la ficha no los cuente como estudios distintos. |
+| `documentos[].indice` | posición, 1..N global | Permite que la ficha diga "ver estudio 2" **sin que viaje ningún uuid**. |
+| `documentos[].fecha` | `documents.document_date` | Ubica el hallazgo en el tiempo. |
+| `documentos[].categoria` | `documents.category` → etiqueta en castellano | Un laboratorio y una receta se leen distinto. |
+| `documentos[].titulo` | `documents.title` | Qué estudio es. Texto libre, ver §5. |
+| `documentos[].especialidad` | `documents.specialty` | El **área** ("Cardiología"), no la persona. |
+| `documentos[].resumenIa` | `documents.ai_summary` | El resumen en lenguaje claro que ya generó el Sprint 4, y el insumo principal de la ficha. **Obligatorio**: un documento sin resumen no entra. |
+
+#### Por qué esto NO afloja la minimización
+
+La lista blanca de **columnas** no se tocó: sigue sin viajar `institution`,
+`doctor_name`, `storage_path` ni `raw_ocr_text` (§4.4). Lo que cambió es qué
+FILAS entran, y en las dos direcciones:
+
+- **Entran más**: el historial entero en vez de los 5 archivos más nuevos. Se
+  justifica por la finalidad declarada (art. 4 inc. 1, Ley 25.326): la ficha
+  existe para resumir antecedentes ante un médico, y un absceso hepático de
+  hace nueve meses, una vasectomía o un hallazgo que quedó "a valorar
+  clínicamente" cambian decisiones clínicas **hoy**. El tope duro es
+  `MAXIMO_DOCUMENTOS_CONTEXTO` (40), y por encima de él se descartan episodios
+  enteros desde el más viejo.
+- **Salen menos**: los documentos cuyo `ai_summary` no cuenta ningún hecho
+  clínico —una placa escaneada, una hoja de imágenes, la hoja de firmas de un
+  informe— **ya no viajan**. Son datos de salud que salían del servidor a
+  cambio de cero valor clínico: en el historial real de 47 documentos eran 18
+  (38 %). Menos superficie de exposición, no más.
+
+#### El filtro `aportaHechoClinico`
+
+Un documento entra solo si su resumen cuenta algo que le pasó a la persona. El
+filtro vive en `lib/ficha/armado.ts` y reconoce las fórmulas que
+`lib/gemini/prompt-documento.ts` (regla 5.b) le pide a la ingesta cuando la
+página no tiene contenido: "sin informe escrito", "sin hallazgos nuevos", "solo
+trae los datos administrativos y la firma". Las dos piezas son un contrato, y
+`tests/unit/contexto-ficha.test.ts` lo verifica con los textos reales.
+
+El motivo no es de privacidad sino de calidad, y lo reportó el dueño del
+producto: sin el filtro, la ficha heredaba esos resúmenes y terminaba diciendo
+"el 29/10/2025 se realizó un estudio en tal sanatorio" en lugar de "el
+29/10/2025 se le encontró un absceso en el hígado". La ficha no puede mejorar
+un resumen vacío; lo único correcto es no mostrarlo.
 
 ### 3.4 `metricasLaboratorio`
 
@@ -238,7 +287,7 @@ por lo tanto el sistema no puede garantizar que no contengan un identificador:
 
 | Campo | Ejemplo real | Por qué entra igual |
 |---|---|---|
-| `estudiosRecientes[].titulo` | "Análisis de sangre completo — Laboratorio Central" | El roadmap lo pide y es el nombre del estudio. Alguien podría escribir "Análisis de Roberto" y ese texto viajaría. |
+| `episodios[].documentos[].titulo` | "Análisis de sangre completo — Laboratorio Central" | El roadmap lo pide y es el nombre del estudio. Alguien podría escribir "Análisis de Roberto" y ese texto viajaría. |
 | `medicacionActiva[].indicaciones` | "Tomar con las comidas" | Instrucciones de toma; cambian la adherencia. |
 | `signosVitales[].ultimas[].nota` | "En ayunas" | Cambia por completo la lectura del valor. |
 | `paciente.notasSos` | "Marcapasos colocado en 2019" | Es el campo de antecedentes libres; su contenido típico es puramente clínico. |
@@ -247,7 +296,7 @@ por lo tanto el sistema no puede garantizar que no contengan un identificador:
 base local (§7.3) devuelve **cero** apariciones de todo lo del §4 —incluida
 `documents.institution`, que en el seed vale `"Centro Cardiovascular Ushuaia"`
 y no aparece por ningún lado— pero encuentra el texto `"Laboratorio Central"`
-**una** vez, dentro de `estudiosRecientes[1].titulo`:
+**una** vez, dentro del `titulo` de un documento (`episodios[].documentos[].titulo`):
 
 ```
 "titulo": "Análisis de sangre completo — Laboratorio Central"

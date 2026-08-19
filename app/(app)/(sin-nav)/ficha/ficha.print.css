@@ -44,6 +44,31 @@
  * permite que el contenido típico del seed -seis secciones, preguntas y
  * aviso- entre en una sola hoja A4 sin recortar nada.
  *
+ * ## El presupuesto de alto: por qué el margen bajó a 10mm y el `gap` se aprieta
+ *
+ * La tarea 10.4 calibró esta hoja contra una ficha corta: la del seed, con un
+ * perfil de seis antecedentes y cinco estudios. Desde la versión 2 del
+ * contexto clínico (`lib/ficha/armado.ts`) la ficha cuenta el historial
+ * COMPLETO agrupado por episodio -antes solo veía los cinco documentos más
+ * nuevos-, y una ficha con contenido real pasó de 823px a 1042px de alto
+ * impreso, contra una caja útil de 1032px: se iba a una segunda página **por
+ * diez píxeles**.
+ *
+ * Se recuperan unos 55px sin tocar una sola letra:
+ *
+ * - `@page margin: 12mm → 10mm`. Cuatro milímetros verticales (≈15px). 10mm
+ *   sigue siendo un margen de documento perfectamente imprimible en cualquier
+ *   impresora hogareña -por debajo de 6mm sí empiezan los recortes-.
+ * - `gap` de la hoja: `gap-5` (≈16,7px con la raíz de 10pt) → `0.875rem`
+ *   (≈11,7px). Son ocho separaciones entre las nueve franjas de la hoja:
+ *   ≈40px de aire, no de contenido.
+ *
+ * Lo que NO se tocó, a propósito: el `font-size` de raíz (10pt), la escala
+ * tipográfica, el interlineado y las tres líneas de "Notas del médico". El
+ * criterio de aceptación pide una hoja LEGIBLE de una sola página; achicar la
+ * letra para que entre más texto cumpliría la letra del criterio y rompería
+ * su intención.
+ *
  * ## Neutralización de la densidad (Sprint 13, tarea 13.6)
  *
  * `components/ficha/hoja-consulta.tsx` usa utilidades de Tailwind
@@ -80,7 +105,8 @@
 @media print {
   @page {
     size: A4;
-    margin: 12mm;
+    /* 10mm, no los 12mm de la tarea 10.4 — ver "El presupuesto de alto" abajo. */
+    margin: 10mm;
   }
 
   html,
@@ -130,6 +156,10 @@
     border: none !important;
     border-radius: 0 !important;
     box-shadow: none !important;
+    /* `gap-5` (≈16,7px con la raíz de 10pt) entre las nueve franjas de la
+       hoja se comía unos 130px de la única página. Ver "El presupuesto de
+       alto" en el encabezado: se aprieta el AIRE, nunca la tipografía. */
+    gap: 0.875rem !important;
   }
 
   /* Texto negro sobre fondo blanco en TODO el árbol de la hoja, sin importar

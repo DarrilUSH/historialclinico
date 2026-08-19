@@ -40,9 +40,35 @@ import "server-only"
  * `documents.id`, `medications.id`, `vital_signs.id`: ninguno aporta al
  * resumen y todos son identificadores estables que permitirían correlacionar
  * dos requests distintos como "de la misma persona". Cuando la ficha necesita
- * referirse a un estudio, usa `EstudioContexto.indice` -un ordinal 1..N válido
- * SOLO dentro de este contexto-, y quien lo consuma vuelve a la fila por
- * posición en el mismo arreglo con el que armó el pedido.
+ * referirse a un estudio, usa `DocumentoContexto.indice` -un ordinal 1..N
+ * válido SOLO dentro de este contexto-, y quien lo consuma vuelve a la fila
+ * por posición en el mismo arreglo con el que armó el pedido.
+ *
+ * ## Por qué el historial viaja AGRUPADO POR EPISODIO (versión 2)
+ *
+ * La versión 1 mandaba "los 5 documentos más nuevos", y eso producía dos
+ * defectos que se vieron con un historial real de 47 documentos:
+ *
+ * 1. **Un episodio quedaba afuera entero.** Una internación de dieciséis días
+ *    deja 18 archivos; cinco meses después, ninguno de esos 18 está entre los
+ *    5 más nuevos y la ficha no mencionaba la internación en absoluto -el
+ *    hecho clínico más importante de la persona, invisible-.
+ * 2. **Cada archivo se leía como un evento suelto.** Dieciocho archivos de una
+ *    misma internación son UNA internación, no dieciocho estudios.
+ *
+ * Desde la versión 2 el contexto manda `episodios`: los documentos agrupados
+ * por cercanía de fecha (`DIAS_CORTE_EPISODIO`), sin recorte por antigüedad y
+ * **sin los documentos que no aportan ningún hecho clínico** (las placas y
+ * hojas de imágenes, cuyo resumen habla del archivo -"la imagen sola, sin
+ * informe escrito"- y no de lo que se encontró). Esos no se describen: se
+ * cuentan, en `adjuntosSinContenidoClinico`.
+ *
+ * Es MENOS ruido y MÁS señal para el mismo conjunto de columnas: la lista
+ * blanca de campos no se tocó -sigue sin viajar `institution`, `doctor_name`,
+ * `storage_path` ni `raw_ocr_text`-, cambió QUÉ FILAS entran y cómo se
+ * ordenan. La justificación de por qué el historial entero es pertinente
+ * -un absceso hepático de hace nueve meses cambia decisiones clínicas de hoy-
+ * está en `docs/minimizacion-datos.md` §4.4.
  *
  * ## Puro, pero no isomórfico
  *
@@ -76,10 +102,43 @@ import type { CategoriaDocumento, FrecuenciaMedicacion, TipoSignoVital } from "@
  * (tarea 10.5); saber con qué forma de contexto se produjo es lo que permite
  * releerla años después sin adivinar.
  */
-export const VERSION_CONTEXTO_CLINICO = 1
+export const VERSION_CONTEXTO_CLINICO = 2
 
-/** Cuántos estudios recientes entran. Fijado por el roadmap (tarea 10.2). */
-export const MAXIMO_ESTUDIOS = 5
+/**
+ * Cuántas filas de `documents` se leen de la base como mucho. NO es un
+ * recorte de contenido -el recorte lo hace `MAXIMO_DOCUMENTOS_CONTEXTO`, ya
+ * con los episodios armados-: es el tope defensivo de la CONSULTA, para que
+ * un perfil con miles de archivos no traiga la tabla entera a memoria.
+ */
+export const MAXIMO_DOCUMENTOS_LEIDOS = 200
+
+/**
+ * Cuántos documentos CON contenido clínico entran al contexto. Si sobran, se
+ * descartan episodios enteros desde el más VIEJO: es preferible que la ficha
+ * no mencione una ecografía de 2009 a que mencione media internación.
+ */
+export const MAXIMO_DOCUMENTOS_CONTEXTO = 40
+
+/**
+ * Tope por episodio. Alto a propósito: una internación real deja más de diez
+ * documentos con contenido y truncarla es exactamente el defecto que la
+ * versión 2 vino a arreglar. Solo actúa ante un episodio anómalo.
+ */
+export const MAXIMO_DOCUMENTOS_POR_EPISODIO = 14
+
+/**
+ * Máxima distancia entre dos documentos CONSECUTIVOS para que sigan siendo el
+ * mismo episodio. Treinta días cubre "internación + controles de las semanas
+ * siguientes" -que es un solo relato clínico- sin fusionar dos controles
+ * anuales.
+ */
+export const DIAS_CORTE_EPISODIO = 30
+
+/**
+ * Tope de duración total de un episodio. Sin él, alguien que se hace un
+ * laboratorio cada 25 días encadenaría años enteros en un solo "episodio".
+ */
+export const DIAS_MAXIMOS_EPISODIO = 120
 
 /** Cuántas mediciones por métrica de laboratorio y por tipo de signo vital entran. */
 export const MEDICIONES_POR_TIPO = 3
@@ -136,8 +195,15 @@ export interface MedicacionContexto {
   indicaciones: string | null
 }
 
-/** Un estudio reciente, sin quién lo firmó ni dónde se hizo. */
-export interface EstudioContexto {
+/**
+ * Un documento del historial que SÍ aporta un hecho clínico, sin quién lo
+ * firmó ni dónde se hizo.
+ *
+ * A diferencia de la versión 1, `resumenIa` no es opcional: un documento sin
+ * resumen -o cuyo resumen habla del archivo y no de lo que se encontró- no
+ * llega hasta acá, lo filtra `aportaHechoClinico`.
+ */
+export interface DocumentoContexto {
   /**
    * Ordinal 1..N **dentro de este contexto**, para que la ficha pueda decir
    * "ver estudio 2" sin que viaje ningún uuid. No es un identificador
@@ -153,7 +219,35 @@ export interface EstudioContexto {
   /** `documents.specialty` ("Cardiología"): el área, no la persona. */
   especialidad: string | null
   /** `documents.ai_summary`: el resumen en lenguaje claro que ya generó el Sprint 4. */
-  resumenIa: string | null
+  resumenIa: string
+}
+
+/**
+ * Un tramo del historial: los documentos que caen juntos en el tiempo y por
+ * lo tanto cuentan UN mismo hecho -una internación, una tanda de estudios,
+ * un control anual-.
+ *
+ * `desde` y `hasta` son las fechas de los DOCUMENTOS del tramo, no las de la
+ * internación: la fecha exacta de lo que pasó la cuentan los resúmenes, y el
+ * prompt le pide explícitamente a Gemini que use esas y no el rango de
+ * archivos.
+ */
+export interface EpisodioContexto {
+  /** Ordinal 1..N dentro de este contexto, del episodio más reciente al más viejo. */
+  indice: number
+  /** Fecha del documento más VIEJO del episodio, `YYYY-MM-DD`. */
+  desde: string
+  /** Fecha del documento más NUEVO del episodio, `YYYY-MM-DD`. */
+  hasta: string
+  /** Los documentos con contenido clínico, en orden cronológico ascendente. */
+  documentos: DocumentoContexto[]
+  /**
+   * Cuántos archivos MÁS tiene el episodio que no aportan ningún hecho
+   * clínico (placas, hojas de imágenes, hojas de firma). Viaja el NÚMERO para
+   * que la ficha sepa que existen y no los confunda con estudios distintos —
+   * nunca su texto, que es justamente el membrete que hay que dejar afuera.
+   */
+  adjuntosSinContenidoClinico: number
 }
 
 /** Una medición de una métrica de laboratorio. */
@@ -235,8 +329,18 @@ export interface ContextoClinico {
   paciente: PacienteContexto
   /** Solo lo vigente hoy, ordenado por nombre. */
   medicacionActiva: MedicacionContexto[]
-  /** Hasta `MAXIMO_ESTUDIOS`, más reciente primero. */
-  estudiosRecientes: EstudioContexto[]
+  /**
+   * El historial agrupado por episodio, del más reciente al más viejo, sin
+   * los documentos que no aportan ningún hecho clínico. Ver "Por qué el
+   * historial viaja AGRUPADO POR EPISODIO" en el encabezado.
+   */
+  episodios: EpisodioContexto[]
+  /**
+   * Cuántos archivos del historial quedaron afuera por no aportar ningún
+   * hecho clínico, en total. Es el número que hace auditable el filtro: si
+   * una ficha "pierde" un estudio, este contador dice si fue por acá.
+   */
+  documentosSinContenidoClinico: number
   /** Una entrada por métrica, ordenadas alfabéticamente. */
   metricasLaboratorio: MetricaContexto[]
   /** Una entrada por tipo con mediciones, en el orden fijo de `TIPOS_SIGNO`. */
@@ -444,24 +548,201 @@ function armarMedicacion(filas: readonly FilaMedicacionFuente[]): MedicacionCont
 }
 
 /**
- * Los últimos `MAXIMO_ESTUDIOS`, más reciente primero.
+ * Frases con las que el propio resumen declara que el documento NO trae
+ * hallazgos: es una placa, una hoja de imágenes o la hoja administrativa de
+ * un informe que está cargado aparte.
  *
- * El orden lo impone esta función y no la consulta: así el recorte a 5 es
- * correcto aunque las filas lleguen en cualquier orden, y el test puede
- * pasarlas desordenadas a propósito.
+ * No es una lista de palabras "sospechosas" inventada acá: es el vocabulario
+ * que produce `lib/gemini/prompt-documento.ts` cuando la página no tiene
+ * contenido clínico -regla 5 de ese prompt, que le pide exactamente esas
+ * fórmulas-. Las dos piezas son un contrato: si alguna vez se reescribe la
+ * regla 5, hay que actualizar esta tabla, y `tests/unit/contexto-ficha.test.ts`
+ * lo comprueba con los textos reales.
+ *
+ * Se comparan sobre el resumen NORMALIZADO (sin tildes, en minúsculas), así
+ * "ecógrafo" y "ecografo" son la misma marca.
  */
-function armarEstudios(filas: readonly FilaDocumentoFuente[]): EstudioContexto[] {
-  return [...filas]
-    .sort((a, b) => b.document_date.localeCompare(a.document_date))
-    .slice(0, MAXIMO_ESTUDIOS)
-    .map((fila, posicion) => ({
-      indice: posicion + 1,
-      fecha: fila.document_date,
-      categoria: ETIQUETA_CATEGORIA[fila.category] ?? ETIQUETA_CATEGORIA.other,
-      titulo: fila.title,
-      especialidad: textoOpcional(fila.specialty),
-      resumenIa: textoOpcional(fila.ai_summary),
-    }))
+export const MARCAS_SIN_CONTENIDO_CLINICO = [
+  "sin informe",
+  "no hay informe escrito",
+  "sin hallazgos nuevos",
+  "es la imagen sola",
+  "la imagen en si",
+  "son capturas del estudio",
+  "captura del ecografo",
+  "capturas del ecografo",
+  "datos administrativos",
+  "hoja de contacto",
+  "cargado por separado",
+  "cargada por separado",
+  "no un hallazgo del informe",
+  "es un documento aparte",
+] as const
+
+/** Sin tildes y en minúsculas, para que la comparación no dependa de la ortografía. */
+function normalizarResumen(texto: string): string {
+  return texto
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+}
+
+/**
+ * ¿Este documento cuenta algo que le pasó a la persona?
+ *
+ * Es el filtro que evita el defecto que reportó el dueño del producto: que la
+ * ficha diga "el 29/10/2025 se hizo un estudio en tal sanatorio" en vez de
+ * "el 29/10/2025 se le encontró un absceso en el hígado". Ese membrete no lo
+ * inventa la ficha: lo hereda de resúmenes de documentos que efectivamente no
+ * tienen nada más que contar -una placa escaneada, la hoja de firmas de un
+ * informe-. La ficha no puede mejorarlos; lo único correcto es no mostrarlos.
+ *
+ * Un documento sin resumen tampoco entra: sin `ai_summary` lo único que la
+ * ficha podría decir de él es su fecha y su título, que es exactamente el
+ * membrete que se quiere evitar.
+ */
+export function aportaHechoClinico(fila: FilaDocumentoFuente): boolean {
+  const resumen = textoOpcional(fila.ai_summary)
+  if (resumen === null) return false
+  const normalizado = normalizarResumen(resumen)
+  return !MARCAS_SIN_CONTENIDO_CLINICO.some((marca) => normalizado.includes(marca))
+}
+
+/** Días calendario entre dos fechas `YYYY-MM-DD`. Positivo si `a` es posterior a `b`. */
+function diasEntre(a: string, b: string): number {
+  return Math.round((Date.parse(`${a}T00:00:00Z`) - Date.parse(`${b}T00:00:00Z`)) / 86_400_000)
+}
+
+/** Cuánto "pesa" un documento cuando hay que elegir cuáles entran. */
+const PESO_CATEGORIA: Record<CategoriaDocumento, number> = {
+  consultation: 5,
+  other: 4,
+  laboratory: 3,
+  imaging: 3,
+  prescription: 2,
+}
+
+/**
+ * Puntaje de un documento, solo para DESEMPATAR cuando un episodio excede
+ * `MAXIMO_DOCUMENTOS_POR_EPISODIO`. Una epicrisis o un parte quirúrgico pesan
+ * más que una placa informada, y a igual categoría gana el resumen que más
+ * cuenta. No cambia el orden de salida -que siempre es cronológico-, solo
+ * quién sobrevive al recorte.
+ */
+function puntajeDocumento(fila: FilaDocumentoFuente): number {
+  const peso = PESO_CATEGORIA[fila.category] ?? PESO_CATEGORIA.other
+  const largo = Math.min((fila.ai_summary ?? "").trim().length, 999)
+  return peso * 1000 + largo
+}
+
+/** Filas de un mismo episodio, todavía sin recortar ni mapear. */
+interface GrupoEpisodio {
+  desde: string
+  hasta: string
+  conContenido: FilaDocumentoFuente[]
+  adjuntos: number
+}
+
+/**
+ * Agrupa los documentos en episodios por cercanía de fecha.
+ *
+ * Se recorre de lo más nuevo a lo más viejo y se encadena mientras dos
+ * documentos CONSECUTIVOS estén a menos de `DIAS_CORTE_EPISODIO` y el
+ * episodio entero no supere `DIAS_MAXIMOS_EPISODIO`. La segunda condición es
+ * la que impide que un control cada 25 días encadene años enteros.
+ *
+ * Los documentos sin contenido clínico **entran al grupo** (para que el
+ * episodio los cuente en `adjuntosSinContenidoClinico`) pero no a la lista de
+ * documentos: un episodio que solo tuviera placas no aparece en la ficha,
+ * porque no habría nada que contar de él.
+ */
+function agruparEnEpisodios(filas: readonly FilaDocumentoFuente[]): GrupoEpisodio[] {
+  const grupos: GrupoEpisodio[] = []
+
+  for (const fila of [...filas].sort((a, b) => b.document_date.localeCompare(a.document_date))) {
+    const ultimo = grupos[grupos.length - 1]
+    const sigueElMismoEpisodio =
+      ultimo !== undefined &&
+      diasEntre(ultimo.desde, fila.document_date) <= DIAS_CORTE_EPISODIO &&
+      diasEntre(ultimo.hasta, fila.document_date) <= DIAS_MAXIMOS_EPISODIO
+
+    let grupo: GrupoEpisodio
+    if (sigueElMismoEpisodio) {
+      grupo = ultimo
+    } else {
+      grupo = {
+        desde: fila.document_date,
+        hasta: fila.document_date,
+        conContenido: [],
+        adjuntos: 0,
+      }
+      grupos.push(grupo)
+    }
+
+    grupo.desde = fila.document_date
+    if (aportaHechoClinico(fila)) grupo.conContenido.push(fila)
+    else grupo.adjuntos += 1
+  }
+
+  return grupos
+}
+
+/**
+ * El historial agrupado por episodio, del más reciente al más viejo.
+ *
+ * El orden lo impone esta función y no la consulta: así el armado es correcto
+ * aunque las filas lleguen en cualquier orden, y el test puede pasarlas
+ * desordenadas a propósito. Dentro de cada episodio los documentos salen en
+ * orden cronológico ASCENDENTE, que es como se lee un relato: primero la
+ * consulta de guardia, después el estudio que encontró el problema, después
+ * el procedimiento, después el alta.
+ */
+function armarEpisodios(filas: readonly FilaDocumentoFuente[]): {
+  episodios: EpisodioContexto[]
+  sinContenidoClinico: number
+} {
+  const grupos = agruparEnEpisodios(filas)
+  const sinContenidoClinico = grupos.reduce((total, grupo) => total + grupo.adjuntos, 0)
+
+  const episodios: EpisodioContexto[] = []
+  let documentosUsados = 0
+  let ordinalDocumento = 0
+
+  for (const grupo of grupos) {
+    if (grupo.conContenido.length === 0) continue
+    if (documentosUsados >= MAXIMO_DOCUMENTOS_CONTEXTO) break
+
+    const cupo = Math.min(
+      MAXIMO_DOCUMENTOS_POR_EPISODIO,
+      MAXIMO_DOCUMENTOS_CONTEXTO - documentosUsados,
+    )
+
+    const elegidos = [...grupo.conContenido]
+      .sort((a, b) => puntajeDocumento(b) - puntajeDocumento(a))
+      .slice(0, cupo)
+      .sort((a, b) => a.document_date.localeCompare(b.document_date))
+
+    documentosUsados += elegidos.length
+
+    episodios.push({
+      indice: episodios.length + 1,
+      desde: grupo.desde,
+      hasta: grupo.hasta,
+      documentos: elegidos.map((fila) => ({
+        indice: (ordinalDocumento += 1),
+        fecha: fila.document_date,
+        categoria: ETIQUETA_CATEGORIA[fila.category] ?? ETIQUETA_CATEGORIA.other,
+        titulo: fila.title,
+        especialidad: textoOpcional(fila.specialty),
+        // `aportaHechoClinico` ya garantizó que hay texto: el `?? ""` es solo
+        // para el verificador de tipos, nunca ocurre.
+        resumenIa: textoOpcional(fila.ai_summary) ?? "",
+      })),
+      adjuntosSinContenidoClinico: grupo.adjuntos,
+    })
+  }
+
+  return { episodios, sinContenidoClinico }
 }
 
 /**
@@ -582,12 +863,15 @@ function armarAlertas(filas: readonly FilaAlertaFuente[]): AlertaContexto[] {
  *   explícito que el reloj no entra por la puerta de atrás.
  */
 export function armarContexto(fuentes: FuentesClinicas, generadoEn: Date): ContextoClinico {
+  const historial = armarEpisodios(fuentes.documentos)
+
   return {
     version: VERSION_CONTEXTO_CLINICO,
     generadoEn: generadoEn.toISOString(),
     paciente: armarPaciente(fuentes.perfil, generadoEn),
     medicacionActiva: armarMedicacion(fuentes.medicaciones),
-    estudiosRecientes: armarEstudios(fuentes.documentos),
+    episodios: historial.episodios,
+    documentosSinContenidoClinico: historial.sinContenidoClinico,
     metricasLaboratorio: armarMetricas(fuentes.metricas),
     signosVitales: armarSignos(fuentes.signos),
     alertasActivas: armarAlertas(fuentes.alertas),

@@ -47,7 +47,7 @@ import "server-only"
 import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
 import {
   armarContexto,
-  MAXIMO_ESTUDIOS,
+  MAXIMO_DOCUMENTOS_LEIDOS,
   type ContextoClinico,
   type FilaAlertaFuente,
   type FilaDocumentoFuente,
@@ -61,7 +61,8 @@ import type { FilaLabMetrica } from "@/lib/laboratorio/series"
 export type {
   AlertaContexto,
   ContextoClinico,
-  EstudioContexto,
+  DocumentoContexto,
+  EpisodioContexto,
   FuentesClinicas,
   MedicacionContexto,
   MetricaContexto,
@@ -141,7 +142,7 @@ export async function leerFuentesClinicas(
       .select(COLUMNAS_DOCUMENTO)
       .eq("profile_id", perfilId)
       .order("document_date", { ascending: false })
-      .limit(MAXIMO_ESTUDIOS),
+      .limit(MAXIMO_DOCUMENTOS_LEIDOS),
     supabase
       .from("lab_metrics")
       .select(COLUMNAS_METRICA)

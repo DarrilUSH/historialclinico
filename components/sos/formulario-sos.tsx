@@ -195,7 +195,7 @@ export function FormularioSos({ valoresIniciales }: FormularioSosProps) {
             maxLength={120}
             autoComplete="off"
             defaultValue={valoresIniciales.contactoNombre}
-            ayuda="A quién llamar. Sin nombre, el teléfono no le sirve a nadie."
+            ayuda="A quién llamar en caso de emergencia."
             contenedorClassName="sm:col-span-2 chica:col-span-1 chica:order-1"
           />
           <CampoTexto

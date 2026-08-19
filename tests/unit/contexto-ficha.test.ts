@@ -25,8 +25,8 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  aportaHechoClinico,
   armarContexto,
-  MAXIMO_ESTUDIOS,
   MEDICIONES_POR_TIPO,
   VERSION_CONTEXTO_CLINICO,
   type FuentesClinicas,
@@ -142,20 +142,68 @@ function documentoDe(parcial: Partial<Documento>): Documento {
   }
 }
 
-/** Seis documentos: uno más que `MAXIMO_ESTUDIOS`, y en desorden a propósito. */
+/**
+ * Ocho documentos, en desorden a propósito. Reproducen en chico el historial
+ * real que obligó a la versión 2 del contexto (`lib/ficha/armado.ts`):
+ *
+ * - una INTERNACIÓN que deja cuatro archivos juntos en el tiempo, uno de
+ *   ellos una placa cuyo resumen habla del papel y no de lo que se encontró;
+ * - un estudio suelto cuyo ÚNICO archivo es una hoja de contacto sin informe
+ *   -su episodio no tiene nada que contar y no aparece-;
+ * - estudios sueltos de otras fechas, cada uno su propio episodio.
+ *
+ * Los textos de los resúmenes son los que produce `lib/gemini/prompt-documento.ts`
+ * (regla 5.b) para una página sin contenido clínico: el filtro y el prompt de
+ * ingesta son un contrato, y este fixture es donde se verifica.
+ */
 const DOCUMENTOS: Documento[] = [
   documentoDe({ id: DOCUMENTO_ID, document_date: "2026-08-01" }),
+
+  // Episodio de la internación: cuatro archivos entre el 10 y el 26 de junio.
   documentoDe({
-    document_date: "2026-08-05",
+    document_date: "2026-06-10",
     category: "consultation",
-    title: "Consulta — Control de diabetes y presión",
-    ai_summary: null,
-    specialty: "Medicina General",
+    title: "Historia clínica de internación",
+    specialty: "Clínica médica",
+    ai_summary:
+      "Ingresó el 10 de junio de 2026 por fiebre de tres días. Quedó anotado que tiene una vasectomía previa y que no toma medicación habitual.",
   }),
-  documentoDe({ document_date: "2026-06-15", category: "imaging", title: "Electrocardiograma" }),
-  documentoDe({ document_date: "2026-07-20", category: "prescription", title: "Receta — Metformina 850 mg" }),
-  documentoDe({ document_date: "2026-05-10", category: "other", title: "Informe administrativo" }),
-  documentoDe({ document_date: "2025-11-02", category: "laboratory", title: "Análisis viejo (sexto, no entra)" }),
+  documentoDe({
+    document_date: "2026-06-10",
+    category: "imaging",
+    title: "Radiografía de tórax — placa",
+    specialty: "Diagnóstico por imágenes",
+    ai_summary:
+      "Placa de la radiografía de tórax, la imagen en sí. El informe firmado está cargado por separado.",
+  }),
+  documentoDe({
+    document_date: "2026-06-12",
+    category: "other",
+    title: "Parte quirúrgico — drenaje percutáneo",
+    specialty: "Cirugía general",
+    ai_summary:
+      "Drenaje del absceso del hígado a través de la piel, guiado por tomografía. Se aspiraron 12 cc de material purulento.",
+  }),
+  documentoDe({
+    document_date: "2026-06-26",
+    category: "laboratory",
+    title: "Análisis de control post-drenaje",
+    ai_summary: "La proteína C reactiva bajó a 3,0. El hemograma salió normal.",
+  }),
+
+  documentoDe({ document_date: "2026-02-15", category: "prescription", title: "Receta — Metformina 850 mg" }),
+  documentoDe({
+    document_date: "2025-11-02",
+    category: "imaging",
+    title: "RX de columna lumbar — hoja de contacto",
+    ai_summary: "Hoja de contacto con las tres tomas del estudio en miniatura. Sin informe escrito.",
+  }),
+  documentoDe({
+    document_date: "2024-03-08",
+    category: "imaging",
+    title: "Ecografía abdominal — esteatosis leve",
+    ai_summary: "El hígado se vio con la ecogenicidad aumentada, compatible con esteatosis leve.",
+  }),
 ]
 
 /** Fila COMPLETA de `v_medicacion_estado`. */
@@ -356,7 +404,8 @@ describe("contexto de la ficha — minimización (criterio de aceptación 10.2)"
   it("las claves de primer nivel son exactamente la lista blanca", () => {
     expect(Object.keys(CONTEXTO).sort()).toEqual([
       "alertasActivas",
-      "estudiosRecientes",
+      "documentosSinContenidoClinico",
+      "episodios",
       "generadoEn",
       "medicacionActiva",
       "metricasLaboratorio",
@@ -377,16 +426,30 @@ describe("contexto de la ficha — minimización (criterio de aceptación 10.2)"
     })
   })
 
-  it("de cada estudio no viaja el médico ni la institución", () => {
-    for (const estudio of CONTEXTO.estudiosRecientes) {
-      expect(Object.keys(estudio).sort()).toEqual([
-        "categoria",
-        "especialidad",
-        "fecha",
+  it("de cada episodio solo viajan sus fechas, sus documentos y el conteo de adjuntos", () => {
+    for (const episodio of CONTEXTO.episodios) {
+      expect(Object.keys(episodio).sort()).toEqual([
+        "adjuntosSinContenidoClinico",
+        "desde",
+        "documentos",
+        "hasta",
         "indice",
-        "resumenIa",
-        "titulo",
       ])
+    }
+  })
+
+  it("de cada estudio no viaja el médico ni la institución", () => {
+    for (const episodio of CONTEXTO.episodios) {
+      for (const estudio of episodio.documentos) {
+        expect(Object.keys(estudio).sort()).toEqual([
+          "categoria",
+          "especialidad",
+          "fecha",
+          "indice",
+          "resumenIa",
+          "titulo",
+        ])
+      }
     }
   })
 
@@ -437,25 +500,52 @@ describe("contexto de la ficha — contenido clínico", () => {
     expect(CONTEXTO.medicacionActiva[0]?.necesitaRenovacion).toBe(true)
   })
 
-  it("trae como mucho 5 estudios, del más nuevo al más viejo, numerados desde 1", () => {
-    expect(CONTEXTO.estudiosRecientes).toHaveLength(MAXIMO_ESTUDIOS)
-    expect(CONTEXTO.estudiosRecientes.map((e) => e.fecha)).toEqual([
-      "2026-08-05",
-      "2026-08-01",
-      "2026-07-20",
-      "2026-06-15",
-      "2026-05-10",
+  it("agrupa los documentos cercanos en el tiempo en UN episodio, del más nuevo al más viejo", () => {
+    expect(CONTEXTO.episodios.map((e) => [e.desde, e.hasta])).toEqual([
+      ["2026-08-01", "2026-08-01"],
+      ["2026-06-10", "2026-06-26"],
+      ["2026-02-15", "2026-02-15"],
+      ["2024-03-08", "2024-03-08"],
     ])
-    expect(CONTEXTO.estudiosRecientes.map((e) => e.indice)).toEqual([1, 2, 3, 4, 5])
+    expect(CONTEXTO.episodios.map((e) => e.indice)).toEqual([1, 2, 3, 4])
+  })
+
+  it("dentro del episodio los documentos van en orden cronológico, como se lee un relato", () => {
+    const internacion = CONTEXTO.episodios[1]
+    expect(internacion?.documentos.map((d) => d.titulo)).toEqual([
+      "Historia clínica de internación",
+      "Parte quirúrgico — drenaje percutáneo",
+      "Análisis de control post-drenaje",
+    ])
+  })
+
+  it("deja afuera los documentos que no cuentan ningún hecho clínico, pero los cuenta", () => {
+    // La placa del 10/06 es del episodio de la internación; la hoja de
+    // contacto del 02/11/2025 era el único archivo de su episodio, así que
+    // ese episodio entero desaparece -no hay nada que contar de él-.
+    expect(CONTEXTO.episodios[1]?.adjuntosSinContenidoClinico).toBe(1)
+    expect(CONTEXTO.episodios.map((e) => e.desde)).not.toContain("2025-11-02")
+    expect(CONTEXTO.documentosSinContenidoClinico).toBe(2)
+
+    const titulos = CONTEXTO.episodios.flatMap((e) => e.documentos.map((d) => d.titulo))
+    expect(titulos).not.toContain("Radiografía de tórax — placa")
+    expect(titulos).not.toContain("RX de columna lumbar — hoja de contacto")
+  })
+
+  it("numera los documentos con un ordinal corrido a lo largo de todo el historial", () => {
+    expect(CONTEXTO.episodios.flatMap((e) => e.documentos.map((d) => d.indice))).toEqual([
+      1, 2, 3, 4, 5, 6,
+    ])
   })
 
   it("traduce la categoría del estudio al castellano", () => {
-    expect(CONTEXTO.estudiosRecientes.map((e) => e.categoria)).toEqual([
+    expect(CONTEXTO.episodios.flatMap((e) => e.documentos.map((d) => d.categoria))).toEqual([
+      "Laboratorio",
       "Consulta",
+      "Otro",
       "Laboratorio",
       "Receta",
       "Imágenes",
-      "Otro",
     ])
   })
 
@@ -537,10 +627,27 @@ describe("contexto de la ficha — datos faltantes", () => {
       notasSos: null,
     })
     expect(vacio.medicacionActiva).toEqual([])
-    expect(vacio.estudiosRecientes).toEqual([])
+    expect(vacio.episodios).toEqual([])
+    expect(vacio.documentosSinContenidoClinico).toBe(0)
     expect(vacio.metricasLaboratorio).toEqual([])
     expect(vacio.signosVitales).toEqual([])
     expect(vacio.alertasActivas).toEqual([])
+  })
+
+  it("un documento sin resumen no entra al contexto: su fecha y su título son el membrete", () => {
+    const soloMembrete = armarContexto(
+      {
+        perfil: PERFIL,
+        medicaciones: [],
+        documentos: [documentoDe({ document_date: "2026-08-01", ai_summary: null })],
+        metricas: [],
+        signos: [],
+        alertas: [],
+      },
+      GENERADO_EN,
+    )
+    expect(soloMembrete.episodios).toEqual([])
+    expect(soloMembrete.documentosSinContenidoClinico).toBe(1)
   })
 
   it("una métrica con una sola medición no inventa tendencia", () => {
@@ -557,5 +664,49 @@ describe("contexto de la ficha — datos faltantes", () => {
     )
     expect(unaSola.metricasLaboratorio[0]?.tendencia).toBeNull()
     expect(unaSola.metricasLaboratorio[0]?.ultimas).toHaveLength(1)
+  })
+})
+
+/**
+ * El filtro de `aportaHechoClinico` no es una lista de palabras sospechosas
+ * inventada: es el vocabulario que `lib/gemini/prompt-documento.ts` (regla
+ * 5.b) le pide a Gemini cuando una página no tiene contenido clínico. Estos
+ * textos son los que efectivamente produjo la ingesta sobre un historial
+ * real de 47 documentos, y son el contrato entre los dos módulos: si alguien
+ * reescribe la regla 5.b sin tocar `MARCAS_SIN_CONTENIDO_CLINICO`, este
+ * bloque falla.
+ */
+describe("contexto de la ficha — qué cuenta como hecho clínico", () => {
+  const SIN_CONTENIDO = [
+    "Placa de la radiografía de tórax, la imagen en sí, con el nombre, el documento y la fecha impresos en el borde. Es la imagen que acompaña al informe firmado, que está cargado por separado.",
+    "Segunda hoja de imágenes de la ecografía de abdomen, tal como la imprimió el ecógrafo. Son capturas del estudio, sin informe escrito.",
+    "Es la segunda hoja del informe: solo trae los datos administrativos y la firma, sin hallazgos nuevos.",
+    "Hoja de contacto de la radiografía de columna lumbar: reúne en miniatura las tres tomas del estudio. Sin informe escrito.",
+    "Imagen ampliada de la ecografía de vejiga. Es una captura del ecógrafo, sin informe escrito.",
+    "Sobre la imagen hay una anotación del técnico: es una aclaración del propio estudio, no un hallazgo del informe.",
+  ]
+
+  const CON_CONTENIDO = [
+    "Es el resumen de alta de una internación de dieciséis días con diagnóstico de egreso de absceso en el hígado. Entró por fiebre de 72 horas y se le hizo un drenaje.",
+    "Tomografía con contraste: se vio un aumento de tamaño de las amígdalas, más marcado del lado izquierdo. La conclusión pide valorarlo clínicamente.",
+    "Espermograma de control después de la vasectomía. No se observan espermatozoides en la muestra analizada.",
+    "El hígado se vio levemente agrandado y con la ecogenicidad aumentada, compatible con esteatosis leve a moderada.",
+  ]
+
+  for (const resumen of SIN_CONTENIDO) {
+    it(`deja afuera: "${resumen.slice(0, 48)}…"`, () => {
+      expect(aportaHechoClinico(documentoDe({ ai_summary: resumen }))).toBe(false)
+    })
+  }
+
+  for (const resumen of CON_CONTENIDO) {
+    it(`deja entrar: "${resumen.slice(0, 48)}…"`, () => {
+      expect(aportaHechoClinico(documentoDe({ ai_summary: resumen }))).toBe(true)
+    })
+  }
+
+  it("un resumen vacío o en blanco tampoco aporta", () => {
+    expect(aportaHechoClinico(documentoDe({ ai_summary: null }))).toBe(false)
+    expect(aportaHechoClinico(documentoDe({ ai_summary: "   " }))).toBe(false)
   })
 })
