@@ -1350,6 +1350,113 @@ select pruebas_rls.registrar('8d. número de orden',
 
 
 -- =============================================================================
+-- BLOQUE 8e — resultados CUALITATIVOS de lab_metrics (Sprint 18)
+-- -----------------------------------------------------------------------------
+-- `20260819190000_lab_metrics_resultados_cualitativos.sql` deja `value`
+-- nullable y agrega `value_text` + el CHECK `lab_metrics_valor_o_texto`
+-- (al menos uno de los dos, nunca ninguno). Este bloque prueba lo que 8b no
+-- cubre: una métrica con SOLO `value_text` (sin `value`) se acepta e
+-- inserta, y una métrica sin NINGUNO de los dos se sigue rechazando -mismo
+-- criterio atómico que 8b, ahora por la guarda ampliada-.
+-- =============================================================================
+\echo '### BLOQUE 8e — resultados cualitativos (value_text) del RPC de confirmación'
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+insert into public.documents (id, profile_id, title, category, document_date, storage_path) values
+    ('8d8d8d8d-8d8d-4d8d-8d8d-8d8d8d8d8d8d', :p_a, 'Análisis con resultado cualitativo (sin revisar)', 'other', '2026-08-09', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8e-cualitativo.pdf'),
+    ('8d8d8d8e-8d8d-4d8d-8d8d-8d8d8d8d8d8e', :p_a, 'Análisis sin value ni value_text (sin revisar)',    'other', '2026-08-10', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8e-mal.pdf');
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare
+    v text;
+    n integer;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '8d8d8d8d-8d8d-4d8d-8d8d-8d8d8d8d8d8d',
+            'Análisis con resultado cualitativo — agosto', 'laboratory', '2026-08-09', null,
+            '[{"metric_name":"Strep A","value_text":"Negativo"},
+              {"metric_name":"Plaquetas","metric_canonical":"Plaquetas","value":450000,"value_text":"Aumentadas","unit":"/mm3"}]'::jsonb);
+        select count(*) into n from public.lab_metrics where document_id = '8d8d8d8d-8d8d-4d8d-8d8d-8d8d8d8d8d8d';
+        v := 'confirmado, ' || n || ' métricas insertadas';
+    exception when others then v := 'error ' || sqlstate || ' ' || sqlerrm;
+    end;
+    perform pruebas_rls.registrar('8e. resultados cualitativos',
+        'A confirma con una métrica SOLO value_text y otra con value+value_text juntos: las dos quedan insertadas',
+        'confirmado, 2 métricas insertadas', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8e. resultados cualitativos',
+       '"Strep A" quedó con value NULL y value_text = Negativo (resultado puramente cualitativo)',
+       'NULL / Negativo',
+       coalesce((select coalesce(value::text, 'NULL') || ' / ' || value_text
+                   from public.lab_metrics
+                  where document_id = '8d8d8d8d-8d8d-4d8d-8d8d-8d8d8d8d8d8d'
+                    and metric_name = 'Strep A'),
+                'NO ENCONTRADA'));
+
+select pruebas_rls.registrar('8e. resultados cualitativos',
+       '"Plaquetas" quedó con value Y value_text a la vez (no es un XOR, ver el CHECK lab_metrics_valor_o_texto)',
+       '450000 / Aumentadas',
+       coalesce((select value::text || ' / ' || value_text
+                   from public.lab_metrics
+                  where document_id = '8d8d8d8d-8d8d-4d8d-8d8d-8d8d8d8d8d8d'
+                    and metric_name = 'Plaquetas'),
+                'NO ENCONTRADA'));
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            '8d8d8d8e-8d8d-4d8d-8d8d-8d8d8d8d8d8e',
+            'Análisis sin ningún valor', 'laboratory', '2026-08-10', null,
+            '[{"metric_name":"Rara sin valor"}]'::jsonb);
+        v := 'confirmado (no debería)';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                   then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8e. resultados cualitativos',
+        'A confirma con una métrica SIN value NI value_text (guarda 5 ampliada): se rechaza la llamada completa',
+        'rechazado (22023)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8e. resultados cualitativos',
+       'El rechazo por guarda 5 ampliada es atómico: el documento sigue SIN confirmar y no se coló ninguna fila de lab_metrics',
+       'sin confirmar, sin métricas',
+       case when exists (
+                 select 1 from public.documents
+                  where id = '8d8d8d8e-8d8d-4d8d-8d8d-8d8d8d8d8d8e'
+                    and confirmed_at is null
+                    and title = 'Análisis sin value ni value_text (sin revisar)')
+             and not exists (
+                 select 1 from public.lab_metrics
+                  where document_id = '8d8d8d8e-8d8d-4d8d-8d8d-8d8d8d8d8d8e')
+            then 'sin confirmar, sin métricas'
+            else 'estado inesperado' end);
+
+-- Mismo criterio que el cierre de 8b: no se borran acá, la limpieza final
+-- del script los arrastra por CASCADE al borrar auth.users.
+
+
+-- =============================================================================
 -- BLOQUE 9 — recordatorios de turnos: infraestructura cerrada (tarea 6.4)
 -- -----------------------------------------------------------------------------
 -- `appointment_reminders` y sus funciones son INFRAESTRUCTURA: las escriben
