@@ -402,6 +402,22 @@ export function GraficoMetrica({ serie, colorIndice = 0, tamano = "grande", clas
             ← Deslizá para ver el historial completo →
           </p>
         )}
+
+        {/* Pedido en vivo del usuario, 2026-08-19 ("revisá cómo se ve hoy un
+            punto solo"): Recharts ya no dibuja una línea con un solo punto
+            -no hay forma de trazar un segmento entre un punto y nada-, así
+            que el gráfico nunca INSINÚA una tendencia falsa. Pero alguien
+            que llega directo a esta sección (sin pasar por la tarjeta de
+            arriba, que sí avisa "Única medición") ve un único punto flotando
+            en medio de la banda de referencia sin ninguna pista de que ES
+            el único dato: mismo criterio que la pista de scroll de arriba,
+            `aria-hidden` porque `construirAriaLabelSerie` ya dice "1
+            medición" en el `aria-label` del contenedor. */}
+        {datos.length === 1 && (
+          <p aria-hidden="true" className="pt-1 text-center text-sm text-muted-foreground">
+            Un solo punto: todavía no alcanza para mostrar una tendencia.
+          </p>
+        )}
       </div>
 
       <Tarjeta aria-live="polite" className="gap-2 px-(--card-spacing)">

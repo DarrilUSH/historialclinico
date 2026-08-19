@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest"
 
-import { resumenUltimoValor, type PuntoMedicion } from "@/lib/laboratorio/ultimo-valor"
+import { esMedicionUnica, resumenUltimoValor, type PuntoMedicion } from "@/lib/laboratorio/ultimo-valor"
+
+describe("esMedicionUnica", () => {
+  it("un solo elemento: true", () => {
+    expect(esMedicionUnica([{ valor: 1 }])).toBe(true)
+  })
+
+  it("dos o más elementos: false", () => {
+    expect(esMedicionUnica([{ valor: 1 }, { valor: 2 }])).toBe(false)
+    expect(esMedicionUnica([{ valor: 1 }, { valor: 2 }, { valor: 3 }])).toBe(false)
+  })
+
+  it("arreglo vacío: false (no hay ninguna medición, no es 'la única')", () => {
+    expect(esMedicionUnica([])).toBe(false)
+  })
+})
 
 describe("resumenUltimoValor", () => {
   it("última medición correcta: valor, fecha, unidad", () => {

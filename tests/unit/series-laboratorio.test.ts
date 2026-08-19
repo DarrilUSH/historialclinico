@@ -10,6 +10,9 @@
  * - `fueraDeRango` y `metricasDisponibles` (última medición).
  * - Corte de período (`calcularFechaCorte`) con fecha fija, incluyendo el
  *   límite exacto.
+ * - `contarEstudiosDistintos` y el aviso de "muestra chica"
+ *   (`debeAvisarMuestraChica`/`mensajeMuestraChica`), sumados en la mejora
+ *   de tendencias del 2026-08-19 (ver el encabezado de `periodo.ts`).
  *
  *   npm run test -- series-laboratorio
  */
@@ -18,11 +21,18 @@ import { describe, it, expect } from "vitest"
 
 import {
   agruparEnSeries,
+  contarEstudiosDistintos,
   estaFueraDeRango,
   obtenerMetricasDisponibles,
   type FilaLabMetrica,
 } from "@/lib/laboratorio/series"
-import { calcularFechaCorte, parsearPeriodo } from "@/lib/laboratorio/periodo"
+import {
+  calcularFechaCorte,
+  debeAvisarMuestraChica,
+  mensajeMuestraChica,
+  parsearPeriodo,
+  UMBRAL_MUESTRA_CHICA,
+} from "@/lib/laboratorio/periodo"
 
 function fila(parcial: Partial<FilaLabMetrica> & { measurement_date: string; value: number }): FilaLabMetrica {
   return {
@@ -161,6 +171,52 @@ describe("lib/laboratorio/series.ts", () => {
       })
     })
   })
+
+  describe("contarEstudiosDistintos", () => {
+    it("un solo document_id repetido en varias filas cuenta como UN estudio (PSA + Volumen del mismo laboratorio)", () => {
+      // Reproduce el caso real que motivó el aviso de "muestra chica": un
+      // único estudio de laboratorio (02/06/2026) trae dos métricas, PSA y
+      // Volumen -dos FILAS de `lab_metrics`, un solo `document_id`-.
+      const cantidad = contarEstudiosDistintos([
+        { document_id: "doc-1", measurement_date: "2026-06-02" },
+        { document_id: "doc-1", measurement_date: "2026-06-02" },
+      ])
+      expect(cantidad).toBe(1)
+    })
+
+    it("document_id distintos cuentan como estudios distintos", () => {
+      const cantidad = contarEstudiosDistintos([
+        { document_id: "doc-1", measurement_date: "2026-06-02" },
+        { document_id: "doc-2", measurement_date: "2026-07-10" },
+      ])
+      expect(cantidad).toBe(2)
+    })
+
+    it("sin document_id, agrupa por measurement_date", () => {
+      const cantidad = contarEstudiosDistintos([
+        { document_id: null, measurement_date: "2026-06-02" },
+        { document_id: null, measurement_date: "2026-06-02" },
+        { document_id: null, measurement_date: "2026-07-10" },
+      ])
+      expect(cantidad).toBe(2)
+    })
+
+    it("mezcla de filas con y sin document_id", () => {
+      const cantidad = contarEstudiosDistintos([
+        { document_id: "doc-1", measurement_date: "2026-06-02" },
+        { document_id: null, measurement_date: "2026-06-02" },
+        { document_id: null, measurement_date: "2026-07-10" },
+      ])
+      // "doc-1" y "fecha:2026-06-02" son claves distintas aunque compartan
+      // fecha -sin el vínculo de documento no hay forma de saber que son el
+      // mismo estudio, así que se cuentan aparte-.
+      expect(cantidad).toBe(3)
+    })
+
+    it("arreglo vacío: cero estudios", () => {
+      expect(contarEstudiosDistintos([])).toBe(0)
+    })
+  })
 })
 
 describe("lib/laboratorio/periodo.ts", () => {
@@ -204,6 +260,54 @@ describe("lib/laboratorio/periodo.ts", () => {
       expect(parsearPeriodo(undefined)).toBe("6m")
       expect(parsearPeriodo(null)).toBe("6m")
       expect(parsearPeriodo("")).toBe("6m")
+    })
+  })
+
+  describe("debeAvisarMuestraChica", () => {
+    it("caso real: '6m', 1 estudio en el período, hay estudios más viejos -> avisa", () => {
+      expect(debeAvisarMuestraChica("6m", 1, true)).toBe(true)
+    })
+
+    it("'todo' nunca avisa, sin importar la cantidad", () => {
+      expect(debeAvisarMuestraChica("todo", 1, true)).toBe(false)
+      expect(debeAvisarMuestraChica("todo", 0, true)).toBe(false)
+    })
+
+    it("sin estudios más viejos (el período ya muestra todo el historial): no avisa aunque la cantidad sea chica", () => {
+      expect(debeAvisarMuestraChica("6m", 1, false)).toBe(false)
+    })
+
+    it("justo en el umbral: avisa", () => {
+      expect(debeAvisarMuestraChica("6m", UMBRAL_MUESTRA_CHICA, true)).toBe(true)
+    })
+
+    it("un estudio más que el umbral: no avisa", () => {
+      expect(debeAvisarMuestraChica("6m", UMBRAL_MUESTRA_CHICA + 1, true)).toBe(false)
+    })
+
+    it("aplica igual a '1a'", () => {
+      expect(debeAvisarMuestraChica("1a", 1, true)).toBe(true)
+      expect(debeAvisarMuestraChica("1a", 10, true)).toBe(false)
+    })
+  })
+
+  describe("mensajeMuestraChica", () => {
+    it("singular: '1 estudio', no '1 estudios'", () => {
+      expect(mensajeMuestraChica("6m", 1)).toBe(
+        'En los últimos 6 meses hay 1 estudio con resultados. Probá "Todo" para ver la serie completa.',
+      )
+    })
+
+    it("plural para 2 o más", () => {
+      expect(mensajeMuestraChica("6m", 2)).toBe(
+        'En los últimos 6 meses hay 2 estudios con resultados. Probá "Todo" para ver la serie completa.',
+      )
+    })
+
+    it("prefijo distinto para '1a'", () => {
+      expect(mensajeMuestraChica("1a", 1)).toBe(
+        'En el último año hay 1 estudio con resultados. Probá "Todo" para ver la serie completa.',
+      )
     })
   })
 })

@@ -6,12 +6,21 @@
  * - El valor más reciente con su fecha y unidad.
  * - Señal de rango (dentro/fuera de rango de referencia).
  * - Variación vs. la medición anterior (dirección y diferencia), o
- *   "Primera medición" si solo hay una.
+ *   ninguna si solo hay una (ver `esMedicionUnica`).
  *
  * Con una sola medición NO se inventa tendencia: la flecha no se muestra.
  * La dirección es informativa (solo dice "subió" o "bajó"), nunca semántica
  * ("bueno" o "malo") — eso lo decide el rango de referencia del badge,
  * independiente.
+ *
+ * `esMedicionUnica` (pedido en vivo del usuario, 2026-08-19: "si solo existe
+ * una medición que aclare que es la única medición") es la misma condición
+ * que ya usaba `resumenUltimoValor` para dejar `variacion` en `null`, ahora
+ * nombrada aparte y exportada: antes `components/estudios/tarjeta-ultimo-valor.tsx`
+ * la infería indirectamente (`!resumen.variacion`) para mostrar "Primera
+ * medición"; con el diálogo de detalle nuevo (`dialogo-detalle-metrica.tsx`)
+ * la misma pregunta hace falta en un segundo lugar, así que pasa a ser una
+ * función con nombre propio en vez de repetir la inferencia indirecta.
  */
 
 export interface PuntoMedicion {
@@ -86,6 +95,17 @@ function calcularVariacion(ultimoValor: number, penultimoValor: number): Variaci
       diferencia: 0,
     }
   }
+}
+
+/**
+ * ¿Es esta la única medición en `puntos`? Genérica en el elemento a
+ * propósito -la usan tanto `PuntoMedicion[]` (tarjeta) como `PuntoSerie[]`
+ * (`lib/laboratorio/series.ts`, diálogo de detalle), y las dos veces la
+ * pregunta es exactamente "¿el arreglo tiene largo 1?", sin tocar ningún
+ * campo particular del punto-.
+ */
+export function esMedicionUnica(puntos: readonly unknown[]): boolean {
+  return puntos.length === 1
 }
 
 /**
