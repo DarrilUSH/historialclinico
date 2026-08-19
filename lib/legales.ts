@@ -66,8 +66,7 @@ import { cache } from "react"
 import { headers } from "next/headers"
 
 import { normalizarIp } from "@/lib/auditoria"
-import type { ClienteSupabaseServidor } from "@/lib/auth/guardas"
-import { createClient } from "@/lib/supabase/server"
+import { sesionDeLaRequest, type ClienteSupabaseServidor } from "@/lib/auth/guardas"
 
 /**
  * Versión vigente de los documentos legales. Cambia cuando el TEXTO de
@@ -219,11 +218,11 @@ export async function registrarConsentimiento(
  * veces a la base (mismo criterio que `obtenerPerfilActivo`).
  */
 export const cuentaAceptoLegalesDeAlta = cache(async (): Promise<boolean> => {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // `sesionDeLaRequest()` en vez de `createClient()` + `getUser()` propios:
+  // los dos `cache()` se suman, así que este gate comparte el único viaje a
+  // GoTrue del request con las guardas y con `obtenerTamano` en vez de abrir
+  // el suyo (ver el encabezado de `sesionDeLaRequest` en lib/auth/guardas.ts).
+  const { usuario: user, supabase } = await sesionDeLaRequest()
 
   // Sin sesión no hay cuenta a la que exigirle nada: de la ruta privada ya se
   // ocupan `proxy.ts` y las guardas.

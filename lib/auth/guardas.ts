@@ -26,6 +26,7 @@ import "server-only"
  * algo que mostrar que no sea una pantalla vacía y ambigua.
  */
 
+import { cache } from "react"
 import { redirect } from "next/navigation"
 import type { User } from "@supabase/supabase-js"
 
@@ -132,6 +133,65 @@ export interface SesionServidor {
   supabase: ClienteSupabaseServidor
 }
 
+/**
+ * La sesión de **esta** request, resuelta UNA sola vez.
+ *
+ * ## Por qué existe (P0 de rendimiento, 2026-08-18)
+ *
+ * `supabase.auth.getUser()` **siempre sale a la red**: `@supabase/auth-js`
+ * lo implementa como un `GET /auth/v1/user` contra GoTrue en cada llamada,
+ * a propósito, para no confiar en el JWT que vino en la cookie sin
+ * verificarlo (ver `_getUser` en `node_modules/@supabase/auth-js`). No hay
+ * ninguna caché adentro del cliente: dos `createClient()` distintos en el
+ * mismo request son dos viajes de ida y vuelta.
+ *
+ * Y en este proyecto había cuatro por pantalla. Un `GET /inicio` resolvía la
+ * misma sesión, contra el mismo token, cuatro veces:
+ *
+ * 1. `app/layout.tsx` → `obtenerTamano()`
+ * 2. `app/(app)/layout.tsx` → `cuentaAceptoLegalesDeAlta()`
+ * 3. `app/(app)/(con-nav)/layout.tsx` → `obtenerPerfilActivo()` → `requerirPermiso` → `requerirSesion()`
+ * 4. `app/(app)/(con-nav)/inicio/page.tsx` → `requerirSesion()`
+ *
+ * Los layouts se resuelven en cadena (cada uno `await`ea antes de renderizar
+ * al siguiente), así que los cuatro viajes eran **serie pura**. Medido contra
+ * producción el 2026-08-18: la función de Vercel corre en `iad1` (Virginia) y
+ * el proyecto de Supabase vive en `us-west-2` (Oregón) — costa a costa, entre
+ * 90 y 150 ms por viaje. Cuatro `getUser()` idénticos eran ~440 ms de reloj
+ * en cada navegación, y nadie los veía porque no fallan: solo tardan.
+ *
+ * Memoizar acá los colapsa a uno. Los otros tres pasan a costar cero.
+ *
+ * ## Por qué es correcto, y no solo rápido
+ *
+ * `cache()` de React es **por request**: Next.js lo aísla con
+ * `AsyncLocalStorage`, así que dos personas navegando al mismo tiempo nunca
+ * comparten esta entrada. No es un mecanismo nuevo ni una apuesta: es
+ * exactamente el que ya usan `obtenerPerfilActivo` (`lib/perfil-activo.ts`) y
+ * `cuentaAceptoLegalesDeAlta` (`lib/legales.ts`), que memoizan datos MÁS
+ * sensibles que este —el perfil de otra persona, con sus permisos— desde el
+ * Sprint 3.
+ *
+ * Dentro de un mismo request tampoco se pierde nada: el token es el mismo
+ * (`proxy.ts` ya lo refrescó y lo fijó en `request.cookies` **antes** de que
+ * cualquier Server Component corra), así que preguntar cuatro veces no podía
+ * dar cuatro respuestas distintas. Lo único que agregaba era latencia.
+ *
+ * No memoiza autorización: `requerirPermiso` sigue consultando la base
+ * (`puede_ver_perfil` y compañía) en cada llamada. Lo que se comparte es
+ * "quién sos", no "qué podés hacer".
+ */
+export const sesionDeLaRequest = cache(
+  async (): Promise<{ usuario: User | null; supabase: ClienteSupabaseServidor }> => {
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    return { usuario: user, supabase }
+  },
+)
+
 export interface OpcionesRequerirSesion {
   /** Por defecto `"redirigir"`. Las Server Actions suelen querer `"lanzar"`. */
   siNoHaySesion?: EstrategiaSinSesion
@@ -161,10 +221,10 @@ export async function requerirSesion(
 ): Promise<SesionServidor> {
   const { siNoHaySesion = "redirigir", desde } = opciones
 
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
+  // Memoizada por request: ver `sesionDeLaRequest`. Antes esto abría un
+  // cliente nuevo y salía a la red en cada llamada, y en una pantalla con
+  // layout + página eso eran dos viajes idénticos a GoTrue.
+  const { usuario: user, supabase } = await sesionDeLaRequest()
 
   if (!user) {
     if (siNoHaySesion === "lanzar") {

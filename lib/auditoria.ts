@@ -79,7 +79,7 @@ import "server-only"
 
 import { headers } from "next/headers"
 
-import { createClient } from "@/lib/supabase/server"
+import { sesionDeLaRequest } from "@/lib/auth/guardas"
 import type { Json } from "@/types/database.types"
 import type { AccionAcceso } from "@/types/dominio"
 
@@ -214,11 +214,13 @@ const MAX_USER_AGENT = 512
  */
 export async function registrarAcceso(entrada: EntradaAuditoria): Promise<void> {
   try {
-    const supabase = await createClient()
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    // Sesión compartida del request (`cache()` de React, ver
+    // lib/auth/guardas.ts). Importa acá más que en otros lados: esta función
+    // corre dentro de `fijarPerfilActivo`, o sea en el POST de `elegirPerfil`
+    // -el toque de la tarjeta de perfil, con la persona esperando-, donde la
+    // guarda de permiso ya resolvió quién es. Abrir un cliente propio sumaba
+    // un viaje entero a GoTrue a ese POST sin averiguar nada nuevo.
+    const { usuario: user, supabase } = await sesionDeLaRequest()
 
     if (!user) {
       // Sin sesión no hay nada que auditar y la política de INSERT lo

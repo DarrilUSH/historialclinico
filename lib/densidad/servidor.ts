@@ -48,7 +48,7 @@ import { cache } from "react"
 
 import { cookies } from "next/headers"
 
-import { createClient } from "@/lib/supabase/server"
+import { sesionDeLaRequest } from "@/lib/auth/guardas"
 import {
   COOKIE_TAMANO,
   TAMANO_POR_DEFECTO,
@@ -118,15 +118,17 @@ export const obtenerTamano = cache(async (): Promise<Tamano> => {
  */
 async function leerTamanoDeLaCuenta(): Promise<Tamano | null> {
   try {
-    const supabase = await createClient()
-
     // Sin sesión, `getUser()` devuelve `user: null` sin salir a la red
     // (`AuthSessionMissingError` se resuelve contra el storage de cookies), así
     // que las rutas anónimas -`/login`, `/registro`, `/offline`, `/`- no pagan
     // ningún viaje por esta función.
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    //
+    // CON sesión sí sale a la red, y esta función corre en el layout RAÍZ, o
+    // sea en TODA pantalla autenticada. Por eso pide la sesión compartida del
+    // request (`sesionDeLaRequest`, memoizada con `cache()`) en vez de abrir su
+    // propio cliente: el viaje a GoTrue lo paga una sola vez el primero que
+    // llegue, y acá ya está resuelto. Ver lib/auth/guardas.ts.
+    const { usuario: user, supabase } = await sesionDeLaRequest()
 
     if (!user) {
       return null
@@ -253,10 +255,10 @@ export async function persistirTamano(tamano: Tamano): Promise<ResultadoPersiste
   let persistido = false
 
   try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    // Misma sesión compartida del request que usa `leerTamanoDeLaCuenta`: esta
+    // Server Action corre en el mismo request que ya resolvió quién es la
+    // persona, y no hay motivo para volver a preguntárselo a GoTrue.
+    const { usuario: user, supabase } = await sesionDeLaRequest()
 
     if (user) {
       hayCuenta = true
