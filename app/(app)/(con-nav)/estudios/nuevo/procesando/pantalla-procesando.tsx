@@ -58,6 +58,8 @@ export interface PantallaProcesandoProps {
   medicos: MedicoParaAutocompletar[]
   /** `true` si el catálogo REFES tiene centros cargados (cruces inteligentes, agosto 2026). */
   catalogoDisponible: boolean
+  /** Títulos que el perfil ya usa, para avisar cuando el propuesto se repite (Sprint 19). Pasa tal cual a `FormularioRevision`. */
+  titulosExistentes: readonly string[]
 }
 
 type Estado = "leyendo" | "revisando"
@@ -100,6 +102,7 @@ export function PantallaProcesando({
   fechaMaximaIso,
   medicos,
   catalogoDisponible,
+  titulosExistentes,
 }: PantallaProcesandoProps) {
   const [estado, setEstado] = React.useState<Estado>("leyendo")
   const [extraccion, setExtraccion] = React.useState<DocumentoMedicoExtraido | null>(null)
@@ -166,6 +169,7 @@ export function PantallaProcesando({
       fechaMaximaIso={fechaMaximaIso}
       medicos={medicos}
       catalogoDisponible={catalogoDisponible}
+      titulosExistentes={titulosExistentes}
     />
   )
 }

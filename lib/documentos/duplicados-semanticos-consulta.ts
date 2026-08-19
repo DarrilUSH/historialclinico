@@ -86,20 +86,26 @@ export async function buscarDuplicadoSemantico(
 
   const { data: metricas, error: errorMetricas } = await supabase
     .from("lab_metrics")
-    .select("document_id, metric_name, metric_canonical, value, unit")
+    .select("document_id, metric_name, metric_canonical, value, value_text, unit")
     .in("document_id", ids)
 
   if (errorMetricas) {
     throw new Error(`No se pudo leer las métricas para el cotejo de duplicados: ${errorMetricas.message}`)
   }
 
-  const metricasPorDocumento = new Map<string, { nombre: string; valor: number; unidad: string }[]>()
+  const metricasPorDocumento = new Map<string, { nombre: string; valor: number | null; valorTexto?: string; unidad: string }[]>()
   for (const fila of metricas ?? []) {
     if (!fila.document_id) continue
     const lista = metricasPorDocumento.get(fila.document_id) ?? []
+    // `value` es nullable desde el Sprint 18 (resultados CUALITATIVOS, ver
+    // `MetricaComparable`): `Number(null)` daría `0` y confundiría un "No
+    // Reactivo" con un valor numérico real de cero, así que se propaga el
+    // `null` tal cual y se suma `value_text` para que la comparación de
+    // duplicados los distinga.
     lista.push({
       nombre: fila.metric_canonical ?? fila.metric_name,
-      valor: Number(fila.value),
+      valor: fila.value === null ? null : Number(fila.value),
+      valorTexto: fila.value_text ?? undefined,
       unidad: fila.unit ?? "",
     })
     metricasPorDocumento.set(fila.document_id, lista)

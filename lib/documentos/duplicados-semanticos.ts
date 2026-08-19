@@ -81,6 +81,58 @@
  * ve dos veces el mismo estudio y borra uno-, mientras que el falso positivo
  * escondía un estudio que sí tenía. El error barato se elige a propósito.
  *
+ * ## El umbral se adapta para IMAGEN cuando hay médico informante (Sprint 19)
+ *
+ * El costo "conocido y aceptado" de arriba se hizo carne con un caso real del
+ * dueño: una **ecografía vesical** regenerada por la clínica (dos PDF, mismo
+ * contenido, bytes distintos -exactamente el escenario que motiva todo este
+ * módulo-) NO se detectó. `contarSustanciaCompartida` daba 2 (institución +
+ * médico informante, ambos presentes e idénticos en las dos extracciones) y
+ * `MIN_SUSTANCIA_CAPA_3` pide 3 -un estudio de imágenes, por naturaleza, no
+ * tiene métricas ni casi nunca número de orden, así que institución + médico
+ * ES el techo de sustancia alcanzable-.
+ *
+ * La opción descartada fue sumar una señal de similitud textual sobre
+ * `resumen`/`texto_completo`: el propio encabezado de este módulo ya explica
+ * por qué esos dos campos quedaron AFUERA de la Capa 3 desde el principio -son
+ * texto libre generado por IA, nunca literalmente estable entre dos llamadas
+ * aunque el documento sea idéntico- y meterlos por la puerta de atrás como
+ * "similitud" reintroduce el mismo problema con más superficie de bugs
+ * (¿qué umbral de similitud? ¿con qué distancia?) para resolver un caso que
+ * institución + médico ya identifican sin ambigüedad.
+ *
+ * La solución elegida es un umbral MÁS BAJO, `MIN_SUSTANCIA_CAPA_3_IMAGING`,
+ * que se usa en vez del general SOLO cuando **las tres condiciones dan
+ * simultáneamente**:
+ *
+ *   1. `categoria === "imaging"`.
+ *   2. La institución está presente y coincide en los dos (ya lo exige la
+ *      Capa 3 más arriba, comparada como condición de corte).
+ *   3. El médico está presente (no vacío) y coincide en los dos -también ya
+ *      exigido arriba; acá solo se vuelve a preguntar si además NO está
+ *      vacío-.
+ *
+ * Por qué esto NO reabre los dos falsos positivos del Sprint 18: los cuatro
+ * casos sintéticos que los reproducen (`tests/fixtures/documentos-sinteticos/`,
+ * ids `05`, `06`, `07`, `16`) tienen los CUATRO `medico: ""` -ninguna placa
+ * trae médico informante legible, que es justamente parte de lo que los volvía
+ * un falso positivo-. La condición 3 exige médico NO vacío, así que esos pares
+ * siguen evaluándose contra `MIN_SUSTANCIA_CAPA_3` (3) sin bajar la guardia.
+ * El caso real que motivó el cambio, en cambio, sí trae médico informante en
+ * las dos extracciones -es lo que dice la ecografía-, así que institución +
+ * médico (2) alcanza el umbral adaptado y se detecta.
+ *
+ * El otro caso real medido en el mismo sprint -una **radiografía de tórax**
+ * regenerada cuyas dos lecturas de Gemini devolvieron FECHAS DISTINTAS (una
+ * tomó la fecha del estudio, la otra la fecha de "Firmado" del informe)- NO
+ * se arregla acá ni en ningún otro lado de este módulo: la fecha se compara
+ * PRIMERO y es condición necesaria (regla 2 del dueño, textual, ver más
+ * arriba), así que ninguna cantidad de sustancia compartida puede compensar
+ * una fecha distinta. Es un límite del PIPELINE DE EXTRACCIÓN (no
+ * determinismo de Gemini entre dos lecturas del mismo documento), fuera del
+ * alcance de este módulo puro -queda declarado como deuda en el Resumen de
+ * Entrega del Sprint 19-.
+ *
  * ## Puro, sin red, sin `server-only`
  *
  * Recibe datos ya extraídos (de Gemini o de la base) y devuelve un veredicto.
@@ -96,10 +148,18 @@
 import { normalizarMetrica, normalizarTexto } from "@/lib/laboratorio/diccionario"
 import type { CategoriaDocumentoExtraida } from "@/lib/gemini/schemas"
 
-/** Una métrica de laboratorio, en la forma mínima que hace falta para comparar. */
+/**
+ * Una métrica de laboratorio, en la forma mínima que hace falta para
+ * comparar. `valor` es `null` para un resultado CUALITATIVO ("Negativo", "No
+ * Reactivo") — espejo de `MetricaExtraida`/`lab_metrics.value` desde que ese
+ * campo se volvió nullable (Sprint 18, cableado a la extracción en vivo en el
+ * Sprint 19): ver `valorTexto`.
+ */
 export interface MetricaComparable {
   nombre: string
-  valor: number
+  valor: number | null
+  /** Resultado cualitativo cuando `valor` es `null`. Ignorado si `valor` es numérico. */
+  valorTexto?: string
   unidad: string
 }
 
@@ -107,11 +167,18 @@ export interface MetricaComparable {
  * Los datos de UN documento (nuevo o ya cargado), en la forma que este módulo
  * necesita para cotejar. `institucion`/`medico`/`numeroOrden` son cadena
  * vacía -no `null`- cuando el documento no trae el dato: mismo criterio que
- * `DocumentoMedicoExtraido` (Gemini nunca devuelve `null`, devuelve `""`).
+ * `DocumentoMedicoExtraido` (Gemini nunca devuelve `null` para esos tres,
+ * devuelve `""`).
+ *
+ * `fecha` SÍ es `string | null` (Sprint 19): un documento recién extraído
+ * puede no traer fecha propia (`DocumentoMedicoExtraido.fecha`, ver su
+ * comentario en `lib/gemini/schemas.ts` — el modelo ya no la inventa). Un
+ * documento SIN fecha nunca puede declararse duplicado de nada: ver la guarda
+ * al principio de `coincidenTodosLosDatos`.
  */
 export interface DatosComparablesDocumento {
-  /** `YYYY-MM-DD`. */
-  fecha: string
+  /** `YYYY-MM-DD`, o `null` si el documento no trae fecha propia (todavía sin confirmar por una persona). */
+  fecha: string | null
   categoria: CategoriaDocumentoExtraida
   institucion: string
   medico: string
@@ -128,8 +195,20 @@ export const TEXTO_MOTIVO_DUPLICADO_SEMANTICO: Record<MotivoDuplicadoSemantico, 
   datos_identicos: "misma fecha, categoría, institución, médico y valores de laboratorio",
 }
 
-/** Un documento YA CARGADO, candidato a ser el original de un duplicado. */
+/**
+ * Un documento YA CARGADO, candidato a ser el original de un duplicado.
+ * `fecha` se redeclara SIN `null` (angosta el tipo heredado): un candidato
+ * sale de `documents` filtrado por `confirmed_at is not null`
+ * (`duplicados-semanticos-consulta.ts`/`duplicados-semanticos-admin.ts`), y
+ * `documents.document_date` es `NOT NULL` en la base -la fecha puede quedar
+ * sin confirmar mientras el documento es un BORRADOR, pero confirmar exige
+ * una fecha real (ver el comentario de `fecha` en
+ * `lib/gemini/schemas.ts#SCHEMA_DOCUMENTO_MEDICO`)-. Solo el lado `nuevo` de
+ * una comparación (la extracción recién hecha, todavía sin confirmar) puede
+ * tener `fecha: null`.
+ */
 export interface CandidatoDuplicado extends DatosComparablesDocumento {
+  fecha: string
   documentoId: string
   titulo: string
 }
@@ -164,11 +243,19 @@ function normalizar(valor: string | null | undefined): string {
   return normalizarTexto((valor ?? "").trim())
 }
 
-/** Clave de comparación de UNA métrica: nombre canónico (o normalizado) + valor + unidad normalizada. */
+/**
+ * Clave de comparación de UNA métrica: nombre canónico (o normalizado) +
+ * valor + unidad normalizada. El valor es el numérico si lo hay; si no
+ * (resultado CUALITATIVO, Sprint 19 — ver `MetricaComparable`), es el texto
+ * normalizado con un prefijo (`texto:`) que evita que un resultado
+ * cualitativo colisione por accidente con un resultado numérico que
+ * casualmente tenga la misma representación de cadena.
+ */
 function claveMetrica(metrica: MetricaComparable): string {
   const { canonico } = normalizarMetrica(metrica.nombre)
   const nombreClave = normalizarTexto(canonico ?? metrica.nombre)
-  return `${nombreClave}::${metrica.valor}::${normalizar(metrica.unidad)}`
+  const valorClave = metrica.valor !== null ? String(metrica.valor) : `texto:${normalizar(metrica.valorTexto)}`
+  return `${nombreClave}::${valorClave}::${normalizar(metrica.unidad)}`
 }
 
 /**
@@ -267,6 +354,42 @@ export function contarSustanciaCompartida(
 export const MIN_SUSTANCIA_CAPA_3 = 3
 
 /**
+ * Umbral adaptado para documentos de IMAGEN cuando institución Y médico están
+ * los dos presentes y coinciden (Sprint 19) — ver el bloque "El umbral se
+ * adapta para IMAGEN cuando hay médico informante" en el encabezado del
+ * archivo para el caso real y el porqué del número. Más bajo que
+ * `MIN_SUSTANCIA_CAPA_3` porque para esa categoría institución + médico ES el
+ * techo de sustancia alcanzable -no hay métricas y casi nunca número de
+ * orden-, así que pedir 3 es pedir algo que ese tipo de estudio
+ * estructuralmente no puede dar.
+ */
+export const MIN_SUSTANCIA_CAPA_3_IMAGING = 2
+
+/**
+ * ¿Corresponde relajar el umbral de sustancia de la Capa 3 para este par?
+ *
+ * Solo cuando los TRES se cumplen a la vez: categoría `imaging`, institución
+ * presente (y ya coincidente -se llama después del corte por institución en
+ * `coincidenTodosLosDatos`-), médico presente (ídem, ya coincidente) y NO
+ * vacío. El tercer chequeo es el que de verdad decide acá: institución y
+ * médico YA se compararon arriba y son iguales en los dos documentos si se
+ * llegó hasta este punto; lo único que este helper agrega es preguntar si
+ * además ninguno de los dos está vacío -que es la diferencia real entre el
+ * caso real que motivó el cambio (ecografía con médico informante) y los dos
+ * falsos positivos del Sprint 18 (radiografías sin médico informante
+ * legible, ver el encabezado del archivo)-.
+ */
+function corresponUmbralImagen(
+  nuevo: DatosComparablesDocumento,
+  existente: DatosComparablesDocumento,
+): boolean {
+  if (nuevo.categoria !== "imaging") return false
+  const institucionPresente = normalizar(nuevo.institucion).length > 0
+  const medicoPresente = normalizar(nuevo.medico).length > 0
+  return institucionPresente && medicoPresente && normalizar(existente.institucion).length > 0
+}
+
+/**
  * Capa 3: ¿son EXACTAMENTE el mismo documento en todos los datos extraídos?
  *
  * La fecha se compara PRIMERO y es condición NECESARIA -regla 2 del usuario,
@@ -285,6 +408,15 @@ export function coincidenTodosLosDatos(
   nuevo: DatosComparablesDocumento,
   existente: DatosComparablesDocumento,
 ): boolean {
+  // Fecha DESCONOCIDA (Sprint 19: un documento recién extraído puede no
+  // traer fecha propia, ver `DatosComparablesDocumento`): no hay con qué
+  // evaluar la condición necesaria de abajo, así que nunca se declara
+  // duplicado. Se chequea ANTES del `!==` a propósito -en JS `null === null`
+  // es `true`, así que sin esta guarda dos documentos con fecha desconocida
+  // pasarían la condición como si tuvieran "la misma fecha", que es
+  // exactamente lo que esta regla existe para evitar.
+  if (nuevo.fecha === null || existente.fecha === null) return false
+
   // Condición NECESARIA, comparada primero: fecha distinta = jamás duplicado.
   if (nuevo.fecha !== existente.fecha) return false
 
@@ -304,7 +436,10 @@ export function coincidenTodosLosDatos(
 
   if (!mismasMetricas(nuevo.metricas, existente.metricas)) return false
 
-  return contarSustanciaCompartida(nuevo, existente) >= MIN_SUSTANCIA_CAPA_3
+  const umbral = corresponUmbralImagen(nuevo, existente)
+    ? MIN_SUSTANCIA_CAPA_3_IMAGING
+    : MIN_SUSTANCIA_CAPA_3
+  return contarSustanciaCompartida(nuevo, existente) >= umbral
 }
 
 /**

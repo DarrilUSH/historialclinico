@@ -304,14 +304,23 @@ async function intentarDocumento(
   // "posible duplicado" de arriba, que se resuelven ANTES para no gastar la
   // llamada al modelo si ya se puede cortar por bytes o por metadata-.
   const duplicadoSemantico = await deps.buscarDuplicadoSemantico(destino.perfilId, {
+    // Sprint 19: `fecha` viaja tal cual, `null` incluido — `DatosComparablesDocumento`
+    // la acepta y `coincidenTodosLosDatos` tiene una guarda explícita para ese
+    // caso (sin fecha propia, un documento nunca se declara duplicado de
+    // nadie). A diferencia del camino humano, acá SÍ se hace la consulta con
+    // fecha nula: la Capa 2 (mismo N° de orden) no depende de la fecha y su
+    // motivo suma información útil al aviso de la bandeja de revisión.
     fecha: extraccion.fecha,
     categoria: extraccion.categoria,
     institucion: extraccion.institucion,
     medico: extraccion.medico,
     numeroOrden: extraccion.numero_orden ?? "",
+    // El resultado cualitativo viaja igual que el numérico: es sustancia
+    // comparable (ver `MetricaComparable`).
     metricas: extraccion.metricas.map((metrica) => ({
       nombre: metrica.nombre,
       valor: metrica.valor,
+      valorTexto: metrica.valorTexto,
       unidad: metrica.unidad,
     })),
   })
@@ -319,7 +328,13 @@ async function intentarDocumento(
   const veredicto = evaluarDocumentoParaAutoCarga({
     pacienteDetectado: extraccion.paciente,
     nombrePerfilDestino: destino.perfilNombre,
-    fecha: extraccion.fecha,
+    // Sprint 19: `null` (el documento no imprime su fecha) entra a la
+    // compuerta como cadena vacía, que ya es exactamente el caso que
+    // `fecha_no_confiable` cubre desde el Sprint 17 — **sin fecha, a revisión
+    // humana, jamás auto-carga**. La regla no cambia; lo que cambia es que
+    // ahora el lector puede DECIRLO en vez de inventar una fecha plausible que
+    // pasaba la compuerta sin que nadie la mirara.
+    fecha: extraccion.fecha ?? "",
     categoria: extraccion.categoria,
     tituloDetectado: titulo.detectado,
     huellaDuplicada: false,
@@ -340,7 +355,11 @@ async function intentarDocumento(
     mimeDeclarado: adjunto.mimeType as string,
     titulo: titulo.titulo,
     categoria: extraccion.categoria,
-    fecha: extraccion.fecha,
+    // Inalcanzable con fecha nula: la compuerta de arriba ya devolvió
+    // `fecha_no_confiable` y este `cargarDocumento` no se ejecuta. El `?? ""`
+    // es solo para que el tipo lo diga en voz alta -el RPC
+    // `ingresar_documento_automatico` rechaza `p_fecha` nula igual-.
+    fecha: extraccion.fecha ?? "",
     resumen: extraccion.resumen,
     textoOcr: extraccion.texto_completo ?? "",
     numeroOrden: extraccion.numero_orden ?? "",

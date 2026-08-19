@@ -35,10 +35,42 @@ export const MODELO_GEMINI_DEFAULT = 'gemini-3.5-flash-lite';
 
 /**
  * Timeout por llamada a Gemini, en milisegundos. 30s es razonable para un
- * `generateContent` con `inlineData` de un PDF/imagen de pocas páginas; el
- * único reintento (ver `extraerJson`) usa el mismo valor.
+ * `generateContent` con `inlineData` de un PDF/imagen de pocas páginas; CADA
+ * intento (ver `extraerJson`) usa el mismo valor.
  */
 const TIMEOUT_MS = 30_000;
+
+/**
+ * Cantidad máxima de REINTENTOS ante un error TRANSITORIO (timeout o 5xx) —
+ * no cuenta el intento inicial. Sprint 19: medido sobre 19 documentos reales,
+ * 2 de 19 (1 de cada 9) murieron con `GeminiTimeoutError` después de gastar
+ * el único reintento que había hasta acá, y ninguno de los dos era un
+ * documento grande -uno pesaba 204 KB, el otro 2,6 KB-: el timeout era
+ * transitorio (una llamada manual más, inmediatamente después, funcionó a la
+ * primera) y el producto lo trataba como definitivo. Dos reintentos (tres
+ * intentos en total) le dan una segunda chance a esa misma clase de falla sin
+ * convertir esto en un bucle sin fin -ver `ESPERA_ENTRE_REINTENTOS_MS` para
+ * el tope de tiempo total-.
+ */
+const MAX_REINTENTOS = 2;
+
+/**
+ * Espera (ms) ANTES de cada reintento, CRECIENTE — el primer reintento espera
+ * `ESPERA_ENTRE_REINTENTOS_MS[0]`, el segundo `[1]`. Un backoff corto (1s,
+ * luego 3s) alcanza para no repetir la llamada contra el mismo problema
+ * transitorio en el mismo instante, sin sumar una espera larga que la
+ * persona sienta como "esto se colgó" -`VeloEspera` ya avisa "puede tardar
+ * hasta un minuto"-. Peor caso con `MAX_REINTENTOS = 2`: 3 × 30s de timeout +
+ * 1s + 3s de espera ≈ 94s: ver `maxDuration` en
+ * `app/api/documentos/extraer/route.ts`, que le da margen a la función
+ * serverless para ese caso límite.
+ */
+const ESPERA_ENTRE_REINTENTOS_MS = [1_000, 3_000];
+
+/** `await`-eable: espera `ms` milisegundos sin bloquear el event loop. */
+function esperar(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /** Error base de este módulo. Todos los errores que tira `extraerJson` heredan de acá. */
 export class GeminiError extends Error {
@@ -66,9 +98,9 @@ export class GeminiTimeoutError extends GeminiError {
 
 /**
  * La API de Gemini respondió con un error HTTP. `status` permite distinguir
- * errores transitorios (5xx, se reintentan una vez) de errores del cliente
- * (4xx: API key inválida, modelo inexistente, request mal formado — no se
- * reintentan).
+ * errores transitorios (5xx, se reintentan hasta `MAX_REINTENTOS` veces) de
+ * errores del cliente (4xx: API key inválida, modelo inexistente, request mal
+ * formado — no se reintentan nunca).
  */
 export class GeminiApiError extends GeminiError {
   readonly status: number | undefined;
@@ -126,7 +158,7 @@ export interface ExtraerJsonParams {
   schema: Schema;
 }
 
-/** Errores considerados transitorios: vale la pena reintentar una sola vez. Nunca 4xx. */
+/** Errores considerados transitorios: vale la pena reintentar (hasta `MAX_REINTENTOS` veces). Nunca 4xx. */
 function esErrorTransitorio(error: unknown): boolean {
   if (error instanceof GeminiTimeoutError) return true;
   if (error instanceof GeminiApiError) {
@@ -171,17 +203,53 @@ async function llamarGenerateContent(model: string, parts: Part[], schema: Schem
 }
 
 /**
+ * Ejecuta `llamarGenerateContent` con reintentos ante error TRANSITORIO
+ * (`esErrorTransitorio`), con espera creciente entre cada uno
+ * (`ESPERA_ENTRE_REINTENTOS_MS`). Un error de CONTRATO (4xx, parseo) se
+ * propaga en el primer intento, sin esperar ni reintentar -ver el comentario
+ * de `extraerJson`, que es quien llama a esto-.
+ */
+async function llamarConReintentos(model: string, parts: Part[], schema: Schema): Promise<GenerateContentResponse> {
+  for (let intento = 0; intento <= MAX_REINTENTOS; intento++) {
+    try {
+      return await llamarGenerateContent(model, parts, schema);
+    } catch (error) {
+      const esUltimoIntento = intento === MAX_REINTENTOS;
+      if (!esErrorTransitorio(error) || esUltimoIntento) throw error;
+
+      const espera = ESPERA_ENTRE_REINTENTOS_MS[intento] ?? ESPERA_ENTRE_REINTENTOS_MS.at(-1)!;
+      console.warn(
+        `[gemini] Intento ${intento + 1}/${MAX_REINTENTOS + 1} falló con un error transitorio ` +
+          `(modelo "${model}"), reintentando en ${espera}ms:`,
+        error instanceof Error ? error.message : error,
+      );
+      await esperar(espera);
+    }
+  }
+  // Inalcanzable: el `for` siempre termina en `return` (éxito) o `throw`
+  // (agotó los intentos, `esUltimoIntento` es `true` en la última vuelta).
+  // TypeScript no puede probarlo por sí solo porque la condición vive dentro
+  // del `catch`, así que queda este `throw` explícito para que la función
+  // tipe como `Promise<GenerateContentResponse>` y no `Promise<GenerateContentResponse | undefined>`.
+  throw new GeminiError('Se agotaron los reintentos sin una respuesta ni un error (no debería pasar nunca).');
+}
+
+/**
  * Llama a `generateContent` pidiendo salida JSON validada contra `schema` y
  * devuelve el objeto ya parseado.
  *
- * Reintenta **una sola vez** ante error transitorio (HTTP 5xx o timeout). Los
- * errores 4xx (API key inválida, modelo inexistente, request mal formado) NO
- * se reintentan: se propagan de inmediato porque un segundo intento fallaría
- * exactamente igual.
+ * Reintenta hasta `MAX_REINTENTOS` veces ante error TRANSITORIO (HTTP 5xx o
+ * timeout), con espera CRECIENTE entre cada intento (`ESPERA_ENTRE_REINTENTOS_MS`
+ * — Sprint 19, medido: 1 reintento no alcanzaba, ver su comentario). Los
+ * errores de CONTRATO -4xx (API key inválida, modelo inexistente, request mal
+ * formado) y cualquier otro que `esErrorTransitorio` no reconozca- NO se
+ * reintentan: se propagan de inmediato porque un intento más fallaría
+ * exactamente igual y solo alargaría la espera de la persona sin ninguna
+ * chance real de éxito.
  *
  * @throws {GeminiConfigError} si falta `GEMINI_API_KEY`.
- * @throws {GeminiTimeoutError} si ninguno de los dos intentos respondió a tiempo.
- * @throws {GeminiApiError} si Gemini devolvió un error HTTP (4xx o 5xx tras el reintento).
+ * @throws {GeminiTimeoutError} si NINGUNO de los intentos respondió a tiempo.
+ * @throws {GeminiApiError} si Gemini devolvió un error HTTP (4xx, o 5xx tras agotar los reintentos).
  * @throws {GeminiParseError} si la respuesta no trae texto o el texto no es JSON válido.
  */
 export async function extraerJson<T>({ prompt, media, schema }: ExtraerJsonParams): Promise<T> {
@@ -192,14 +260,7 @@ export async function extraerJson<T>({ prompt, media, schema }: ExtraerJsonParam
     parts.push({ inlineData: { mimeType: media.mimeType, data: media.data } });
   }
 
-  let respuesta: GenerateContentResponse;
-  try {
-    respuesta = await llamarGenerateContent(model, parts, schema);
-  } catch (error) {
-    if (!esErrorTransitorio(error)) throw error;
-    // Único reintento ante error transitorio. Si vuelve a fallar, el error se propaga tal cual.
-    respuesta = await llamarGenerateContent(model, parts, schema);
-  }
+  const respuesta = await llamarConReintentos(model, parts, schema);
 
   const texto = respuesta.text;
   if (!texto || texto.trim().length === 0) {

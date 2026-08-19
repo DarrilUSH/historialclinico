@@ -41,9 +41,10 @@
  * salgan cortados es una molestia visible y reparable a mano.
  *
  * **Siguen rechazando**, a propósito:
- * - `fecha`: es identidad y es la condición NECESARIA del detector de
- *   duplicados. Una fecha recortada (`"2026-03-1"`) o inventada es peor que no
- *   tener el documento: contamina Tendencias y el orden del historial.
+ * - `fecha` MAL FORMADA: es identidad y es la condición NECESARIA del detector
+ *   de duplicados. Una fecha recortada (`"2026-03-1"`) o imposible
+ *   (`"2026-02-30"`) es peor que no tener el documento: contamina Tendencias y
+ *   el orden del historial. Ver abajo la diferencia con la fecha AUSENTE.
  * - `categoria`: es un enum cerrado. Un valor fuera de la lista no se puede
  *   "recortar" a algo válido sin ELEGIR por el modelo, y elegir mal manda el
  *   estudio a la solapa equivocada. Fuera de la lista → a revisión humana.
@@ -56,6 +57,56 @@
  *   (`lab_metrics` tiene `UNIQUE (document_id, metric_name)`) ni mostrar.
  * - La forma general del objeto (`.strict()`): un campo de más o de menos es
  *   un cambio de contrato con el modelo, no un dato largo.
+ *
+ * ## Sprint 19 — las dos excepciones que salieron de medir el pipeline
+ *
+ * ### `fecha: null` ACEPTADA (fecha ausente ≠ fecha mal formada)
+ *
+ * Hasta el Sprint 18, `fecha` era `z.string()` con formato obligatorio: ni
+ * `null` ni `""` pasaban. Y el prompt le pedía a Gemini justamente `""`
+ * cuando el documento no trae fecha, así que un modelo OBEDIENTE tiraba la
+ * extracción entera. El incentivo real, entonces, era desobedecer e inventar
+ * — y eso es lo que la medición encontró: dos fechas inventadas de la nada
+ * (`2024-03-12`, `2024-02-14`) y una robada de un estudio previo citado en el
+ * texto (`2025-10-29` en una colangio-RMN del 3 de noviembre).
+ *
+ * La regla nueva distingue dos cosas que antes eran la misma:
+ *
+ * - **Fecha AUSENTE** (`null` o `""`) → se normaliza a `null` y el documento
+ *   SIGUE. Es la única excepción que vale la pena en "la identidad no se
+ *   recorta": no se recorta nada, se acepta un "no la sé" honesto. Todo el
+ *   resto del documento -resumen, métricas, institución- sigue siendo valioso,
+ *   y la pantalla de revisión pide la fecha con el foco puesto ahí y no deja
+ *   confirmar sin ella (`components/documentos/formulario-revision.tsx`).
+ * - **Fecha MAL FORMADA** (`"15/03/2026"`, `"2026-02-30"`, `"2026-03-1"`) →
+ *   sigue RECHAZANDO. Un valor así no es "no la sé": es una lectura
+ *   equivocada, y convertirla en `null` en silencio taparía un problema
+ *   sistemático del lector.
+ *
+ * Ningún RPC cambia: `confirmar_documento_recien_subido` e
+ * `ingresar_documento_automatico` siguen exigiendo `nueva_fecha`/`p_fecha` no
+ * nulas. El `null` vive y muere ANTES de esos dos puntos — lo resuelve una
+ * persona en el formulario, o la compuerta de auto-carga manda el correo a
+ * revisión (`fecha_no_confiable`, `lib/gmail/auto-ingesta.ts`).
+ *
+ * ### Métricas: valor numérico **O** resultado cualitativo
+ *
+ * `lab_metrics.value` es nullable y existe `value_text` desde
+ * `20260819190000_lab_metrics_resultados_cualitativos.sql`, con el CHECK
+ * `lab_metrics_valor_o_texto` (al menos uno de los dos). `prepararMetricas`
+ * ya sabía leer `valorTexto` desde el Sprint 18. Lo que faltaba era este
+ * archivo -y el `responseSchema`-: acá `valor` era `z.number()` a secas y
+ * `valorTexto` ni se aceptaba, así que Zod lo stripeaba en silencio. Medido:
+ * de 5 resultados cualitativos del corpus real ("VDRL / HBsAg / Hepatitis C:
+ * No Reactivo" del laboratorio más completo del dueño, el espermograma
+ * post-vasectomía), se guardaron 0.
+ *
+ * Ahora `valor` acepta `number | null` y `valorTexto` es un descriptivo más
+ * (se recorta a 300, el mismo tope que valida el RPC). Una métrica que no
+ * trae NINGUNO de los dos no describe ninguna medición: se DESCARTA esa
+ * métrica sola -no tiene nada que guardar, y `prepararMetricas` la descartaría
+ * igual- y el documento sigue con el resto. Es la misma lección del Sprint 18
+ * llevada al array: no se pierden 38 métricas buenas por una vacía.
  *
  * Uso en `app/api/documentos/extraer/route.ts`:
  *   const resultado = validarExtraccion(datosDeGemini)
@@ -100,6 +151,10 @@ function validarFecha(raw: unknown): { ok: boolean; error?: string } {
 
   const trimmed = raw.trim()
   if (!trimmed) {
+    // Esta rama ya no se alcanza desde `schemaExtraccionDocumento` -la fecha
+    // vacía se normaliza a `null` antes, ver el encabezado del archivo-, pero
+    // la función sigue siendo total: es pública para el resto del código y no
+    // tiene por qué asumir que la llaman ya normalizada.
     return { ok: false, error: 'La fecha no puede estar vacía' }
   }
 
@@ -170,6 +225,41 @@ function textoRecortado(max: number, mensajeDeTipo: string) {
 const MAX_METRICAS = 50
 
 /**
+ * Deja el array de métricas listo para `MetricaExtraida[]`:
+ *
+ * 1. `valor` SIEMPRE presente (`number | null`), aunque el modelo lo omita —
+ *    así el tipo de salida es el del contrato y no un `?` accidental.
+ * 2. `valorTexto` vacío se OMITE: la cadena vacía no es un resultado
+ *    cualitativo, y dejarla puesta solo engorda el JSON del campo oculto del
+ *    formulario.
+ * 3. Una métrica sin valor numérico Y sin texto se DESCARTA (ella sola, no el
+ *    documento): no describe ninguna medición, el CHECK
+ *    `lab_metrics_valor_o_texto` la rechazaría y `prepararMetricas` la
+ *    saltearía igual. Ver el encabezado del archivo.
+ * 4. El excedente por encima de `MAX_METRICAS` se corta, como antes.
+ */
+function normalizarMetricas(
+  metricas: readonly {
+    nombre: string
+    valor?: number | null
+    valorTexto?: string
+    unidad: string
+    rango: string
+  }[],
+) {
+  const utiles = metricas
+    .map((metrica) => ({
+      ...metrica,
+      valor: typeof metrica.valor === 'number' ? metrica.valor : null,
+      valorTexto:
+        metrica.valorTexto && metrica.valorTexto.length > 0 ? metrica.valorTexto : undefined,
+    }))
+    .filter((metrica) => metrica.valor !== null || metrica.valorTexto !== undefined)
+
+  return utiles.length > MAX_METRICAS ? utiles.slice(0, MAX_METRICAS) : utiles
+}
+
+/**
  * Schema Zod espejo de `SCHEMA_DOCUMENTO_MEDICO`.
  *
  * Todos los campos tienen mensajes custom en español. Las coerciones
@@ -185,18 +275,42 @@ const MAX_METRICAS = 50
  */
 export const schemaExtraccionDocumento = z
   .object({
+    // Nombre del estudio dicho por el MODELO (Sprint 19). Descriptivo: se
+    // recorta al tope del campo del formulario (`maxLength={200}`), nunca
+    // rechaza. `.optional()` aunque el `responseSchema` lo pida en `required`,
+    // por el mismo criterio defensivo que `paciente`: si el modelo lo omite,
+    // `sugerirTitulo` cae al título genérico compuesto y la UI lo marca como
+    // NO detectado, que es exactamente lo que corresponde.
+    titulo: textoRecortado(200, 'El título debe ser texto').optional(),
+
+    // Fecha AUSENTE (`null` o cadena vacía) -> `null`, y el documento sigue.
+    // Fecha MAL FORMADA -> sigue rechazando. Ver el encabezado del archivo
+    // para la evidencia medida detrás de esta distinción.
     fecha: z
-      .string({ message: 'La fecha debe ser texto' })
-      .trim()
-      .max(10, 'La fecha es demasiado larga')
+      .union([z.string(), z.null()], { message: 'La fecha debe ser texto o null' })
       .superRefine((raw, ctx) => {
-        const validacion = validarFecha(raw)
+        if (raw === null) return
+
+        const limpia = raw.trim()
+        if (limpia.length === 0) return
+
+        if (limpia.length > 10) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'La fecha es demasiado larga' })
+          return
+        }
+
+        const validacion = validarFecha(limpia)
         if (!validacion.ok) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: validacion.error || 'Fecha inválida',
           })
         }
+      })
+      .transform((raw) => {
+        if (raw === null) return null
+        const limpia = raw.trim()
+        return limpia.length === 0 ? null : limpia
       }),
 
     // Descriptivos: se recortan al tope, nunca hacen fallar el documento.
@@ -228,12 +342,24 @@ export const schemaExtraccionDocumento = z
               'El nombre de la métrica no puede estar vacío',
             ),
 
+            // `null` = el resultado no es numérico y vive en `valorTexto`
+            // (Sprint 19). Un valor PRESENTE que no sea un número finito sigue
+            // rechazando: eso no es "no lo sé", es un dato clínico falso, que
+            // es exactamente lo que este archivo existe para impedir.
             valor: z
-              .number({ message: 'El valor debe ser un número' })
+              .union([z.number(), z.null()], {
+                message: 'El valor debe ser un número finito o null',
+              })
+              .optional()
               .refine(
-                (n) => Number.isFinite(n),
+                (n) => n === undefined || n === null || Number.isFinite(n),
                 'El valor debe ser un número finito (no Infinity ni NaN)',
               ),
+
+            // Resultado CUALITATIVO ("No Reactivo", "No se observan
+            // espermatozoides"). Descriptivo: se recorta a 300, el mismo tope
+            // que valida el RPC sobre `lab_metrics.value_text`.
+            valorTexto: textoRecortado(300, 'El resultado cualitativo debe ser texto').optional(),
 
             unidad: textoRecortado(50, 'La unidad debe ser texto'),
 
@@ -244,13 +370,11 @@ export const schemaExtraccionDocumento = z
             rango: textoRecortado(100, 'El rango debe ser texto'),
           },
           {
-            message: 'Cada métrica debe tener nombre, valor, unidad y rango',
+            message: 'Cada métrica debe tener nombre, y un valor numérico o un resultado en texto',
           },
         ),
       )
-      .transform((metricas) =>
-        metricas.length > MAX_METRICAS ? metricas.slice(0, MAX_METRICAS) : metricas,
-      ),
+      .transform(normalizarMetricas),
 
     // El caso real que costó tres documentos: 507 caracteres contra un tope
     // de 500. Siete de más. Se recorta.
@@ -268,6 +392,16 @@ export const schemaExtraccionDocumento = z
     // corre en `sanearNumeroOrden` después del parseo, y ante la duda deja el
     // campo en `undefined`.
     numero_orden: z.string({ message: 'El número de orden debe ser texto' }).trim().optional(),
+
+    // El RÓTULO impreso al lado del número (Sprint 19), la entrada nueva de
+    // `sanearNumeroOrden`. Descriptivo -no es identidad, es la EVIDENCIA con
+    // la que se juzga la identidad-: se recorta y nunca hace fallar el
+    // documento. Se consume en `conNumeroOrdenSaneado` y no se persiste en
+    // ninguna columna.
+    numero_orden_rotulo: textoRecortado(
+      100,
+      'El rótulo del número de orden debe ser texto',
+    ).optional(),
   })
   .strict()
 
@@ -291,10 +425,16 @@ function conNumeroOrdenSaneado<T extends {
   resumen: string
   texto_completo?: string
   numero_orden?: string
+  numero_orden_rotulo?: string
 }>(datos: T): T {
   const acreditado = sanearNumeroOrden(datos.numero_orden, {
     categoria: datos.categoria as CategoriaDocumentoExtraida,
     textoDelDocumento: `${datos.texto_completo ?? ''} ${datos.resumen}`,
+    // Sprint 19: el rótulo que el lector copió del documento. Es lo que
+    // devuelve la Capa 2 a la vida para los números de orden que son una tira
+    // de dígitos corridos -los 5 reales del laboratorio del dueño-, sin
+    // aflojar ninguno de los rechazos del Sprint 18.
+    rotulo: datos.numero_orden_rotulo,
   })
 
   const saneados: Record<string, unknown> = { ...datos }

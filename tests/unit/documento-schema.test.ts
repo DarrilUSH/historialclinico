@@ -539,3 +539,194 @@ describe('lib/validacion/documento.schema.ts', () => {
     })
   })
 })
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Sprint 19 — el contrato que salió de medir el pipeline
+ *
+ *  Los tres cambios de este archivo, cada uno con el caso real que lo motivó.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+describe('Sprint 19 — fecha ausente, resultados cualitativos y rótulo del número de orden', () => {
+  const base: Record<string, unknown> = {
+    fecha: '2026-03-15',
+    especialidad: 'Clínica médica',
+    institucion: 'Laboratorio Central SA',
+    medico: 'Dra. Gómez (MP 4567)',
+    resumen: 'Análisis de control sin novedades.',
+    categoria: 'laboratory',
+    metricas: [],
+  }
+
+  /* ── 1. TÍTULO ────────────────────────────────────────────────────────── */
+
+  it('acepta el título que devuelve el modelo y lo recorta al tope del campo', () => {
+    const resultado = validarExtraccion({ ...base, titulo: `Ecografía abdominal ${'x'.repeat(300)}` })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.titulo).toHaveLength(200)
+      expect(resultado.datos.titulo?.startsWith('Ecografía abdominal')).toBe(true)
+    }
+  })
+
+  it('sin título del modelo la extracción sigue siendo válida: el campo es opcional', () => {
+    const resultado = validarExtraccion(base)
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) expect(resultado.datos.titulo).toBeUndefined()
+  })
+
+  /* ── 2. FECHA ─────────────────────────────────────────────────────────── */
+
+  it('acepta fecha null SIN tirar la extracción — el resto del documento se conserva', () => {
+    const resultado = validarExtraccion({ ...base, fecha: null, resumen: 'Colangio-RMN de abdomen.' })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.fecha).toBeNull()
+      expect(resultado.datos.resumen).toBe('Colangio-RMN de abdomen.')
+    }
+  })
+
+  it('normaliza la fecha vacía a null (el modelo puede seguir contestando "" por costumbre)', () => {
+    for (const vacia of ['', '   ']) {
+      const resultado = validarExtraccion({ ...base, fecha: vacia })
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) expect(resultado.datos.fecha).toBeNull()
+    }
+  })
+
+  it('la fecha MAL FORMADA sigue rechazando: ausente no es lo mismo que mal leída', () => {
+    for (const rota of ['15/03/2026', '2026-02-30', '2026-3-1', '2026-13-01']) {
+      const resultado = validarExtraccion({ ...base, fecha: rota })
+      expect(resultado.ok).toBe(false)
+    }
+  })
+
+  it('una fecha válida sigue pasando tal cual', () => {
+    const resultado = validarExtraccion({ ...base, fecha: '2025-11-03' })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) expect(resultado.datos.fecha).toBe('2025-11-03')
+  })
+
+  /* ── 3. RESULTADOS CUALITATIVOS ───────────────────────────────────────── */
+
+  it('guarda el resultado cualitativo cuando no hay valor numérico (VDRL / HBsAg / Hepatitis C)', () => {
+    const resultado = validarExtraccion({
+      ...base,
+      metricas: [
+        { nombre: 'VDRL', valor: null, valorTexto: 'No Reactivo', unidad: '', rango: '' },
+        { nombre: 'HBsAg', valor: null, valorTexto: 'No Reactivo', unidad: '', rango: '' },
+        { nombre: 'Hepatitis C', valor: null, valorTexto: 'No Reactivo', unidad: '', rango: '' },
+      ],
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.metricas).toHaveLength(3)
+      expect(resultado.datos.metricas.map((m) => m.valorTexto)).toEqual([
+        'No Reactivo',
+        'No Reactivo',
+        'No Reactivo',
+      ])
+      expect(resultado.datos.metricas.every((m) => m.valor === null)).toBe(true)
+    }
+  })
+
+  it('el espermograma pasa: "No se observan espermatozoides" es un resultado, no un vacío', () => {
+    const resultado = validarExtraccion({
+      ...base,
+      metricas: [
+        {
+          nombre: 'Recuento de espermatozoides',
+          valor: null,
+          valorTexto: 'No se observan espermatozoides',
+          unidad: '',
+          rango: '',
+        },
+      ],
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.metricas[0].valorTexto).toBe('No se observan espermatozoides')
+    }
+  })
+
+  it('una métrica numérica con valorTexto vacío queda sin el campo, no con cadena vacía', () => {
+    const resultado = validarExtraccion({
+      ...base,
+      metricas: [{ nombre: 'Glucemia', valor: 95, valorTexto: '', unidad: 'mg/dl', rango: '70 - 110' }],
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.metricas[0].valor).toBe(95)
+      expect(resultado.datos.metricas[0].valorTexto).toBeUndefined()
+    }
+  })
+
+  it('una métrica sin número Y sin texto se descarta SOLA: el resto del laboratorio entra completo', () => {
+    const resultado = validarExtraccion({
+      ...base,
+      metricas: [
+        { nombre: 'Glucemia', valor: 95, valorTexto: '', unidad: 'mg/dl', rango: '70 - 110' },
+        { nombre: 'Métrica sin nada', valor: null, valorTexto: '', unidad: '', rango: '' },
+        { nombre: 'Colesterol', valor: 180, valorTexto: '', unidad: 'mg/dl', rango: '< 200' },
+      ],
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.metricas.map((m) => m.nombre)).toEqual(['Glucemia', 'Colesterol'])
+    }
+  })
+
+  it('el resultado cualitativo se recorta a 300, el mismo tope que valida el RPC', () => {
+    const resultado = validarExtraccion({
+      ...base,
+      metricas: [{ nombre: 'Observaciones', valor: null, valorTexto: 'z'.repeat(400), unidad: '', rango: '' }],
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) expect(resultado.datos.metricas[0].valorTexto).toHaveLength(300)
+  })
+
+  /* ── 4. NÚMERO DE ORDEN CON SU RÓTULO ─────────────────────────────────── */
+
+  it('los 5 números de orden REALES del laboratorio del dueño sobreviven gracias al rótulo', () => {
+    // La regresión medida del Sprint 18: siete dígitos corridos sin rótulo son
+    // indistinguibles de un DNI y se descartaban los cinco, dejando la Capa 2
+    // inerte para todo el historial.
+    for (const numero of ['1675729', '1446188', '1683737', '1720279', '1720280']) {
+      const resultado = validarExtraccion({
+        ...base,
+        numero_orden: numero,
+        numero_orden_rotulo: 'N° de Orden',
+      })
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) expect(resultado.datos.numero_orden).toBe(numero)
+    }
+  })
+
+  it('el mismo número SIN rótulo se sigue descartando: el rótulo es la única puerta nueva', () => {
+    const resultado = validarExtraccion({ ...base, numero_orden: '1446188' })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) expect(resultado.datos.numero_orden).toBeUndefined()
+  })
+
+  it('un rótulo AJENO descarta el número aunque el lector lo haya puesto en numero_orden', () => {
+    const resultado = validarExtraccion({
+      ...base,
+      categoria: 'consultation',
+      numero_orden: '176828',
+      numero_orden_rotulo: 'N° de Internación',
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) expect(resultado.datos.numero_orden).toBeUndefined()
+  })
+
+  it('una accesión DICOM rotulada como orden se sigue rechazando: la forma manda sobre el rótulo', () => {
+    const resultado = validarExtraccion({
+      ...base,
+      categoria: 'imaging',
+      numero_orden: '15570342.01',
+      numero_orden_rotulo: 'N° de Orden',
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) expect(resultado.datos.numero_orden).toBeUndefined()
+  })
+})

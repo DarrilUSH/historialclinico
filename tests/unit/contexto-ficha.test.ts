@@ -153,7 +153,7 @@ function documentoDe(parcial: Partial<Documento>): Documento {
  * - estudios sueltos de otras fechas, cada uno su propio episodio.
  *
  * Los textos de los resúmenes son los que produce `lib/gemini/prompt-documento.ts`
- * (regla 5.b) para una página sin contenido clínico: el filtro y el prompt de
+ * (regla 6.b) para una página sin contenido clínico: el filtro y el prompt de
  * ingesta son un contrato, y este fixture es donde se verifica.
  */
 const DOCUMENTOS: Documento[] = [
@@ -673,7 +673,7 @@ describe("contexto de la ficha — datos faltantes", () => {
  * 5.b) le pide a Gemini cuando una página no tiene contenido clínico. Estos
  * textos son los que efectivamente produjo la ingesta sobre un historial
  * real de 47 documentos, y son el contrato entre los dos módulos: si alguien
- * reescribe la regla 5.b sin tocar `MARCAS_SIN_CONTENIDO_CLINICO`, este
+ * reescribe la regla 6.b sin tocar `MARCAS_SIN_CONTENIDO_CLINICO`, este
  * bloque falla.
  */
 describe("contexto de la ficha — qué cuenta como hecho clínico", () => {

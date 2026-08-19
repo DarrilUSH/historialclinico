@@ -35,8 +35,14 @@
  *     regla que el caso ejercita: lo que se prueba es el validador, no este
  *     catálogo.
  *
- * Gemini nunca devuelve `null`: cuando un campo no está en el documento,
- * devuelve cadena vacía (`""`).
+ * Sobre los campos ausentes: hasta el Sprint 18, cuando un campo no estaba en
+ * el documento Gemini devolvía cadena vacía (`""`) y nunca `null`. Desde el
+ * Sprint 19 hay UNA excepción declarada en el contrato: `fecha` puede venir
+ * `null` cuando el documento no imprime su propia fecha
+ * (`lib/gemini/schemas.ts`), y el validador la acepta -campo vacío en la
+ * pantalla, que la complete una persona- en vez de tirar la extracción entera
+ * y empujar al modelo a inventar. Todos los demás campos siguen usando la
+ * cadena vacía.
  */
 
 import { readFileSync } from "node:fs"
@@ -44,13 +50,6 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const CARPETA = dirname(fileURLToPath(import.meta.url))
-
-export interface MetricaExtraida {
-  nombre: string
-  valor: number
-  unidad: string
-  rango: string
-}
 
 export interface CasoSintetico {
   /** Igual al nombre del `.txt` sin extensión. */

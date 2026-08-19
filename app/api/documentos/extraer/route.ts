@@ -110,6 +110,23 @@ import type { DuplicadoSemanticoParaCliente } from "@/lib/documentos/duplicados-
 import { BUCKETS } from "@/lib/storage-admin"
 import { validarExtraccion } from "@/lib/validacion/documento.schema"
 
+// Necesita el runtime de Node (usa `Buffer`, no disponible en Edge) — mismo
+// criterio explícito que el resto de las rutas que llaman a servicios
+// externos lentos (`app/api/lugares/sincronizar/route.ts`).
+export const runtime = "nodejs"
+
+/**
+ * Tope de duración de la función serverless, en segundos (Sprint 19). Con
+ * `MAX_REINTENTOS = 2` y `TIMEOUT_MS = 30s` en `lib/gemini/client.ts`, el peor
+ * caso de `extraerJson` solo (3 intentos + las dos esperas entre reintentos)
+ * ronda los 94s; sumale la descarga del archivo y las dos escrituras a la
+ * base y 120s deja margen real sin acercarse al límite. Sin este número
+ * explícito, la plataforma aplicaría su default -que en algunos planes es
+ * bastante menor a lo que este handler ya necesitaba incluso ANTES de sumar
+ * el segundo reintento-.
+ */
+export const maxDuration = 120
+
 export interface RespuestaExtraccionOk {
   extraccion: DocumentoMedicoExtraido
   /**
@@ -316,34 +333,48 @@ export async function POST(request: Request): Promise<Response> {
     // -igual que el backfill de huellas de `ingestarDocumento`-: si la
     // consulta falla, la pantalla de revisión simplemente no muestra la
     // franja, nunca bloquea la extracción ya conseguida.
+    //
+    // Si `extraccion.fecha` es `null` (Sprint 19: el modelo ya no inventa
+    // fecha cuando el documento no imprime la suya, ver
+    // `lib/gemini/schemas.ts`), directamente NO se cotejan duplicados:
+    // `coincidenTodosLosDatos` resuelve `null` a "no hay con qué evaluar la
+    // condición necesaria de fecha" (ver su guarda), así que preguntarle a la
+    // base acá sería una consulta que de antemano no puede aportar nada.
     let duplicadoSemantico: DuplicadoSemanticoParaCliente | null = null
-    try {
-      const encontrado = await buscarDuplicadoSemantico(supabase, documento.profile_id, documentoId, {
-        fecha: extraccion.fecha,
-        categoria: extraccion.categoria,
-        institucion: extraccion.institucion,
-        medico: extraccion.medico,
-        numeroOrden: extraccion.numero_orden ?? "",
-        metricas: extraccion.metricas.map((metrica) => ({
-          nombre: metrica.nombre,
-          valor: metrica.valor,
-          unidad: metrica.unidad,
-        })),
-      })
+    if (extraccion.fecha) {
+      try {
+        const encontrado = await buscarDuplicadoSemantico(supabase, documento.profile_id, documentoId, {
+          fecha: extraccion.fecha,
+          categoria: extraccion.categoria,
+          institucion: extraccion.institucion,
+          medico: extraccion.medico,
+          numeroOrden: extraccion.numero_orden ?? "",
+          // `valorTexto` viaja también (Sprint 19): un resultado CUALITATIVO
+          // ("No Reactivo") es sustancia comparable igual que uno numérico
+          // -ver `MetricaComparable` en `lib/documentos/duplicados-semanticos.ts`-,
+          // así que ya no hace falta filtrarlo afuera de la comparación.
+          metricas: extraccion.metricas.map((metrica) => ({
+            nombre: metrica.nombre,
+            valor: metrica.valor,
+            valorTexto: metrica.valorTexto,
+            unidad: metrica.unidad,
+          })),
+        })
 
-      if (encontrado) {
-        duplicadoSemantico = {
-          documentoId: encontrado.documentoId,
-          titulo: encontrado.titulo,
-          fechaTexto: formatearFechaDuplicado(encontrado.fecha),
-          motivo: encontrado.motivo,
+        if (encontrado) {
+          duplicadoSemantico = {
+            documentoId: encontrado.documentoId,
+            titulo: encontrado.titulo,
+            fechaTexto: formatearFechaDuplicado(encontrado.fecha),
+            motivo: encontrado.motivo,
+          }
         }
+      } catch (error) {
+        console.error(
+          `[extraccion] No se pudo cotejar duplicados semánticos de ${documentoId} (se sigue sin la franja de aviso):`,
+          error instanceof Error ? error.message : error,
+        )
       }
-    } catch (error) {
-      console.error(
-        `[extraccion] No se pudo cotejar duplicados semánticos de ${documentoId} (se sigue sin la franja de aviso):`,
-        error instanceof Error ? error.message : error,
-      )
     }
 
     return json({ extraccion, duplicadoSemantico }, 200)

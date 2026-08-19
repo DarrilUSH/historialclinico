@@ -45,6 +45,9 @@ export const metadata: Metadata = {
 const PATRON_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/** Tope de títulos que se traen para cotejar repetidos (Sprint 19). */
+const MAX_TITULOS_COTEJADOS = 500
+
 export default async function PaginaProcesando({
   searchParams,
 }: {
@@ -78,7 +81,15 @@ export default async function PaginaProcesando({
   // `/turnos/nuevo` -directorio de médicos activos + estado del catálogo
   // REFES-, para que `FormularioRevision` pueda ofrecer "¿Es este lugar?" /
   // "¿Es este médico?" bajo institución y médico.
-  const [{ data: medicos }, estadoCatalogo] = await Promise.all([
+  //
+  // Y (Sprint 19) los títulos que el perfil YA usa, para avisar en la revisión
+  // cuando el título propuesto se repite. Se leen con el cliente del USUARIO
+  // -RLS decide, igual que el resto de la pantalla- y son exactamente los que
+  // la persona ya ve en `/estudios`: ningún dato nuevo sale de acá. Se excluye
+  // el documento que se está revisando (todavía tiene su título provisional) y
+  // se acota a `MAX_TITULOS_COTEJADOS`, más que suficiente para un historial
+  // personal y un tope duro para que la página no crezca sin límite.
+  const [{ data: medicos }, estadoCatalogo, { data: documentosDelPerfil }] = await Promise.all([
     supabase
       .from("doctors")
       .select("id, full_name, specialties, institution, address, city, province, latitude, longitude")
@@ -86,7 +97,19 @@ export default async function PaginaProcesando({
       .eq("is_active", true)
       .order("full_name", { ascending: true }),
     leerEstadoCatalogo(supabase),
+    supabase
+      .from("documents")
+      .select("title")
+      .eq("profile_id", activo.perfil.id)
+      .neq("id", documentoId)
+      .not("confirmed_at", "is", null)
+      .order("document_date", { ascending: false })
+      .limit(MAX_TITULOS_COTEJADOS),
   ])
+
+  const titulosExistentes = (documentosDelPerfil ?? [])
+    .map((fila) => fila.title)
+    .filter((titulo): titulo is string => typeof titulo === "string" && titulo.length > 0)
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 py-8 chica:gap-4 chica:py-5">
@@ -108,6 +131,7 @@ export default async function PaginaProcesando({
         fechaMaximaIso={fechaDeHoy()}
         medicos={medicos ?? []}
         catalogoDisponible={estadoCatalogo.centros > 0}
+        titulosExistentes={titulosExistentes}
       />
     </div>
   )

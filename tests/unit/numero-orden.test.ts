@@ -243,3 +243,90 @@ describe("el banco sintético completo", () => {
     }
   })
 })
+
+
+/* ------------------------------------------------------------------ *
+ *  Sprint 19 — el rótulo que devuelve el lector (`numero_orden_rotulo`)
+ *
+ *  La deuda que el Sprint 18 dejó anotada de frente: sin rótulo, los 5
+ *  números de orden REALES del laboratorio del dueño se descartaban por ser
+ *  siete dígitos corridos, y la Capa 2 quedaba inerte para todo su historial.
+ * ------------------------------------------------------------------ */
+
+describe("acreditación por el rótulo del campo aparte", () => {
+  it("los 5 números de orden reales del historial vuelven a acreditarse", () => {
+    for (const numero of ["1675729", "1446188", "1683737", "1720279", "1720280"]) {
+      expect(
+        sanearNumeroOrden(numero, { categoria: "laboratory", rotulo: "N° de Orden" }),
+      ).toBe(numero)
+    }
+  })
+
+  it("el rótulo se reconoce sin tildes, sin mayúsculas y con relleno de por medio", () => {
+    const contexto = (rotulo: string) => ({ categoria: "laboratory" as const, rotulo })
+    expect(sanearNumeroOrden("1446188", contexto("PROTOCOLO Nro."))).toBe("1446188")
+    expect(sanearNumeroOrden("1446188", contexto("n° de solicitud"))).toBe("1446188")
+    expect(sanearNumeroOrden("90210", contexto("Pedido N °"))).toBe("90210")
+  })
+
+  it("SIN rótulo, el mismo número se sigue rechazando: la desconfianza del Sprint 18 queda intacta", () => {
+    expect(sanearNumeroOrden("1446188", { categoria: "laboratory" })).toBeNull()
+    expect(sanearNumeroOrden("1446188", { categoria: "laboratory", rotulo: "" })).toBeNull()
+    expect(sanearNumeroOrden("1446188", { categoria: "laboratory", rotulo: "   " })).toBeNull()
+  })
+
+  it("un rótulo AJENO descarta el número aunque su forma parezca válida", () => {
+    const ajenos = [
+      "N° de Internación",
+      "Historia Clínica",
+      "Afiliado",
+      "N° de Accesión",
+      "DNI",
+      "N° de Serie del equipo",
+    ]
+    for (const rotulo of ajenos) {
+      expect(sanearNumeroOrden("1446188", { categoria: "laboratory", rotulo })).toBeNull()
+    }
+  })
+
+  it("el rótulo ajeno gana sobre el de orden: ante los dos, no se acredita", () => {
+    // Un membrete que rotula el mismo número como orden Y como internación es
+    // exactamente el caso en el que no hay que pronunciarse.
+    expect(
+      sanearNumeroOrden("1446188", {
+        categoria: "laboratory",
+        rotulo: "N° de Orden / N° de Internación",
+      }),
+    ).toBeNull()
+  })
+
+  it("las formas PROHIBIDAS se rechazan aunque el rótulo diga orden", () => {
+    const contexto = { categoria: "imaging" as const, rotulo: "N° de Orden" }
+    expect(sanearNumeroOrden("15570342.01", contexto)).toBeNull() // accesión DICOM
+    expect(sanearNumeroOrden("02/05/2026", contexto)).toBeNull() // fecha
+    expect(sanearNumeroOrden("20260502", contexto)).toBeNull() // fecha compacta
+    expect(sanearNumeroOrden("20-12345678-9", contexto)).toBeNull() // CUIT
+    expect(sanearNumeroOrden("00176828", contexto)).toBeNull() // contador con ceros
+  })
+
+  it("en IMÁGENES, el rótulo de orden SÍ acredita un número que sin él se rechazaría", () => {
+    // Mismo criterio que ya tenía el rótulo hallado en el texto del documento
+    // (caso `04-imagenes-vega-registro-dos-medicos`): lo que descalifica a un
+    // informe de imágenes es el número SIN rótulo, no la categoría en sí.
+    expect(
+      sanearNumeroOrden("4471", { categoria: "imaging", rotulo: "N° de Registro" }),
+    ).toBe("4471")
+    expect(sanearNumeroOrden("4471", { categoria: "imaging" })).toBeNull()
+  })
+
+  it("los sintéticos con rótulo en el propio valor siguen igual, con y sin campo aparte", () => {
+    expect(sanearNumeroOrden("887-2026", { categoria: "laboratory" })).toBe("887-2026")
+    expect(
+      sanearNumeroOrden("887-2026", { categoria: "laboratory", rotulo: "N° de Orden" }),
+    ).toBe("887-2026")
+    expect(sanearNumeroOrden("PROT-9087", { categoria: "laboratory" })).toBe("PROT-9087")
+    expect(
+      sanearNumeroOrden("PROT-9087", { categoria: "laboratory", rotulo: "Protocolo" }),
+    ).toBe("PROT-9087")
+  })
+})

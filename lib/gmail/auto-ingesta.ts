@@ -124,7 +124,7 @@ export const TEXTO_MOTIVO: Record<MotivoRevision, string> = {
   lectura_fallida: "no pudimos leer el archivo automáticamente",
   fecha_no_confiable: "no pudimos leer con seguridad la fecha",
   categoria_indeterminada: "no pudimos identificar qué tipo de estudio es",
-  sin_datos_de_contexto: "no dice de qué institución ni de qué especialidad es",
+  sin_datos_de_contexto: "no pudimos ponerle un nombre que lo distinga de otros estudios",
   duplicado_exacto: "ya tenías cargado un archivo idéntico",
   posible_duplicado: "puede estar repetido con otro correo",
   duplicado_numero_orden: "ya tenías cargado un estudio del mismo laboratorio con el mismo número de orden",
@@ -208,10 +208,25 @@ export interface EntradaDocumentoAutoCarga {
    */
   dniDetectado?: string | null
   dniPerfil?: string | null
-  /** `YYYY-MM-DD` que devolvió Gemini. Vacío si no la pudo leer. */
+  /**
+   * `YYYY-MM-DD` que devolvió Gemini. Vacío si no la pudo leer.
+   *
+   * Desde el Sprint 19 el lector puede contestar `null` cuando el documento no
+   * imprime su propia fecha (`DocumentoMedicoExtraido.fecha`); `auto-carga.ts`
+   * lo normaliza a cadena vacía justo antes de llamar acá, así que este
+   * contrato no cambia — y el resultado tampoco: **sin fecha, `fecha_no_confiable`
+   * y el correo va a la bandeja de revisión, nunca al historial.**
+   */
   fecha: string
   categoria: CategoriaDocumentoExtraida
-  /** `sugerirTitulo(...).detectado`: hubo institución, especialidad o médico. */
+  /**
+   * `sugerirTitulo(...).detectado`. Desde el Sprint 19 significa "el lector
+   * NOMBRÓ el estudio" (`DocumentoMedicoExtraido.titulo`), no ya "había
+   * institución, especialidad o médico": el título genérico compuesto dejó de
+   * contar como detectado. Es más exigente a propósito — un historial donde
+   * cinco filas se llaman "Estudio por imágenes — <clínica>" no se puede leer,
+   * y eso hay que arreglarlo con una persona delante.
+   */
   tituloDetectado: boolean
   /** El perfil ya tiene un documento con esta misma huella. */
   huellaDuplicada: boolean
@@ -267,7 +282,13 @@ export function evaluarDocumentoParaAutoCarga(
   // estudio con fecha futura significa que el lector se equivocó leyendo, no
   // que el estudio sea de mañana — es la misma guarda que ya aplica
   // `confirmar_documento_recien_subido` cuando la confirma una persona.
-  const fecha = entrada.fecha.trim()
+  //
+  // Este es el punto donde muere el `null` del Sprint 19 en el camino
+  // automático: la fecha ausente entra como cadena vacía y sale como
+  // `fecha_no_confiable`, es decir, a revisión humana. El `?? ""` es defensivo
+  // -`auto-carga.ts` ya normaliza- para que un llamador nuevo que pase `null`
+  // no rompa en runtime.
+  const fecha = (entrada.fecha ?? "").trim()
   if (fecha.length === 0 || !esFechaIsoValida(fecha) || fecha > entrada.hoyIso) {
     motivos.push("fecha_no_confiable")
   }
@@ -279,11 +300,12 @@ export function evaluarDocumentoParaAutoCarga(
     motivos.push("categoria_indeterminada")
   }
 
-  // Sin institución, ni especialidad, ni médico, el título que se guardaría
-  // sería la etiqueta genérica de la categoría. La pantalla de revisión ya
-  // marca ese caso con "No se detectó — completalo vos"
-  // (`lib/documentos/sugerir-titulo.ts`): si ahí hace falta una persona, acá
-  // también.
+  // Sin un título del lector, lo que se guardaría es el genérico
+  // `<categoría> — <institución>`, que no dice qué estudio es. La pantalla de
+  // revisión ya marca ese caso con "Poné un nombre para reconocerlo" y le pone
+  // el foco encima (`lib/documentos/sugerir-titulo.ts`,
+  // `components/documentos/formulario-revision.tsx`): si ahí hace falta una
+  // persona, acá también.
   if (!entrada.tituloDetectado) {
     motivos.push("sin_datos_de_contexto")
   }

@@ -44,6 +44,39 @@ import { z } from 'zod';
  * que el modelo puede omitir si el documento no aporta texto adicional al
  * `resumen`. `app/api/documentos/extraer/route.ts` además lo trunca de nuevo
  * en el servidor antes de persistir, por si el modelo no respeta el límite.
+ *
+ * ## `titulo` — por qué el nombre del estudio lo dice el MODELO (Sprint 19)
+ *
+ * Hasta el Sprint 18 el título lo componía `lib/documentos/sugerir-titulo.ts`
+ * con la etiqueta de la categoría más el primer dato de contexto que hubiera:
+ * `<categoría> — <institución>`. La medición del pipeline sobre 19 documentos
+ * reales mostró que ese título **nunca dice qué estudio es**, y que -como
+ * institución hay casi siempre- salían repetidos: 15 de 25 documentos
+ * compartían título con otro ("Estudio por imágenes — SANATORIO SAN JORGE
+ * S.R.L." en cinco documentos distintos, "Consulta — …" en tres). Un
+ * historial donde cinco filas se llaman igual no se puede leer.
+ *
+ * El único que sabe si el informe es una ecografía abdominal o una
+ * colangio-RMN es quien leyó el documento. Por eso `titulo` es un campo del
+ * contrato, y `sugerirTitulo` pasa a USARLO — el genérico
+ * `<categoría> — <institución>` queda como último recurso, y la pantalla de
+ * revisión deja de decir "Detectado automáticamente" cuando cae ahí.
+ *
+ * ## `fecha` puede ser `null` — la única excepción a "la identidad no se recorta"
+ *
+ * Medido en la misma pasada: en los 3 documentos del corpus que NO imprimen su
+ * propia fecha, el modelo INVENTÓ una (`2024-03-12`, `2024-02-14`) o tomó la
+ * de OTRO estudio citado en el texto ("TC previa con fecha 29-10-2025" →
+ * `2025-10-29` en una colangio-RMN que es del 3 de noviembre). La causa
+ * estaba de NUESTRO lado: `fecha` era obligatoria y no admitía vacío, así que
+ * contestar "no la sé" costaba la extracción ENTERA — el modelo tenía todo el
+ * incentivo a rellenar con algo plausible.
+ *
+ * Con `nullable: true`, decir "no la encontré" es una respuesta legal, y la
+ * pantalla de revisión la convierte en lo que corresponde: campo vacío, foco
+ * puesto ahí, y sin poder confirmar hasta que una persona la complete. La
+ * fecha sigue siendo obligatoria para GUARDAR; lo que dejó de ser obligatorio
+ * es que la adivine el modelo.
  */
 export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
   type: Type.OBJECT,
@@ -51,12 +84,29 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
     'Datos estructurados extraídos de un documento médico (análisis de laboratorio, ' +
     'informe de imágenes, receta o resumen de consulta).',
   properties: {
+    titulo: {
+      type: Type.STRING,
+      description:
+        'Nombre CORTO y ESPECÍFICO del estudio, en castellano, tal como lo nombraría quien lo ' +
+        'pidió: "Ecografía abdominal", "Radiografía de tórax", "Colangio-RMN de abdomen", ' +
+        '"Análisis de laboratorio — hemograma y hepatograma", "Epicrisis de internación", ' +
+        '"Espermograma", "Parte quirúrgico — drenaje de absceso hepático". NO incluyas la ' +
+        'institución ni la fecha: son campos aparte y se muestran solos junto al título. NO uses ' +
+        'la etiqueta genérica de la categoría ("Estudio por imágenes", "Consulta") si el ' +
+        'documento permite saber QUÉ estudio es. Máximo ~80 caracteres. Cadena vacía solo si el ' +
+        'documento es ilegible o no permite saber de qué se trata.',
+    },
     fecha: {
       type: Type.STRING,
       format: 'date',
+      nullable: true,
       description:
-        'Fecha del documento en formato YYYY-MM-DD. Si el documento no trae fecha explícita, ' +
-        'usar la fecha más probable mencionada en el texto; si no hay ninguna pista, usar cadena vacía.',
+        'Fecha DEL PROPIO documento en formato YYYY-MM-DD: la fecha en que se hizo o se emitió ' +
+        'ESTE estudio, tal como está impresa en él. Si el documento NO imprime su propia fecha, ' +
+        'devolvé null — null es una respuesta correcta y esperada, no un error. NUNCA inventes ' +
+        'una fecha plausible, y NUNCA uses una fecha que el texto le atribuya a OTRO estudio ' +
+        '("TC previa con fecha 29-10-2025", "control anterior del 14/02"): esa es la fecha de ese ' +
+        'otro estudio, no la de este documento.',
     },
     especialidad: {
       type: Type.STRING,
@@ -95,8 +145,9 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
     metricas: {
       type: Type.ARRAY,
       description:
-        'Métricas numéricas de laboratorio detectadas en el documento (por ejemplo valores de un ' +
-        'análisis de sangre). Lista vacía si el documento no es de laboratorio o no trae valores numéricos.',
+        'Resultados de laboratorio detectados en el documento, NUMÉRICOS o CUALITATIVOS (por ' +
+        'ejemplo los valores de un análisis de sangre, y también "VDRL: No Reactivo"). Lista ' +
+        'vacía si el documento no es de laboratorio o no trae ningún resultado.',
       items: {
         type: Type.OBJECT,
         properties: {
@@ -106,7 +157,20 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
           },
           valor: {
             type: Type.NUMBER,
-            description: 'Valor numérico medido, sin unidad ni texto adicional.',
+            nullable: true,
+            description:
+              'Valor numérico medido, sin unidad ni texto adicional. null si el resultado NO es ' +
+              'un número (en ese caso el resultado va en "valorTexto").',
+          },
+          valorTexto: {
+            type: Type.STRING,
+            description:
+              'Resultado CUALITATIVO textual, tal como lo imprime el estudio: "Negativo", ' +
+              '"No Reactivo", "Reactivo", "Positivo", "No se observan espermatozoides", ' +
+              '"Plaquetas aumentadas", "Escasa flora". Es el campo que usan los resultados que no ' +
+              'producen un número (VDRL, HBsAg, Hepatitis C, Strep A, observaciones del ' +
+              'espermograma). Cadena vacía si el resultado es numérico. Nunca dejes los DOS ' +
+              'campos vacíos: cada resultado tiene un número o un texto.',
           },
           unidad: {
             type: Type.STRING,
@@ -119,8 +183,8 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
               'Cadena vacía si no figura.',
           },
         },
-        required: ['nombre', 'valor', 'unidad', 'rango'],
-        propertyOrdering: ['nombre', 'valor', 'unidad', 'rango'],
+        required: ['nombre', 'valor', 'valorTexto', 'unidad', 'rango'],
+        propertyOrdering: ['nombre', 'valor', 'valorTexto', 'unidad', 'rango'],
       },
     },
     texto_completo: {
@@ -143,9 +207,31 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
         'afiliado, el DNI, ni ningún otro código del documento-. Cadena vacía si el documento no trae ' +
         'ningún número de orden visible — no lo inventes.',
     },
+    numero_orden_rotulo: {
+      type: Type.STRING,
+      description:
+        'OPCIONAL — el RÓTULO impreso que acompaña a "numero_orden", copiado LITERAL del ' +
+        'documento y SIN el número: "N° de Orden", "Protocolo", "N° de Solicitud", "Pedido Nro", ' +
+        '"N° de Registro". Es lo que ACREDITA que ese número identifica a ESTE estudio y no a la ' +
+        'persona ni a la placa: sin rótulo, un número de siete dígitos es indistinguible de un ' +
+        'DNI y se descarta. Si el número está rotulado como otra cosa ("N° de Internación", ' +
+        '"Historia Clínica", "Afiliado", "Accesión"), copiá ESE rótulo igual -sirve para ' +
+        'descartarlo-. Cadena vacía si el número aparece pelado, sin ningún rótulo al lado — no ' +
+        'inventes un rótulo que el documento no imprime.',
+    },
   },
-  required: ['fecha', 'especialidad', 'institucion', 'medico', 'resumen', 'categoria', 'metricas'],
+  required: [
+    'titulo',
+    'fecha',
+    'especialidad',
+    'institucion',
+    'medico',
+    'resumen',
+    'categoria',
+    'metricas',
+  ],
   propertyOrdering: [
+    'titulo',
     'fecha',
     'especialidad',
     'institucion',
@@ -155,6 +241,7 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
     'metricas',
     'texto_completo',
     'numero_orden',
+    'numero_orden_rotulo',
   ],
 };
 
@@ -222,7 +309,12 @@ export type CategoriaDocumentoExtraida =
 /** Una métrica de laboratorio extraída de un documento (espejo de `public.lab_metrics`). */
 export interface MetricaExtraida {
   nombre: string;
-  valor: number;
+  /**
+   * Valor numérico medido, o `null` cuando el resultado es CUALITATIVO y vive
+   * en `valorTexto`. Espejo exacto de `lab_metrics.value`, que es nullable
+   * desde `20260819190000_lab_metrics_resultados_cualitativos.sql`.
+   */
+  valor: number | null;
   unidad: string;
   rango: string;
   /**
@@ -231,18 +323,20 @@ export interface MetricaExtraida {
    * 18, tarea de resultados cualitativos. Espejo de `lab_metrics.value_text`
    * (`supabase/migrations/20260819190000_lab_metrics_resultados_cualitativos.sql`).
    *
-   * OPCIONAL y ADITIVO a propósito: ni `SCHEMA_DOCUMENTO_MEDICO` (arriba, el
-   * `responseSchema` real que Gemini recibe) ni
-   * `lib/validacion/documento.schema.ts` piden o aceptan todavía este campo
-   * -los dos siguen exigiendo `valor` numérico en cada métrica-, así que
-   * agregarlo acá no cambia en nada el contrato de la extracción en vivo.
-   * Sirve hoy para que `lib/laboratorio/normalizacion.ts#prepararMetricas`
-   * (y sus tests) tengan un campo tipado con el que trabajar; cablear la
-   * extracción real (prompt + `responseSchema` + validación Zod) es una
-   * ampliación pendiente, documentada como deuda en el Resumen de Entrega
-   * del Sprint 18 -esos tres archivos quedaron fuera del alcance de esa
-   * tarea por trabajo en paralelo sobre `lib/gemini/prompt-documento.ts` y
-   * `lib/validacion/documento.schema.ts`-.
+   * **Sprint 19 — el cable quedó conectado.** Hasta el Sprint 18 este campo
+   * existía en el tipo pero ningún camino lo poblaba: `SCHEMA_DOCUMENTO_MEDICO`
+   * exigía `valor` numérico y no tenía campo de texto, y
+   * `lib/validacion/documento.schema.ts` tampoco lo aceptaba. La medición lo
+   * puso en números: de 5 resultados cualitativos clínicamente relevantes del
+   * corpus real -VDRL, HBsAg y Hepatitis C "No Reactivo" del laboratorio más
+   * completo del dueño, y el espermograma post-vasectomía- se guardaron 0.
+   * Ahora el `responseSchema`, el prompt y el espejo Zod los piden y los
+   * validan, y `prepararMetricas` (que ya sabía leerlos) los persiste en
+   * `lab_metrics.value_text`.
+   *
+   * Sigue siendo `?` porque `prepararMetricas` recibe métricas parseadas de un
+   * campo oculto del formulario (`Partial<MetricaExtraida>`), donde cualquier
+   * campo puede faltar.
    */
   valorTexto?: string;
 }
@@ -256,7 +350,25 @@ export interface MetricaExtraida {
  * más arriba en este archivo.
  */
 export interface DocumentoMedicoExtraido {
-  fecha: string;
+  /**
+   * Nombre corto y específico del estudio, dicho por el MODELO (Sprint 19).
+   * Ver el bloque `titulo` del comentario de `SCHEMA_DOCUMENTO_MEDICO`.
+   *
+   * `?` aunque el schema lo pida en `required`, por el mismo criterio
+   * defensivo que `paciente` más abajo: un modelo puede omitir un campo
+   * pedido, y `sugerirTitulo` tiene que poder tratar "no vino" exactamente
+   * igual que "vino vacío" — cayendo al título genérico compuesto, que la UI
+   * marca como NO detectado.
+   */
+  titulo?: string;
+  /**
+   * Fecha del documento en `YYYY-MM-DD`, o `null` cuando el documento no
+   * imprime su propia fecha. Ver el bloque `fecha` del comentario de
+   * `SCHEMA_DOCUMENTO_MEDICO`: `null` es una respuesta LEGAL y esperada, no un
+   * error — es preferible a la fecha inventada que producía el contrato
+   * anterior.
+   */
+  fecha: string | null;
   especialidad: string;
   institucion: string;
   medico: string;
@@ -271,6 +383,19 @@ export interface DocumentoMedicoExtraido {
    * rara vez tiene uno)-, mismo criterio que `texto_completo`.
    */
   numero_orden?: string;
+  /**
+   * Rótulo impreso al lado de `numero_orden` ("N° de Orden", "Protocolo",
+   * "N° de Internación"), copiado literal y sin el número (Sprint 19).
+   *
+   * Es la ENTRADA de `sanearNumeroOrden` (`lib/documentos/numero-orden.ts`):
+   * el saneador acredita -o descarta- por el rótulo del documento en vez de
+   * por la FORMA del número. Sin este campo, los 5 números de orden reales del
+   * laboratorio del dueño (`1675729`, `1446188`, `1683737`, `1720279`,
+   * `1720280`) se descartaban por ser siete dígitos corridos, indistinguibles
+   * de un DNI. **No se persiste en ninguna columna**: se consume en la
+   * validación y queda en la extracción solo como evidencia auditable.
+   */
+  numero_orden_rotulo?: string;
 }
 
 /**

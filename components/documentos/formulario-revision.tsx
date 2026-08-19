@@ -84,6 +84,40 @@
  * "Confirmar y guardar", que nunca estuvo deshabilitado. Regla de oro
  * respetada: se avisa, nunca se bloquea.
  *
+ * ## Sprint 19: la pantalla deja de decir "detectado" cuando no detectó nada
+ *
+ * Tres cambios, los tres salidos de medir el pipeline con 19 documentos
+ * reales del dueño. Los tres apuntan a lo mismo: que la ayuda debajo de cada
+ * campo diga la VERDAD, porque "Detectado automáticamente — revisalo" es una
+ * invitación a no revisar.
+ *
+ * 1. **Título.** Antes el título lo componía `sugerirTitulo` como
+ *    `<categoría> — <institución>` y, como institución hay casi siempre, la
+ *    ayuda decía "Detectado automáticamente" en 15 de 25 documentos que
+ *    compartían título con otro. Ahora el nombre del estudio lo trae el
+ *    modelo (`DocumentoMedicoExtraido.titulo`): si vino, la ayuda dice que es
+ *    una sugerencia; si NO vino y el título es el genérico compuesto, la
+ *    ayuda dice "Poné un nombre para reconocerlo" y el campo se lleva el
+ *    foco. Además, si el título coincide con el de otro estudio del mismo
+ *    perfil (`titulosExistentes`), se avisa acá mismo — se avisa, nunca se
+ *    bloquea: dos controles del mismo tipo pueden llamarse igual con todo
+ *    derecho.
+ * 2. **Fecha.** `extraccion.fecha` ahora puede ser `null` (el documento no
+ *    imprime su propia fecha, ver `lib/gemini/schemas.ts`). Antes ese caso
+ *    caía a `fechaProvisional` -que es HOY- y se podía confirmar sin que
+ *    nadie mirara: una fecha inventada entrando al historial en silencio.
+ *    Ahora el campo queda VACÍO, dice "No la encontramos — completala vos",
+ *    se lleva el foco y, como es `required`, el formulario no se envía hasta
+ *    que una persona la ponga. `fechaProvisional` sigue siendo el default
+ *    SOLO cuando la extracción falló entera (formulario manual): ahí no hay
+ *    ninguna lectura que contradecir.
+ * 3. **Resultados cualitativos.** La tarjeta de métricas mostraba
+ *    `{valor} {unidad}` y nada más; un resultado sin número ("No Reactivo",
+ *    "No se observan espermatozoides") se veía como una fila vacía. Ahora
+ *    muestra el texto cuando no hay número. Viajan por el mismo campo oculto
+ *    `metricas` de siempre, así que `confirmarDocumento` los persiste en
+ *    `lab_metrics.value_text` sin ningún cambio de su lado.
+ *
  * ## Velo de espera (Sprint 14, "Feedback de espera global")
  *
  * "Guardando…" es la tercera y última etapa REAL de la ingesta -ver el
@@ -129,7 +163,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { sugerirTitulo } from "@/lib/documentos/sugerir-titulo"
+import { sugerirTitulo, tituloYaUsado } from "@/lib/documentos/sugerir-titulo"
 import {
   TEXTO_MOTIVO_DUPLICADO_SEMANTICO,
   type DuplicadoSemanticoParaCliente,
@@ -140,6 +174,7 @@ import type { LugarExtraidoParaCotejo } from "@/lib/lugares/candidatos"
 import type { CentroSugerido } from "@/lib/lugares/sugerencias"
 import type { MedicoParaAutocompletar } from "@/lib/turnos/autocompletar-medico"
 import type { CategoriaDocumento } from "@/types/dominio"
+import { cn } from "@/lib/utils"
 
 export interface FormularioRevisionProps {
   documentoId: string
@@ -161,6 +196,13 @@ export interface FormularioRevisionProps {
   medicos: MedicoParaAutocompletar[]
   /** `true` si el catálogo REFES tiene centros cargados (cruces inteligentes, agosto 2026). Con `false`, la franja de institución nunca tiene nada que ofrecer. */
   catalogoDisponible?: boolean
+  /**
+   * Títulos de los documentos que el perfil YA tiene (Sprint 19), para avisar
+   * cuando el título propuesto se repite. Se resuelven en el Server Component
+   * de `/estudios/nuevo/procesando` y llegan ya filtrados por RLS: son los
+   * mismos que la persona ve en `/estudios`, ningún dato nuevo.
+   */
+  titulosExistentes?: readonly string[]
 }
 
 const ESTADO_INICIAL: EstadoConfirmacion = { error: null }
@@ -169,6 +211,12 @@ const FECHA_MINIMA_ISO = "1901-01-01"
 
 const AYUDA_DETECTADO = "Detectado automáticamente — revisalo."
 const AYUDA_NO_DETECTADO = "No se detectó — completalo vos."
+const AYUDA_TITULO_SUGERIDO = "Sugerido a partir de lo que detectamos. Podés cambiarlo."
+const AYUDA_TITULO_A_COMPLETAR = "Poné un nombre para reconocerlo."
+const AYUDA_FECHA_FALTANTE = "No la encontramos — completala vos."
+
+/** id del aviso de título repetido, para asociarlo al campo con `aria-describedby`. */
+const ID_AVISO_TITULO_REPETIDO = "aviso-titulo-repetido"
 
 const CATEGORIAS: { valor: CategoriaDocumento; etiqueta: string }[] = [
   { valor: "laboratory", etiqueta: "Laboratorio" },
@@ -208,6 +256,7 @@ export function FormularioRevision({
   fechaMaximaIso,
   medicos,
   catalogoDisponible = false,
+  titulosExistentes = [],
 }: FormularioRevisionProps) {
   const [estadoConfirmar, enviarConfirmar, pendienteConfirmar] = useActionState(
     confirmarDocumento,
@@ -224,10 +273,24 @@ export function FormularioRevision({
 
   const sugerido = extraccion ? sugerirTitulo(extraccion) : null
   const tituloInicial = sugerido?.titulo || tituloProvisional
+  // `detectado` es `true` SOLO cuando el modelo nombró el estudio: el título
+  // genérico compuesto ya NO cuenta como detectado (ver el encabezado).
   const tituloDetectado = sugerido?.detectado ?? false
 
-  const fechaDetectada = Boolean(extraccion && PATRON_FECHA.test(extraccion.fecha))
-  const fechaInicial = fechaDetectada && extraccion ? extraccion.fecha : fechaProvisional
+  // Fecha: `null` = el documento no imprime la suya. El campo queda VACÍO a
+  // propósito -no se cae a "hoy"-, y como es `required` el formulario no se
+  // envía hasta que una persona la complete. Con la extracción fallida entera
+  // se conserva `fechaProvisional`: ahí no hay ninguna lectura que contradecir.
+  const fechaExtraida = extraccion?.fecha ?? null
+  const fechaDetectada = Boolean(fechaExtraida && PATRON_FECHA.test(fechaExtraida))
+  const faltaFecha = Boolean(extraccion) && !fechaDetectada
+  const fechaInicial = extraccion ? (fechaDetectada ? (fechaExtraida ?? "") : "") : fechaProvisional
+
+  // Un solo campo se lleva el foco, y gana el que BLOQUEA: sin fecha no se
+  // puede confirmar; sin un buen título sí -el genérico compuesto queda
+  // cargado-, así que el título solo pide foco cuando la fecha no lo necesita.
+  const enfocarFecha = faltaFecha
+  const enfocarTitulo = Boolean(extraccion) && !tituloDetectado && !enfocarFecha
 
   const categoriaInicial = extraccion?.categoria ?? categoriaProvisional
   // La categoría es un campo required del schema de Gemini: si `extraccion`
@@ -257,6 +320,12 @@ export function FormularioRevision({
   // este"/"Vincular". Arrancan con lo que detectó la IA, igual que antes.
   const [institucion, setInstitucion] = React.useState(institucionInicial)
   const [medico, setMedico] = React.useState(medicoInicial)
+
+  // El título pasa a controlado por el mismo motivo que institución y médico,
+  // pero por otra razón: el aviso de "ya tenés un estudio con este nombre"
+  // tiene que seguir a lo que la persona escribe, no al valor inicial.
+  const [titulo, setTitulo] = React.useState(tituloInicial)
+  const tituloRepetido = tituloYaUsado(titulo, titulosExistentes)
 
   // Referencia fija de lo que la IA detectó (esta pantalla no tiene un
   // "Analizar de nuevo": ver el comentario de cabecera). Cada franja se
@@ -327,11 +396,27 @@ export function FormularioRevision({
         <CampoTexto
           id="titulo"
           label="Título"
-          defaultValue={tituloInicial}
+          value={titulo}
+          onChange={(evento) => setTitulo(evento.target.value)}
           required
           maxLength={200}
-          ayuda={tituloDetectado ? "Sugerido a partir de lo que detectamos. Podés cambiarlo." : AYUDA_NO_DETECTADO}
+          autoFocus={enfocarTitulo}
+          describedBy={tituloRepetido ? ID_AVISO_TITULO_REPETIDO : undefined}
+          ayuda={tituloDetectado ? AYUDA_TITULO_SUGERIDO : AYUDA_TITULO_A_COMPLETAR}
         />
+
+        {/* Se avisa, nunca se bloquea: dos controles del mismo tipo pueden
+            llamarse igual con todo derecho, y quien decide es la persona.
+            `estatica` porque el aviso puede estar en pantalla desde el
+            arranque -un `role="alert"` en cada carga interrumpe al lector de
+            pantalla sin motivo, ver `components/base/alerta.tsx`-; la
+            asociación con el campo la da `describedBy` de arriba. */}
+        {tituloRepetido && (
+          <Alerta id={ID_AVISO_TITULO_REPETIDO} variante="advertencia" estatica>
+            Ya tenés un estudio guardado con este mismo nombre. Podés cambiarlo para
+            distinguirlos, o dejarlo así.
+          </Alerta>
+        )}
 
         {/* Chica (Sprint 13, tarea 13.3): fecha+categoría se agrupan en una
             grilla de 2 columnas -el mismo gap-5 que ya separaba estos campos
@@ -350,7 +435,14 @@ export function FormularioRevision({
             required
             max={fechaMaximaIso}
             min={FECHA_MINIMA_ISO}
-            ayuda={fechaDetectada ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
+            autoFocus={enfocarFecha}
+            ayuda={
+              fechaDetectada
+                ? AYUDA_DETECTADO
+                : faltaFecha
+                  ? AYUDA_FECHA_FALTANTE
+                  : AYUDA_NO_DETECTADO
+            }
           />
 
           <div className="flex flex-col gap-2">
@@ -449,18 +541,31 @@ export function FormularioRevision({
               </p>
             </div>
             <ul className="flex flex-col gap-2">
-              {metricas.map((metrica, indice) => (
-                <li
-                  key={`${metrica.nombre}-${indice}`}
-                  className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-2 last:border-0 last:pb-0"
-                >
-                  <span className="text-base font-medium text-foreground">{metrica.nombre}</span>
-                  <span className="text-base text-muted-foreground numeros-clinicos">
-                    {metrica.valor} {metrica.unidad}
-                    {metrica.rango && ` (ref: ${metrica.rango})`}
-                  </span>
-                </li>
-              ))}
+              {metricas.map((metrica, indice) => {
+                // Sprint 19: un resultado sin número ("No Reactivo", "No se
+                // observan espermatozoides") se muestra por su texto. Antes
+                // esta fila quedaba vacía y la persona no tenía cómo saber
+                // que el resultado estaba ahí. `numeros-clinicos` (cifras
+                // tabulares) solo aplica al caso numérico.
+                const esNumerico = typeof metrica.valor === "number"
+                return (
+                  <li
+                    key={`${metrica.nombre}-${indice}`}
+                    className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-2 last:border-0 last:pb-0"
+                  >
+                    <span className="text-base font-medium text-foreground">{metrica.nombre}</span>
+                    <span
+                      className={cn(
+                        "text-base text-muted-foreground",
+                        esNumerico && "numeros-clinicos",
+                      )}
+                    >
+                      {esNumerico ? `${metrica.valor} ${metrica.unidad}`.trim() : metrica.valorTexto}
+                      {metrica.rango && ` (ref: ${metrica.rango})`}
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
             <p className="text-sm text-muted-foreground">
               Se van a guardar como serie de laboratorio al confirmar.

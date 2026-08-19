@@ -152,6 +152,137 @@ describe('lib/laboratorio/diccionario.ts', () => {
     })
   })
 
+  /* ------------------------------------------------------------------ *
+   *  SPRINT 19 — hemograma completo (70% de las fallas medidas sobre el
+   *  corpus real: 30 de 43) + casi-aciertos + tolerancia a UNA errata.
+   * ------------------------------------------------------------------ */
+
+  describe('Sprint 19 — hemograma completo y fórmula leucocitaria', () => {
+    it('reconoce Hematíes por sus variantes argentinas (Hematíes/Eritrocitos/Glóbulos rojos)', () => {
+      expect(normalizarMetrica('Hematíes').canonico).toBe('Hematíes')
+      expect(normalizarMetrica('Eritrocitos').canonico).toBe('Hematíes')
+      expect(normalizarMetrica('Glóbulos rojos').canonico).toBe('Hematíes')
+      expect(normalizarMetrica('Recuento de eritrocitos').canonico).toBe('Hematíes')
+      expect(normalizarMetrica('GR').canonico).toBe('Hematíes')
+      expect(normalizarMetrica('RBC').canonico).toBe('Hematíes')
+    })
+
+    it('reconoce los cuatro índices hematimétricos (VCM, HCM, CHCM, RDW) y sus siglas en inglés', () => {
+      expect(normalizarMetrica('VCM').canonico).toBe('VCM')
+      expect(normalizarMetrica('Volumen Corpuscular Medio').canonico).toBe('VCM')
+      expect(normalizarMetrica('MCV').canonico).toBe('VCM')
+      expect(normalizarMetrica('HCM').canonico).toBe('HCM')
+      expect(normalizarMetrica('Hemoglobina Corpuscular Media').canonico).toBe('HCM')
+      expect(normalizarMetrica('MCH').canonico).toBe('HCM')
+      expect(normalizarMetrica('CHCM').canonico).toBe('CHCM')
+      expect(normalizarMetrica('Concentración de Hemoglobina Corpuscular Media').canonico).toBe('CHCM')
+      expect(normalizarMetrica('MCHC').canonico).toBe('CHCM')
+      expect(normalizarMetrica('RDW').canonico).toBe('RDW')
+      expect(normalizarMetrica('RDW-CV').canonico).toBe('RDW')
+      expect(normalizarMetrica('Ancho de Distribución Eritrocitaria').canonico).toBe('RDW')
+    })
+
+    it('reconoce la fórmula leucocitaria completa (Neutrófilos, Basófilos, Eosinófilos, Linfocitos, Monocitos)', () => {
+      expect(normalizarMetrica('Neutrófilos segmentados').canonico).toBe('Neutrófilos segmentados')
+      expect(normalizarMetrica('Neutrófilos').canonico).toBe('Neutrófilos segmentados')
+      expect(normalizarMetrica('Segmentados').canonico).toBe('Neutrófilos segmentados')
+      expect(normalizarMetrica('Basófilos').canonico).toBe('Basófilos')
+      expect(normalizarMetrica('Eosinófilos').canonico).toBe('Eosinófilos')
+      expect(normalizarMetrica('Linfocitos').canonico).toBe('Linfocitos')
+      expect(normalizarMetrica('Monocitos').canonico).toBe('Monocitos')
+    })
+
+    it('reconoce Leucocitos y Plaquetas por las variantes argentinas pedidas ("Recuento de blancos", "Recuento plaquetario")', () => {
+      expect(normalizarMetrica('Recuento de blancos').canonico).toBe('Leucocitos')
+      expect(normalizarMetrica('Leucocitos').canonico).toBe('Leucocitos')
+      expect(normalizarMetrica('Recuento plaquetario').canonico).toBe('Plaquetas')
+      expect(normalizarMetrica('Plaquetas').canonico).toBe('Plaquetas')
+    })
+
+    it('el hemograma completo, junta: las diez métricas de un panel real canonizan todas', () => {
+      const panel = [
+        'Hematíes',
+        'Hemoglobina',
+        'Hematocrito',
+        'VCM',
+        'HCM',
+        'CHCM',
+        'RDW',
+        'Leucocitos',
+        'Neutrófilos segmentados',
+        'Basófilos',
+        'Eosinófilos',
+        'Linfocitos',
+        'Monocitos',
+        'Plaquetas',
+      ]
+      for (const nombre of panel) {
+        expect(normalizarMetrica(nombre).canonico, `"${nombre}" debería canonizar`).not.toBeNull()
+      }
+    })
+
+    it('CASI-ACIERTOS medidos: una línea de sinónimo arregla cada uno', () => {
+      expect(normalizarMetrica('Gamma Glutamil Transpeptidasa').canonico).toBe('GGT')
+      expect(normalizarMetrica('Bilirrubina Conjugada').canonico).toBe('Bilirrubina directa')
+      expect(normalizarMetrica('Bilirrubina No Conjugada').canonico).toBe('Bilirrubina indirecta')
+      expect(normalizarMetrica('Vitamina D 25 hidroxi (Vit D3)').canonico).toBe('Vitamina D')
+      expect(normalizarMetrica('T4 libre').canonico).toBe('T4 libre')
+      expect(normalizarMetrica('T3 total').canonico).toBe('T3 total')
+      expect(normalizarMetrica('Insulina').canonico).toBe('Insulina')
+    })
+
+    it('ERRATA REAL DEL DUEÑO — "Proteía C Reactiva Cuantitativa" (falta la "n" de Proteína, así impreso en el PDF) canoniza por tolerancia a UNA errata', () => {
+      expect(normalizarMetrica('Proteía C Reactiva Cuantitativa').canonico).toBe('Proteína C reactiva')
+      // La forma bien escrita, control: tiene que funcionar igual (matchea directo, sin pasar por la tolerancia).
+      expect(normalizarMetrica('Proteína C Reactiva Cuantitativa').canonico).toBe('Proteína C reactiva')
+    })
+
+    describe('tolerancia a errata — guardas de seguridad', () => {
+      it('nombres CORTOS no entran a la tolerancia: no confunde T3 con T4', () => {
+        // "T3" y "T4" están a distancia de edición 1 entre sí (una sola
+        // letra), pero los dos son demasiado cortos para pasar la guarda de
+        // largo mínimo (`LARGO_MINIMO_TOLERANCIA_ERRATA`): cada uno resuelve
+        // SOLO por matcheo exacto, nunca por parecido con el otro. "T4" a
+        // secas no tiene sinónimo propio -deliberado: sin calificar,
+        // "T4" casi siempre se lee como Total, no Libre, y no se agregó esa
+        // suposición- así que da `null`, y el punto es justo ese: NUNCA cae
+        // en "T3 total" por parecido de una letra.
+        expect(normalizarMetrica('T3').canonico).toBe('T3 total')
+        expect(normalizarMetrica('T4').canonico).toBeNull()
+        expect(normalizarMetrica('T4').canonico).not.toBe('T3 total')
+        expect(normalizarMetrica('T4 libre').canonico).toBe('T4 libre')
+        expect(normalizarMetrica('T4 libre').canonico).not.toBe('T3 total')
+      })
+
+      it('nombres CORTOS no entran a la tolerancia: no confunde LDL con HDL', () => {
+        expect(normalizarMetrica('LDL').canonico).toBe('Colesterol LDL')
+        expect(normalizarMetrica('HDL').canonico).toBe('Colesterol HDL')
+        expect(normalizarMetrica('LDL').canonico).not.toBe(normalizarMetrica('HDL').canonico)
+      })
+
+      it('nombres CORTOS no entran a la tolerancia: no confunde TGO con TGP', () => {
+        expect(normalizarMetrica('TGO').canonico).toBe('TGO/AST')
+        expect(normalizarMetrica('TGP').canonico).toBe('TGP/ALT')
+        expect(normalizarMetrica('TGO').canonico).not.toBe(normalizarMetrica('TGP').canonico)
+      })
+
+      it('una métrica realmente desconocida (sin sinónimo cercano) sigue devolviendo null, no adivina', () => {
+        expect(normalizarMetrica('Ácido úrico').canonico).toBeNull()
+        expect(normalizarMetrica('Ferritina').canonico).toBeNull()
+        expect(normalizarMetrica('Magnesio serico total en sangre venosa').canonico).toBeNull()
+      })
+
+      it('dos erratas de una sola letra sobre nombres largos NO confunde pares peligrosos de nombre largo', () => {
+        // "Colesterol ldl" y "Colesterol hdl" están a distancia de edición 1
+        // ENTRE SÍ, pero cada uno ya matchea EXACTO por su propia entrada del
+        // diccionario -la tolerancia a errata es el tercer intento, nunca se
+        // llega a necesitar acá-.
+        expect(normalizarMetrica('Colesterol ldl').canonico).toBe('Colesterol LDL')
+        expect(normalizarMetrica('Colesterol hdl').canonico).toBe('Colesterol HDL')
+      })
+    })
+  })
+
   describe('limpiarSufijoMetodo', () => {
     it('es idempotente: aplicarla dos veces da el mismo resultado que una', () => {
       const nombre = 'TSH - Meia Ultrasensible - Método CMIA'

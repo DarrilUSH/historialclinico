@@ -106,7 +106,7 @@ export async function buscarDuplicadoSemanticoEnPerfil(
 
   const { data: metricas, error: errorMetricas } = await admin
     .from("lab_metrics")
-    .select("document_id, metric_name, metric_canonical, value, unit")
+    .select("document_id, metric_name, metric_canonical, value, value_text, unit")
     .in("document_id", ids)
 
   if (errorMetricas) {
@@ -117,13 +117,18 @@ export async function buscarDuplicadoSemanticoEnPerfil(
     return "mismo_numero_orden"
   }
 
-  const metricasPorDocumento = new Map<string, { nombre: string; valor: number; unidad: string }[]>()
+  const metricasPorDocumento = new Map<string, { nombre: string; valor: number | null; valorTexto?: string; unidad: string }[]>()
   for (const fila of metricas ?? []) {
     if (!fila.document_id) continue
     const lista = metricasPorDocumento.get(fila.document_id) ?? []
+    // `value` es nullable desde el Sprint 18 (resultados CUALITATIVOS, ver
+    // `MetricaComparable` en `lib/documentos/duplicados-semanticos.ts`):
+    // `Number(null)` daría `0` y confundiría un "No Reactivo" con un cero
+    // real, así que se propaga el `null` y se suma `value_text`.
     lista.push({
       nombre: fila.metric_canonical ?? fila.metric_name,
-      valor: Number(fila.value),
+      valor: fila.value === null ? null : Number(fila.value),
+      valorTexto: fila.value_text ?? undefined,
       unidad: fila.unit ?? "",
     })
     metricasPorDocumento.set(fila.document_id, lista)

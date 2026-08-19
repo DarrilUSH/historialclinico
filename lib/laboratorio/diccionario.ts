@@ -79,8 +79,68 @@ const SINONIMOS_POR_CANONICO: Record<string, string[]> = {
   Triglicéridos: ['trigliceridos', 'tg'],
   Hemoglobina: ['hemoglobina', 'hb', 'hgb'],
   Hematocrito: ['hematocrito', 'hto', 'hct'],
-  Leucocitos: ['leucocitos', 'globulos blancos', 'gb', 'wbc'],
+  Leucocitos: [
+    'leucocitos',
+    'globulos blancos',
+    'gb',
+    'wbc',
+    'recuento de blancos',
+    'recuento de globulos blancos',
+    'recuento de leucocitos',
+  ],
   Plaquetas: ['plaquetas', 'plt', 'recuento de plaquetas', 'recuento plaquetario'],
+
+  // ── Hemograma completo (Sprint 19): el 70% de las fallas medidas sobre el
+  // corpus real era ESTA familia entera -presente en todos los hemogramas,
+  // o sea en casi todos los laboratorios de cualquier persona-. Sin nombre
+  // canónico acá, Tendencias no puede armar la serie temporal de ninguna de
+  // estas diez métricas. Sinónimos con las variantes que de verdad imprimen
+  // los laboratorios argentinos (ver el pedido del sprint), más las siglas
+  // en inglés (MCV/MCH/MCHC) que también aparecen en equipos importados.
+  Hematíes: [
+    'hematies',
+    'eritrocitos',
+    'globulos rojos',
+    'recuento de hematies',
+    'recuento de eritrocitos',
+    'recuento de globulos rojos',
+    'gr',
+    'rbc',
+  ],
+  VCM: ['vcm', 'volumen corpuscular medio', 'mcv'],
+  HCM: ['hcm', 'hemoglobina corpuscular media', 'mch'],
+  CHCM: [
+    'chcm',
+    'concentracion de hemoglobina corpuscular media',
+    'concentracion corpuscular media de hemoglobina',
+    'mchc',
+  ],
+  RDW: [
+    'rdw',
+    'rdw-cv',
+    'rdw cv',
+    'ancho de distribucion eritrocitaria',
+    'coeficiente de anisocitosis',
+  ],
+
+  // ── Fórmula leucocitaria (Sprint 19): mismo motivo que el hemograma de
+  // arriba -son las cinco líneas que acompañan a todo recuento de blancos-.
+  // "Neutrófilos segmentados" NO incluye a los "en cayado"/"en banda"
+  // (abastonados): son una métrica DISTINTA del diferencial y fusionarlas
+  // perdería la distinción clínica real entre las dos líneas.
+  'Neutrófilos segmentados': [
+    'neutrofilos segmentados',
+    'neutrofilos',
+    'segmentados',
+    'neu',
+    'neu%',
+    'nse',
+  ],
+  Basófilos: ['basofilos', 'bas', 'baso'],
+  Eosinófilos: ['eosinofilos', 'eos', 'eosino'],
+  Linfocitos: ['linfocitos', 'linf', 'lymph', 'lym'],
+  Monocitos: ['monocitos', 'mono'],
+
   Creatinina: ['creatinina', 'creatinina en sangre', 'creatinina serica', 'creatinina plasmatica'],
   Urea: ['urea', 'uremia', 'urea en sangre'],
   TSH: ['tsh', 'tirotrofina', 'hormona estimulante de la tiroides'],
@@ -114,10 +174,23 @@ const SINONIMOS_POR_CANONICO: Record<string, string[]> = {
     'alanina aminotransferasa',
   ],
   'Fosfatasa alcalina': ['fal', 'falc', 'fosfatasa alcalina'],
-  GGT: ['ggt', 'gamma gt', 'gamma glutamil transferasa', 'gammaglutamiltranspeptidasa'],
+  // Casi-acierto medido (Sprint 19): el diccionario solo tenía la variante
+  // SIN espacios ("gammaglutamiltranspeptidasa"); "Gamma Glutamil
+  // Transpeptidasa" -con espacios, y "transpeptidasa" y no "transferasa"- es
+  // como la imprime el laboratorio real que motivó el sprint.
+  GGT: [
+    'ggt',
+    'gamma gt',
+    'gamma glutamil transferasa',
+    'gamma glutamil transpeptidasa',
+    'gammaglutamiltranspeptidasa',
+  ],
   'Bilirrubina total': ['bilirrubina total', 'bt'],
-  'Bilirrubina directa': ['bilirrubina directa', 'bd'],
-  'Bilirrubina indirecta': ['bilirrubina indirecta', 'bi'],
+  // "Conjugada"/"no conjugada" son sinónimos bioquímicos exactos de
+  // "directa"/"indirecta" (casi-acierto medido, Sprint 19): mismo análisis,
+  // otro nombre.
+  'Bilirrubina directa': ['bilirrubina directa', 'bilirrubina conjugada', 'bd'],
+  'Bilirrubina indirecta': ['bilirrubina indirecta', 'bilirrubina no conjugada', 'bi'],
   Sodio: ['sodio', 'na', 'natremia'],
   Potasio: ['potasio', 'k', 'kalemia'],
   Cloro: ['cloro', 'cl', 'cloremia'],
@@ -135,13 +208,34 @@ const SINONIMOS_POR_CANONICO: Record<string, string[]> = {
     '25-oh vitamina d',
     'vitamina d total',
     '25-hidroxivitamina d',
+    // Casi-acierto medido (Sprint 19): "Vitamina D 25 hidroxi (Vit D3)" tal
+    // como lo imprime el laboratorio real -el "(Vit D3)" final ya lo saca
+    // `limpiarSufijoMetodo` (paso 4, paréntesis al final), esto es lo que
+    // queda después de esa limpieza.
+    'vitamina d 25 hidroxi',
   ],
   'Vitamina B12': ['vitamina b12', 'vitamina b 12', 'b12'],
   Ferremia: ['ferremia', 'hierro serico', 'fe serico', 'hierro plasmatico'],
   Procalcitonina: ['procalcitonina', 'pct'],
   LDH: ['ldh', 'lactato deshidrogenasa', 'lacticodeshidrogenasa'],
   Amilasa: ['amilasa', 'amilasemia'],
-  'Proteína C reactiva': ['pcr', 'proteina c reactiva', 'p.c.r.'],
+  'Proteína C reactiva': [
+    'pcr',
+    'proteina c reactiva',
+    'p.c.r.',
+    // Casi-acierto medido (Sprint 19): el laboratorio real pide la variante
+    // CUANTITATIVA, no la cualitativa -son dos técnicas distintas del mismo
+    // análisis-. La errata real del documento ("Proteía", sin la "n") la
+    // resuelve `buscarPorToleranciaErrata` a partir de ESTA entrada bien
+    // escrita, no una entrada separada para el typo.
+    'proteina c reactiva cuantitativa',
+  ],
+
+  // ── Nuevos (Sprint 19): pedidos explícitos, casi-aciertos medidos que
+  // resultaron ser diccionario incompleto y no solo un sufijo mal recortado.
+  'T4 libre': ['t4 libre', 'tiroxina libre', 'ft4', 't4l'],
+  'T3 total': ['t3 total', 't3', 'triiodotironina total', 'triyodotironina total'],
+  Insulina: ['insulina', 'insulinemia', 'insulina basal', 'insulina en ayunas'],
 }
 
 /**
@@ -252,14 +346,94 @@ export function limpiarSufijoMetodo(nombre: string): string {
 }
 
 /**
+ * Largo mínimo (ya normalizado: sin tildes, en minúsculas, con espacios
+ * colapsados) para que `buscarPorToleranciaErrata` se anime a tolerar UNA
+ * letra de diferencia. Por debajo de este largo, NO se intenta -es la guarda
+ * de seguridad contra el peligro real: "T3"/"T4" (2 caracteres), "LDL"/"HDL"
+ * y "TGO"/"TGP" (3 caracteres) son pares de siglas a distancia de edición 1
+ * ENTRE SÍ que nombran análisis clínicamente distintos, y confundirlas sería
+ * mucho peor que dejar una métrica sin canonizar. 12 caracteres deja afuera a
+ * cualquier sigla corta pero adentro a los nombres largos donde una errata de
+ * imprenta/OCR es plausible ("Proteía C Reactiva Cuantitativa", el caso real
+ * medido que motivó este mecanismo -sin la "n" de "Proteína"-, normaliza a 31
+ * caracteres).
+ */
+const LARGO_MINIMO_TOLERANCIA_ERRATA = 12
+
+/**
+ * Distancia de Levenshtein clásica (inserción/eliminación/sustitución, costo
+ * 1 cada una). El diccionario tiene un puñado de decenas de entradas, así que
+ * no hace falta ninguna optimización más allá del corte por largo de
+ * `buscarPorToleranciaErrata`.
+ */
+function distanciaEdicion(a: string, b: string): number {
+  const filas = a.length + 1
+  const columnas = b.length + 1
+  const fila = new Array<number>(columnas)
+  let filaAnterior = Array.from({ length: columnas }, (_, j) => j)
+
+  for (let i = 1; i < filas; i++) {
+    fila[0] = i
+    for (let j = 1; j < columnas; j++) {
+      const costo = a[i - 1] === b[j - 1] ? 0 : 1
+      fila[j] = Math.min(
+        filaAnterior[j] + 1, // eliminación
+        fila[j - 1] + 1, // inserción
+        filaAnterior[j - 1] + costo, // sustitución
+      )
+    }
+    filaAnterior = [...fila]
+  }
+
+  return filaAnterior[columnas - 1]
+}
+
+/**
+ * Tercer y último intento de `normalizarMetrica`: tolera UNA sola errata de
+ * tipeo/OCR sobre un nombre YA LIMPIO que no matcheó ni directo ni tras
+ * `limpiarSufijoMetodo` -el caso real medido: "Proteía C Reactiva
+ * Cuantitativa", así impreso en el PDF original (falta la "n" de
+ * "Proteína"), que el modelo copió fiel-.
+ *
+ * Dos guardas, ninguna opcional:
+ *
+ *   1. **Largo mínimo** (`LARGO_MINIMO_TOLERANCIA_ERRATA`): nombres cortos no
+ *      entran a este camino. Ver su comentario para el porqué (T3/T4,
+ *      LDL/HDL, TGO/TGP).
+ *   2. **Sin ambigüedad**: si el nombre está a distancia 1 de claves de MÁS
+ *      DE UN canónico distinto, no se adivina -se devuelve `null`, mismo
+ *      criterio de "una métrica desconocida no es un error" que el resto del
+ *      módulo-. Dos claves del MISMO canónico a distancia 1 (ej. el nombre
+ *      completo y su propia sigla) no cuentan como ambigüedad real.
+ */
+function buscarPorToleranciaErrata(nombreNormalizado: string): string | null {
+  if (nombreNormalizado.length < LARGO_MINIMO_TOLERANCIA_ERRATA) return null
+
+  const canonicosADistancia1 = new Set<string>()
+  for (const [clave, canonico] of DICCIONARIO) {
+    // Corte rápido: a distancia de edición 1, el largo de las dos cadenas
+    // difiere como mucho en 1 (una inserción o una eliminación).
+    if (Math.abs(clave.length - nombreNormalizado.length) > 1) continue
+    if (distanciaEdicion(nombreNormalizado, clave) === 1) {
+      canonicosADistancia1.add(canonico)
+    }
+  }
+
+  return canonicosADistancia1.size === 1 ? [...canonicosADistancia1][0] : null
+}
+
+/**
  * Busca el nombre canónico de una métrica de laboratorio por sus sinónimos
  * conocidos. Una métrica desconocida no es un error: se devuelve
  * `canonico: null` y quien llama conserva el nombre original tal cual vino
  * del estudio (ver el encabezado del archivo).
  *
  * Prueba primero el nombre TAL CUAL vino (para no regresionar ningún caso
- * que ya funcionaba) y, si no matchea, reintenta con `limpiarSufijoMetodo`
- * -el método pegado es la causa #1 de cobertura baja (ver su comentario)-.
+ * que ya funcionaba), después reintenta con `limpiarSufijoMetodo` -el método
+ * pegado es la causa #1 de cobertura baja (ver su comentario)- y, recién si
+ * las dos fallan, tolera UNA errata de tipeo/OCR sobre el nombre limpio
+ * (`buscarPorToleranciaErrata`, Sprint 19 -ver sus guardas de largo mínimo y
+ * ambigüedad antes de asumir que esto "adivina" cualquier cosa-).
  */
 export function normalizarMetrica(nombre: string): ResultadoNormalizacionMetrica {
   const claveDirecta = normalizarTexto(nombre)
@@ -267,6 +441,8 @@ export function normalizarMetrica(nombre: string): ResultadoNormalizacionMetrica
   if (directo) return { canonico: directo }
 
   const claveLimpia = normalizarTexto(limpiarSufijoMetodo(nombre))
-  const canonico = DICCIONARIO.get(claveLimpia) ?? null
-  return { canonico }
+  const limpio = DICCIONARIO.get(claveLimpia)
+  if (limpio) return { canonico: limpio }
+
+  return { canonico: buscarPorToleranciaErrata(claveLimpia) }
 }

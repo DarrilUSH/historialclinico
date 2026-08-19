@@ -43,20 +43,30 @@
  * cuesta nada -la Capa 1 (huella byte a byte) y la Capa 3 (todos los datos
  * iguales) siguen mirando-; que se pronuncie MAL cuesta un estudio escondido.
  *
- * ## Qué se pierde con esto, dicho de frente
+ * ## El rótulo del propio lector (Sprint 19) — la deuda del Sprint 18, saldada
  *
- * El caso que estrenó la Capa 2 -Sanatorio San Jorge, `1446188` impreso como
- * "N° ORDEN"- deja de acreditarse cuando el lector devuelve el número pelado y
- * el rótulo no quedó en `texto_completo`: siete dígitos corridos son
- * exactamente la forma de un DNI argentino, y este módulo no tiene manera
- * HONESTA de distinguirlos. Ese par igual se detecta, por la Capa 3: son dos
- * PDF con el mismo contenido, misma fecha, misma institución y las mismas
- * métricas. El aviso cambia de frase, no de existencia.
+ * El Sprint 18 dejó anotado de frente lo que su endurecimiento costaba: el
+ * caso que estrenó la Capa 2 -Sanatorio San Jorge, `1446188` impreso como
+ * "N° ORDEN"- dejaba de acreditarse cuando el lector devolvía el número pelado
+ * y el rótulo no quedaba en `texto_completo`, porque siete dígitos corridos
+ * son exactamente la forma de un DNI argentino. La medición del pipeline
+ * confirmó el daño: **los 5 números de orden REALES del laboratorio del dueño**
+ * (`1675729`, `1446188`, `1683737`, `1720279`, `1720280`) se descartaban los
+ * cinco, y la Capa 2 quedaba inerte para todo su historial.
  *
- * La forma de recuperar la Capa 2 para esos casos es que el lector devuelva el
- * rótulo junto al número (o un campo aparte con el rótulo), y eso vive en
- * `lib/gemini/prompt-documento.ts` — fuera del alcance de este módulo. Queda
- * anotado como deuda.
+ * La deuda decía cómo se arreglaba: "que el lector devuelva el rótulo junto al
+ * número (o un campo aparte con el rótulo)". Eso es lo que hace
+ * `numero_orden_rotulo` (`lib/gemini/schemas.ts`, regla 10 de
+ * `lib/gemini/prompt-documento.ts`) y lo que este módulo recibe ahora en
+ * `ContextoNumeroOrden.rotulo`: el número se acredita -o se descarta- por el
+ * rótulo que el DOCUMENTO imprime, no por la forma que tiene el número.
+ *
+ * Lo que NO cambió: la desconfianza. Un número sin rótulo sigue sin pasar si
+ * es una tira de dígitos corridos; las formas prohibidas (accesión DICOM,
+ * fecha, CUIT, contador con ceros a la izquierda) se rechazan aunque vengan
+ * rotuladas como orden; y un rótulo AJENO ("N° de Internación", "Historia
+ * Clínica", "Accesión") descarta el número aunque su forma parezca válida. El
+ * rótulo es una puerta más, no una puerta abierta.
  *
  * ## Por qué las reglas son GENERALES y no del formato de una clínica
  *
@@ -302,6 +312,18 @@ export interface ContextoNumeroOrden {
    * entonces solo decide la forma del valor.
    */
   textoDelDocumento?: string
+  /**
+   * El RÓTULO que el lector copió al lado del número
+   * (`DocumentoMedicoExtraido.numero_orden_rotulo`, Sprint 19): "N° de Orden",
+   * "Protocolo", "N° de Internación". Se trata exactamente igual que el rótulo
+   * pegado al propio valor -acredita si es de orden, DESCARTA si es ajeno-,
+   * porque es el mismo dato leído del mismo lugar del documento; la única
+   * diferencia es que viene en un campo aparte en vez de pegado al número.
+   *
+   * Vacío o ausente = el número venía pelado, sin ningún rótulo impreso al
+   * lado, y entonces todo sigue como antes: decide la forma del valor.
+   */
+  rotulo?: string
 }
 
 /**
@@ -333,14 +355,22 @@ export function sanearNumeroOrden(
   if (CUIT.test(valor)) return null
   if (RELLENADO_CON_CEROS.test(valor)) return null
 
-  const palabrasRotulo = palabrasNormalizadas(rotulo)
+  // Los dos rótulos posibles pesan lo mismo: el que venía pegado al valor
+  // ("N° de Orden: 1446188") y el que el lector copió en su campo aparte
+  // (`numero_orden_rotulo`, Sprint 19). Son el mismo dato del mismo membrete.
+  const palabrasRotulo = [
+    ...palabrasNormalizadas(rotulo),
+    ...palabrasNormalizadas(contexto.rotulo ?? ""),
+  ]
+
   // ── Rótulo AJENO pegado al número: es de otra cosa. Corta acá.
   if (contieneRotulo(palabrasRotulo, RAICES_ROTULO_AJENO)) return null
 
   const texto = (contexto.textoDelDocumento ?? "").trim()
   if (texto.length > 0 && textoRotulaEl(texto, valor, RAICES_ROTULO_AJENO)) return null
 
-  // ── Acreditación por rótulo, en el valor o en el texto del documento.
+  // ── Acreditación por rótulo: en el valor, en el campo aparte del lector, o
+  // en el texto del documento. Cualquiera de los tres alcanza.
   const acreditadoPorRotulo =
     contieneRotulo(palabrasRotulo, RAICES_ROTULO_DE_ORDEN) ||
     (texto.length > 0 && textoRotulaEl(texto, valor, RAICES_ROTULO_DE_ORDEN))

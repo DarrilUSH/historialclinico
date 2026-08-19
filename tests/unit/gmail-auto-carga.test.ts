@@ -180,6 +180,10 @@ function bases() {
 /** La extracción que devuelve Gemini para el caso perfecto. */
 const EXTRACCION_PERFECTA: DocumentoMedicoConPacienteExtraido = {
   paciente: "GOMEZ, ROBERTO",
+  // Sprint 19: el lector nombra el estudio. `sugerirTitulo(...).detectado` -lo
+  // que mira la compuerta- es `true` solo cuando este campo viene con algo que
+  // no sea la etiqueta genérica de la categoría.
+  titulo: "Análisis de sangre — glucemia y perfil lipídico",
   fecha: "2026-08-15",
   especialidad: "Bioquímica",
   institucion: "Laboratorio Central",
@@ -340,14 +344,15 @@ describe("el correo que se lee sin ninguna duda", () => {
     })
 
     // Lo que se le pidió cargar a la base es lo que la extracción dijo, con el
-    // título compuesto por `sugerirTitulo` — y SIN el nombre del paciente, que
-    // no tiene dónde viajar.
+    // título que NOMBRÓ el lector (Sprint 19; antes era el genérico compuesto
+    // "Análisis de laboratorio — Laboratorio Central") — y SIN el nombre del
+    // paciente, que no tiene dónde viajar.
     expect(espia.documentosCargados).toHaveLength(1)
     expect(espia.documentosCargados[0]).toMatchObject({
       userId: USUARIO,
       correoId: "fila-m-perfecto",
       perfilId: "perfil-roberto",
-      titulo: "Análisis de laboratorio — Laboratorio Central",
+      titulo: "Análisis de sangre — glucemia y perfil lipídico",
       categoria: "laboratory",
       fecha: "2026-08-15",
     })
@@ -416,21 +421,46 @@ describe("cada tipo de duda deja el correo a revisión, con su motivo", () => {
     expect(espia.motivos[0].frase).toContain("la fecha")
   })
 
+  it("el documento no imprime su propia fecha (Sprint 19: el lector contesta null)", async () => {
+    // La regla no cambia -sin fecha, a revisión humana, JAMÁS auto-carga-; lo
+    // que cambia es que ahora el lector puede DECIR que no la encontró en vez
+    // de inventar una fecha plausible que pasaba la compuerta sin que nadie la
+    // mirara. Las dos formas de "no la sé" tienen que terminar igual.
+    const { espia } = await correrConExtraccion({ ...EXTRACCION_PERFECTA, fecha: null })
+    expect(espia.documentosCargados).toHaveLength(0)
+    expect(espia.motivos[0].frase).toContain("la fecha")
+  })
+
   it("no se pudo clasificar qué tipo de estudio es", async () => {
     const { espia } = await correrConExtraccion({ ...EXTRACCION_PERFECTA, categoria: "other" })
     expect(espia.documentosCargados).toHaveLength(0)
     expect(espia.motivos[0].frase).toContain("qué tipo de estudio es")
   })
 
-  it("no hay institución, ni especialidad, ni médico", async () => {
+  it("el lector no le puso nombre al estudio, y tampoco hay con qué componer uno", async () => {
+    // Sprint 19: la compuerta mira `sugerirTitulo(...).detectado`, que ahora es
+    // `true` solo cuando el lector NOMBRÓ el estudio. Sin nombre y sin
+    // institución/especialidad/médico, el título que se guardaría sería
+    // "Análisis de laboratorio" a secas: no distingue nada, y eso necesita una
+    // persona delante.
     const { espia } = await correrConExtraccion({
       ...EXTRACCION_PERFECTA,
+      titulo: "",
       institucion: "",
       especialidad: "",
       medico: "",
     })
     expect(espia.documentosCargados).toHaveLength(0)
-    expect(espia.motivos[0].frase).toContain("de qué institución")
+    expect(espia.motivos[0].frase).toContain("un nombre que lo distinga")
+  })
+
+  it("el lector no le puso nombre, aunque SÍ haya institución: el genérico no alcanza", async () => {
+    // Es el defecto medido: cinco documentos distintos llamados "Estudio por
+    // imágenes — SANATORIO SAN JORGE S.R.L.". Si en pantalla hace falta una
+    // persona para ponerle nombre, en la casilla de correo también.
+    const { espia } = await correrConExtraccion({ ...EXTRACCION_PERFECTA, titulo: "" })
+    expect(espia.documentosCargados).toHaveLength(0)
+    expect(espia.motivos[0].frase).toContain("un nombre que lo distinga")
   })
 
   it("mismo laboratorio y mismo número de orden que un estudio ya confirmado (Capa 2): NO se carga solo", async () => {

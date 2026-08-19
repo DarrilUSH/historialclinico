@@ -25,6 +25,7 @@ import {
   coincidenTodosLosDatos,
   contarSustanciaCompartida,
   MIN_SUSTANCIA_CAPA_3,
+  MIN_SUSTANCIA_CAPA_3_IMAGING,
   type CandidatoDuplicado,
   type DatosComparablesDocumento,
 } from "@/lib/documentos/duplicados-semanticos"
@@ -50,10 +51,15 @@ function documento(parcial: Partial<DatosComparablesDocumento> = {}): DatosCompa
 }
 
 function candidato(parcial: Partial<CandidatoDuplicado> = {}): CandidatoDuplicado {
+  const base = documento()
   return {
     documentoId: "doc-original",
     titulo: "Análisis de laboratorio — Sanatorio San Jorge",
-    ...documento(),
+    ...base,
+    // Un candidato SIEMPRE tiene fecha real (documento ya confirmado, ver el
+    // comentario de `CandidatoDuplicado`); acá solo se lo confirma al tipo —
+    // `documento()` siempre pone una fecha literal, nunca `null`.
+    fecha: base.fecha as string,
     ...parcial,
   }
 }
@@ -306,7 +312,11 @@ function comparableDelBanco(id: string): DatosComparablesDocumento {
 }
 
 function candidatoDelBanco(id: string): CandidatoDuplicado {
-  return { ...comparableDelBanco(id), documentoId: id, titulo: id }
+  const datos = comparableDelBanco(id)
+  // Los casos del banco sintético siempre traen fecha (ver
+  // `tests/fixtures/documentos-sinteticos/casos.ts`); esto solo lo confirma
+  // al tipo, igual que en `candidato()`.
+  return { ...datos, fecha: datos.fecha as string, documentoId: id, titulo: id }
 }
 
 describe("Capa 3 — los dos falsos positivos reales", () => {
@@ -380,6 +390,7 @@ describe("Capa 3 — lo que la exigencia de sustancia NO rompió", () => {
     const sinOrden = { ...comparableDelBanco("03-hospital-zonal-solicitud"), numeroOrden: "" }
     const original: CandidatoDuplicado = {
       ...sinOrden,
+      fecha: sinOrden.fecha as string,
       documentoId: "ya-cargado",
       titulo: "Análisis — enero",
     }
@@ -396,6 +407,80 @@ describe("Capa 3 — lo que la exigencia de sustancia NO rompió", () => {
       titulo: "Hemograma — septiembre",
     }
     expect(coincidenTodosLosDatos(control, mismoAnalisisEnOtraFecha)).toBe(false)
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ *  SPRINT 19 — umbral adaptado para IMAGEN con médico informante
+ *
+ *  Caso real del dueño: una ecografía vesical regenerada (mismo contenido,
+ *  bytes distintos) no se detectaba porque institución + médico solo suman 2
+ *  y `MIN_SUSTANCIA_CAPA_3` pide 3 — un estudio de imágenes no tiene métricas
+ *  ni casi nunca número de orden, así que institución + médico ES el techo.
+ * ------------------------------------------------------------------ */
+
+describe("Capa 3 — umbral adaptado para IMAGEN con médico informante (Sprint 19)", () => {
+  /** Un estudio de imágenes con médico informante, análogo a la ecografía vesical real. */
+  function estudioDeImagen(parcial: Partial<DatosComparablesDocumento> = {}): DatosComparablesDocumento {
+    return documento({
+      categoria: "imaging",
+      institucion: "Sanatorio San Jorge",
+      medico: "Dr. Ibáñez",
+      numeroOrden: "",
+      metricas: [],
+      ...parcial,
+    })
+  }
+
+  it("CASO REAL — ecografía vesical regenerada: institución + médico (2) ahora alcanza para imaging", () => {
+    const nuevo = estudioDeImagen({ fecha: "2024-10-07" })
+    const existente = estudioDeImagen({ fecha: "2024-10-07" })
+
+    expect(contarSustanciaCompartida(nuevo, existente)).toBe(2)
+    expect(contarSustanciaCompartida(nuevo, existente)).toBeLessThan(MIN_SUSTANCIA_CAPA_3)
+    expect(contarSustanciaCompartida(nuevo, existente)).toBeGreaterThanOrEqual(MIN_SUSTANCIA_CAPA_3_IMAGING)
+    expect(coincidenTodosLosDatos(nuevo, existente)).toBe(true)
+  })
+
+  it("categoría distinta de imaging: NO se relaja el umbral aunque institución+médico coincidan", () => {
+    const nuevo = estudioDeImagen({ categoria: "consultation" })
+    const existente = estudioDeImagen({ categoria: "consultation" })
+    expect(coincidenTodosLosDatos(nuevo, existente)).toBe(false)
+  })
+
+  it("imaging SIN médico informante (los dos falsos positivos del Sprint 18): sigue exigiendo el umbral general", () => {
+    const torax = comparableDelBanco("05-radiografia-accesion-dicom")
+    const tobillo = comparableDelBanco("16-radiografia-dni-mal-leido")
+    expect(torax.medico).toBe("")
+    expect(tobillo.medico).toBe("")
+    expect(coincidenTodosLosDatos(torax, tobillo)).toBe(false)
+  })
+
+  it("imaging con médico informante en SOLO uno de los dos: no se relaja (la fecha/institución/médico ya deben coincidir antes de llegar acá)", () => {
+    const conMedico = estudioDeImagen({ medico: "Dr. Ibáñez" })
+    const sinMedico = estudioDeImagen({ medico: "" })
+    // La igualdad de médico ya corta antes de la sustancia -no llegan a compararse por umbral-.
+    expect(coincidenTodosLosDatos(conMedico, sinMedico)).toBe(false)
+  })
+
+  it("REGLA 2 DEL USUARIO intacta para imaging — fecha distinta sigue siendo JAMÁS duplicado (caso real: radiografía de tórax con fechas 29/10 y 31/10)", () => {
+    const lectura1 = estudioDeImagen({ fecha: "2025-10-29" })
+    const lectura2 = estudioDeImagen({ fecha: "2025-10-31" })
+    expect(coincidenTodosLosDatos(lectura1, lectura2)).toBe(false)
+  })
+
+  it("las CUATRO vistas sintéticas del Sprint 18 siguen sin dispararse entre sí con el umbral adaptado activo", () => {
+    const vistas = [
+      "05-radiografia-accesion-dicom",
+      "06-columna-lumbar-frente",
+      "07-columna-lumbar-perfil",
+      "16-radiografia-dni-mal-leido",
+    ]
+    for (const id of vistas) {
+      const nuevo = comparableDelBanco(id)
+      const otras = vistas.filter((otro) => otro !== id).map(candidatoDelBanco)
+      expect(buscarDuplicadoSemanticoEntreCandidatos(nuevo, otras), `${id} no puede tener duplicado`).toBeNull()
+    }
   })
 })
 
