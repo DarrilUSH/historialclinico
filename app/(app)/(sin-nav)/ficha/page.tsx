@@ -55,11 +55,12 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { ArrowLeftIcon } from "lucide-react"
+import { ArrowLeftIcon, HistoryIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
 import { calcularEdad } from "@/lib/perfiles/edad"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { createClient } from "@/lib/supabase/server"
 
 import { PantallaFicha } from "./pantalla-ficha"
 import "./ficha.print.css"
@@ -80,6 +81,17 @@ export default async function PaginaFicha() {
   }
 
   const { perfil } = activo
+
+  // Cuántas fichas guardadas tiene este perfil. `/ficha/historial` existe
+  // desde el Sprint 10.5 pero NINGUNA pantalla enlazaba a ella: el dueño del
+  // producto creyó que sus fichas se borraban solas, cuando en realidad
+  // estaban guardadas y eran inalcanzables. `head: true` porque acá solo
+  // interesa el número, no las filas.
+  const supabase = await createClient()
+  const { count: fichasGuardadas } = await supabase
+    .from("consultation_sheets")
+    .select("id", { count: "exact", head: true })
+    .eq("profile_id", perfil.id)
 
   return (
     // `not-print:chica:` y no `chica:` (Sprint 13, tarea 13.6): este árbol es
@@ -102,6 +114,27 @@ export default async function PaginaFicha() {
       </div>
 
       <PantallaFicha nombreCompleto={perfil.full_name} edadAnios={calcularEdad(perfil.date_of_birth)} />
+
+      {/* Acceso a las fichas ya generadas. Va DESPUÉS de la pantalla de
+          generación y con `print:hidden` porque no forma parte de la hoja que
+          se imprime. Solo aparece si hay algo que ver: en un perfil nuevo,
+          ofrecer "ver fichas anteriores" cuando no hay ninguna sería ruido. */}
+      {(fichasGuardadas ?? 0) > 0 && (
+        <div className="print:hidden">
+          <Boton
+            render={<Link href="/ficha/historial" />}
+            nativeButton={false}
+            variant="outline"
+            size="lg"
+            className="w-full"
+          >
+            <HistoryIcon aria-hidden="true" />
+            {fichasGuardadas === 1
+              ? "Ver la ficha que ya generaste"
+              : `Ver las ${fichasGuardadas} fichas que ya generaste`}
+          </Boton>
+        </div>
+      )}
     </div>
   )
 }
