@@ -23,6 +23,7 @@ import { Suspense } from "react"
 import { ChartLineIcon, FlaskConicalIcon } from "lucide-react"
 
 import { BotonVolverEstudios } from "@/components/estudios/boton-volver-estudios"
+import { ListaResultadosCualitativos } from "@/components/estudios/lista-resultados-cualitativos"
 import { PanelTendencias } from "@/components/estudios/panel-tendencias"
 import { SelectorPeriodo } from "@/components/estudios/selector-periodo"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -30,7 +31,7 @@ import { requerirSesion } from "@/lib/auth/guardas"
 import { obtenerTamano } from "@/lib/densidad/servidor"
 import type { Tamano } from "@/lib/densidad/tamano"
 import { parsearPeriodo } from "@/lib/laboratorio/periodo"
-import { obtenerSeries } from "@/lib/laboratorio/series"
+import { obtenerResultadosCualitativos, obtenerSeries } from "@/lib/laboratorio/series"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
 export const metadata: Metadata = {
@@ -86,13 +87,29 @@ async function ContenidoTendencias({
   tamano: Tamano
 }) {
   const { supabase } = await requerirSesion({ desde: "/estudios/tendencias" })
-  const { series, metricasDisponibles } = await obtenerSeries(supabase, perfilId, periodo)
+  // Series numéricas y resultados cualitativos son consultas independientes
+  // (Sprint 18): un resultado cualitativo no tiene curva posible, así que
+  // vive en su propia lista aparte (`ListaResultadosCualitativos`) en vez de
+  // forzarlo dentro de `PanelTendencias`, que asume valores numéricos de
+  // punta a punta (gráfico, tarjeta de "último valor", variación).
+  const [{ series, metricasDisponibles }, resultadosCualitativos] = await Promise.all([
+    obtenerSeries(supabase, perfilId, periodo),
+    obtenerResultadosCualitativos(supabase, perfilId, periodo),
+  ])
 
-  if (metricasDisponibles.length === 0) {
+  if (metricasDisponibles.length === 0 && resultadosCualitativos.length === 0) {
     return <EstadoVacioTendencias periodo={periodo} />
   }
 
-  return <PanelTendencias series={series} metricasDisponibles={metricasDisponibles} tamano={tamano} />
+  return (
+    <div className="flex flex-col gap-4 chica:gap-3">
+      {metricasDisponibles.length > 0 && (
+        <PanelTendencias series={series} metricasDisponibles={metricasDisponibles} tamano={tamano} />
+      )}
+
+      <ListaResultadosCualitativos resultados={resultadosCualitativos} />
+    </div>
+  )
 }
 
 function EstadoVacioTendencias({ periodo }: { periodo: ReturnType<typeof parsearPeriodo> }) {
