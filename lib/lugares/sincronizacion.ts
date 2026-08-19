@@ -68,6 +68,13 @@ import {
 } from "@/lib/storage-admin"
 import type { Database } from "@/types/database.types"
 
+if (typeof window !== "undefined") {
+  throw new Error(
+    "lib/lugares/sincronizacion.ts se importó desde el navegador. Este módulo usa la " +
+      "SERVICE_ROLE_KEY: sólo puede ejecutarse en el servidor.",
+  )
+}
+
 /**
  * Bytes que procesa cada tanda.
  *

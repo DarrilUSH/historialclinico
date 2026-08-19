@@ -64,6 +64,13 @@ import webpush, { WebPushError } from "web-push"
 
 import type { Database } from "@/types/database.types"
 
+if (typeof window !== "undefined") {
+  throw new Error(
+    "lib/push/servidor.ts se importó desde el navegador. Este módulo usa la " +
+      "SERVICE_ROLE_KEY: sólo puede ejecutarse en el servidor.",
+  )
+}
+
 /** Contenido de una notificación. Lo lee `public/sw.js` en el handler `push`. */
 export interface PayloadPush {
   /** Título en negrita. Obligatorio: una notificación sin título no se muestra. */

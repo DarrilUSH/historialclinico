@@ -273,15 +273,43 @@ Lo mismo aplica a `otorgar_permiso` y `revocar_permiso`: existen en el enum y to
 
 ### 5.1 `SERVICE_ROLE` fuera del cliente
 
+**Criterio (para no quedar desactualizado):** cualquier archivo de `lib/` o `app/` que referencie `SUPABASE_SERVICE_ROLE_KEY` tiene que ser, o bien (a) un módulo de `lib/` con encabezado que declara el uso de la clave **y** una guarda que lanza si se carga en el navegador (`if (typeof window !== "undefined") throw …`), o bien (b) un Route Handler (`app/**/route.ts`): por convención de Next.js corre exclusivamente en el servidor —nunca se importa desde un Client Component, se invoca solo por HTTP— así que no necesita la guarda aunque sí conviene, y ya se usa, declarar `export const runtime = "nodejs"`. La próxima auditoría regenera este censo con:
+
+```bash
+grep -rln "SUPABASE_SERVICE_ROLE_KEY" lib/ app/
 ```
-$ grep -rn "SERVICE_ROLE" app/ components/
+
+**Censo verificado el 2026-08-19 (tarea de higiene post-11.4): 17 archivos, 15 en `lib/` + 2 en `app/`.**
+
+| Módulo | Guarda de navegador |
+|---|---|
+| `lib/auth/cuentas-admin.ts` | ✅ |
+| `lib/documentos/compartir-temporal-admin.ts` | ✅ |
+| `lib/documentos/extraccion-admin.ts` | ✅ |
+| `lib/documentos/huella-admin.ts` | ✅ |
+| `lib/gmail/auto-ingesta-admin.ts` | ✅ |
+| `lib/gmail/conexiones-admin.ts` | ✅ |
+| `lib/gmail/duplicados-semanticos-admin.ts` | ✅ |
+| `lib/gmail/mensajes-admin.ts` | ✅ |
+| `lib/gmail/pendientes-admin.ts` | ✅ |
+| `lib/lugares/sincronizacion.ts` | ✅ (le faltaba; agregada en esta tarea) |
+| `lib/medicacion/generar-tomas-admin.ts` | ✅ |
+| `lib/push/servidor.ts` | ✅ (le faltaba; agregada en esta tarea) |
+| `lib/signos/notificar.ts` | ✅ |
+| `lib/signos/registrar-alertas.ts` | ✅ |
+| `lib/storage-admin.ts` | ✅ |
+| `app/api/push/procesar-alertas-medicacion/route.ts` | N/D — Route Handler, ver criterio (b) |
+| `app/api/push/procesar-recordatorios/route.ts` | N/D — Route Handler, ver criterio (b) |
+
+```
+$ grep -n "SERVICE_ROLE" app/api/push/procesar-alertas-medicacion/route.ts app/api/push/procesar-recordatorios/route.ts
 app/api/push/procesar-alertas-medicacion/route.ts:118,122
 app/api/push/procesar-recordatorios/route.ts:127,131
 ```
 
-**Cero coincidencias en `components/`.** Las dos de `app/` son Route Handlers de los barridos de `pg_cron` — código de servidor por definición, sin `"use client"`, con `runtime = "nodejs"`.
+**Cero coincidencias en `components/`.** Los dos de `app/` son Route Handlers de los barridos de `pg_cron` — código de servidor por definición, sin `"use client"`, con `runtime = "nodejs"`.
 
-Los otros seis módulos que usan la clave viven en `lib/` (`storage-admin`, `push/servidor`, `signos/notificar`, `signos/registrar-alertas`, `medicacion/generar-tomas-admin`, `documentos/compartir-temporal-admin`) y los seis llevan la misma defensa: encabezado que lo declara, y una guarda que **lanza** si el módulo se carga en el navegador (`if (typeof window !== 'undefined') throw …`). Se recorrieron los **74 archivos con `"use client"`** del proyecto: ninguno importa un módulo server-only, y ninguno referencia una variable de entorno que no empiece con `NEXT_PUBLIC_`.
+Los 15 módulos de `lib/` llevan la misma defensa: encabezado que declara el uso de la clave, y una guarda que **lanza** si el módulo se carga en el navegador. Esta tarea encontró dos que se habían quedado sin ella —`lib/lugares/sincronizacion.ts` y `lib/push/servidor.ts`, ambos posteriores a la auditoría 11.4— y les agregó la guarda con el mismo patrón que las otras 13. Se recorrieron los **74 archivos con `"use client"`** del proyecto: ninguno importa un módulo server-only, y ninguno referencia una variable de entorno que no empiece con `NEXT_PUBLIC_`.
 
 ### 5.2 El bundle del cliente
 
