@@ -11,6 +11,20 @@
  * app, sin blur ni translucidez -esta app no hace glassmorphism en ningún
  * lado (docs/design-system.md §5)-, un único hairline (`border-borde-sutil`)
  * como límite inferior.
+ *
+ * ## El avatar y el nombre son un enlace a "Mis datos"
+ *
+ * Hueco de producto real: nunca existió una pantalla para editar el nombre,
+ * la fecha de nacimiento, el DNI o el teléfono del perfil ACTIVO -solo se
+ * cargaban una vez, al crear el perfil-. El header es el lugar de la app
+ * donde el avatar y el nombre ya son "la tarjeta de este perfil" en cada
+ * pantalla con nav, así que convertirlos en el acceso a `/perfil/datos` no
+ * agrega un elemento nuevo: reutiliza uno que ya estaba ahí, con el mismo
+ * criterio que usan las apps de banco/salud con las que esta compite
+ * (tocar el avatar propio abre "mi perfil"). El botón "Cambiar" de perfil
+ * sigue siendo un control aparte -cambiar DE perfil y editar los datos DE
+ * ESTE perfil son dos acciones distintas- y no compite por espacio: son dos
+ * objetivos táctiles independientes, cada uno con su propio `size-tactil`.
  */
 
 import Link from "next/link"
@@ -40,19 +54,27 @@ export function EncabezadoPerfil({ perfil, esPropio, tamano }: EncabezadoPerfilP
   return (
     <header className="sticky top-0 z-30 border-b border-borde-sutil bg-background">
       <div className="mx-auto flex max-w-2xl items-center gap-2 px-4 py-2.5 chica:gap-1.5 chica:px-3 chica:py-2">
-        <span
-          className={cn(
-            "flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-avatar-foreground",
-            colorAvatarPara(perfil.id),
-          )}
-          aria-hidden="true"
+        <Link
+          href="/perfil/datos"
+          aria-label={
+            esPropio ? "Mis datos: nombre, fecha de nacimiento, DNI y teléfono" : `Datos de ${perfil.full_name}`
+          }
+          className="objetivo-tactil flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 -mx-1 transition-colors duration-150 ease-salida hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
-          {inicialesDe(perfil.full_name)}
-        </span>
+          <span
+            className={cn(
+              "flex size-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-avatar-foreground",
+              colorAvatarPara(perfil.id),
+            )}
+            aria-hidden="true"
+          >
+            {inicialesDe(perfil.full_name)}
+          </span>
 
-        <p className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
-          {esPropio ? "Tu historial" : `Viendo a ${perfil.full_name}`}
-        </p>
+          <p className="min-w-0 flex-1 truncate text-base font-medium text-foreground">
+            {esPropio ? "Tu historial" : `Viendo a ${perfil.full_name}`}
+          </p>
+        </Link>
 
         {/* Conmutador de tamaño, SIEMPRE visible (ROADMAP Sprint 13, "opción
             A"): la persona tiene que poder achicar o agrandar la letra desde

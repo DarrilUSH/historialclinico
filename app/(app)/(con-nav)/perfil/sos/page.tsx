@@ -29,13 +29,26 @@
  * tabla. Se muestra en solo lectura, con el enlace a `/coberturas`, para que
  * quede claro dónde se cambia -si se editara desde dos lugares, uno de los
  * dos quedaría viejo, que en una ficha de emergencia es peor que no tenerlo-.
+ *
+ * ## Por qué hay un aviso a "Mis datos" arriba de este formulario
+ *
+ * Reporte real del dueño del producto: buscó la fecha de nacimiento EN esta
+ * pantalla ("vos me hablás de fecha de nacimiento que NUNCA me la pide") y
+ * no estaba -este formulario nunca pidió nombre, fecha de nacimiento, DNI ni
+ * teléfono: son columnas de `profiles`, pero de las que no son "ficha SOS"
+ * (grupo sanguíneo, alergias, contacto de emergencia, etc.), y hasta ahora
+ * no tenían ninguna pantalla de edición-. La solución de fondo es
+ * `/perfil/datos` (`app/(app)/(con-nav)/perfil/datos/`), pero como acá es
+ * justo donde alguien va a seguir buscándolos, el aviso de arriba redirige
+ * al lugar correcto en vez de dejar que la ausencia se note recién al llegar
+ * al final del formulario sin haber encontrado el campo.
  */
 
 import type { Metadata } from "next"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { ArrowLeftIcon, CreditCardIcon, HeartPulseIcon } from "lucide-react"
+import { ArrowLeftIcon, ArrowRightIcon, CreditCardIcon, HeartPulseIcon, UserRoundIcon } from "lucide-react"
 
 import { Alerta } from "@/components/base/alerta"
 import { Tarjeta } from "@/components/base/tarjeta"
@@ -120,6 +133,24 @@ export default async function PaginaFichaSos({
           Ya está disponible para la pantalla de emergencia.
         </Alerta>
       )}
+
+      {/*
+        Ver "Por qué hay un aviso a Mis datos arriba de este formulario" en
+        el encabezado del archivo. El nombre, la fecha de nacimiento, el DNI
+        y el teléfono NO son parte de este formulario -son columnas de
+        `profiles`, pero no de la ficha SOS- y ahora tienen su propia
+        pantalla de edición.
+      */}
+      <Link
+        href="/perfil/datos"
+        className="objetivo-tactil flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-suave transition-colors duration-150 ease-salida hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50 chica:px-3 chica:py-2"
+      >
+        <UserRoundIcon className="size-5 shrink-0 text-primary" aria-hidden="true" />
+        <span className="flex-1 text-base font-medium text-foreground">
+          ¿Buscás el nombre, la fecha de nacimiento, el DNI o el teléfono? Se editan en Mis datos.
+        </span>
+        <ArrowRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </Link>
 
       <FormularioSos valoresIniciales={valoresIniciales} />
 
