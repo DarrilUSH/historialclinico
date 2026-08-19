@@ -1,0 +1,37 @@
+==================================================================
+              LABORATORIO BIOQUÍMICO DEL SUR
+        Bioquímica y Análisis Clínicos - Rosario, Santa Fe
+     Córdoba 1847, Rosario (S2000) - Tel: 0341-425-6690
+              Director: Dr. Ezequiel Bracamonte - M.P. 10456
+==================================================================
+
+Protocolo N°: 24601
+
+Paciente: GREGORIO, MARIA LUJAN
+DNI: 28.114.902                          Edad: 40 años
+Fecha de nacimiento: 15/06/1985
+Obra social: particular
+
+Medico solicitante: Dr. Gustavo Peralta (M.P. 8820)
+Fecha de extracción: 04/03/2026
+Fecha de informe:    05/03/2026
+
+------------------------------------------------------------------
+                       HEMOGRAMA COMPLETO
+------------------------------------------------------------------
+Determinación            Resultado    Unidad          Valor ref.
+------------------------------------------------------------------
+Hematocrito                 42,5        %             38,0 - 47,0
+Hemoglobina                  14,1       g/dl           12,0 - 16,0
+Eritrocitos                  4,52       millones/mm3    4,00 - 5,40
+Leucocitos                   6800       /mm3          4500 - 11000
+Plaquetas                  245000       /mm3        150000 - 450000
+------------------------------------------------------------------
+
+Metodología: contador hematológico automatizado.
+Tipo de muestra: sangre venosa con EDTA.
+Observaciones: sin observaciones.
+
+                                          ________________________
+                                            Dr. Ezequiel Bracamonte
+                                            Bioquímico - M.P. 10456

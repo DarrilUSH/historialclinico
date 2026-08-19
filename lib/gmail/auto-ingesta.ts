@@ -41,10 +41,28 @@
  * titularidad, no ausencia de contradicción. El costo de la decisión es
  * conocido y aceptado: los correos de clínicas que no imprimen el nombre del
  * paciente nunca se van a cargar solos, y se revisan a mano como hasta hoy.
+ *
+ * ## Sprint 18: la titularidad dejó de ser un sí/no
+ *
+ * El cotejo de nombre pasó de devolver un booleano a devolver un veredicto de
+ * cuatro valores (`evaluarTitularidad`, `lib/gmail/coincidencia-nombre.ts`).
+ * La compuerta no se ablandó ni un poco -sigue abriendo SOLO con
+ * `"coincide"`-, lo que cambió es la FRASE que la persona lee cuando no abre:
+ *
+ * - `"coincide"` → sin motivo, se carga solo (igual que antes).
+ * - `"a_confirmar"` → `titularidad_a_confirmar`. Es el caso del apellido que
+ *   el laboratorio imprime truncado (`GREGORI` por `GREGORIO`) y el del DNI
+ *   leído mal en una placa de baja resolución. Antes salían como "el nombre
+ *   que figura no es el del perfil elegido", que es una acusación falsa sobre
+ *   un estudio que sí era suyo.
+ * - `"indeterminado"` → `sin_nombre_de_paciente`. Ahora incluye los documentos
+ *   que traen un código interno (`MDAHE15061985`) donde va el nombre: eso es
+ *   "no dice de quién es", no "es de otro".
+ * - `"no_coincide"` → `nombre_no_coincide`, como siempre.
  */
 
 import type { CategoriaDocumentoExtraida } from "@/lib/gemini/schemas"
-import { coincideNombreDePaciente, nombreApareceEnTexto } from "@/lib/gmail/coincidencia-nombre"
+import { evaluarTitularidad, nombreApareceEnTexto } from "@/lib/gmail/coincidencia-nombre"
 import type { ResultadoAnalisisMensaje } from "@/lib/turnos/construir-propuestas"
 
 /**
@@ -58,6 +76,13 @@ export type MotivoRevision =
   | "nombre_no_coincide"
   /** No se pudo determinar a nombre de quién viene. Ver el encabezado: es duda. */
   | "sin_nombre_de_paciente"
+  /**
+   * Hay indicios de que el estudio es de esta persona pero también algo que
+   * confirmar: el apellido llegó truncado por el sistema del laboratorio, o el
+   * DNI leído no corrobora. Ver la tabla de `evaluarTitularidad`
+   * (`lib/gmail/coincidencia-nombre.ts`): NO es una negativa, es una pregunta.
+   */
+  | "titularidad_a_confirmar"
   /* --- Adjuntos --- */
   /** El archivo no se pudo leer (Gemini no contestó, o contestó algo que no valida). */
   | "lectura_fallida"
@@ -95,6 +120,7 @@ export type MotivoRevision =
 export const TEXTO_MOTIVO: Record<MotivoRevision, string> = {
   nombre_no_coincide: "el nombre que figura no es el del perfil elegido",
   sin_nombre_de_paciente: "no dice a nombre de quién viene",
+  titularidad_a_confirmar: "hay que confirmar que el estudio es de esta persona",
   lectura_fallida: "no pudimos leer el archivo automáticamente",
   fecha_no_confiable: "no pudimos leer con seguridad la fecha",
   categoria_indeterminada: "no pudimos identificar qué tipo de estudio es",
@@ -172,6 +198,16 @@ export interface EntradaDocumentoAutoCarga {
   pacienteDetectado: string | undefined
   /** `profiles.full_name` del perfil de destino elegido en el interruptor. */
   nombrePerfilDestino: string
+  /**
+   * DNI leído en el documento y DNI del perfil, si alguna vez los hubiera.
+   *
+   * **Hoy el circuito no los pasa nunca**, y es deliberado: el schema de
+   * extracción no pregunta el DNI (`docs/minimizacion-datos.md`). Están acá
+   * para que el contrato quede escrito: si llegaran, el DNI solo CORROBORA —
+   * ver la tabla de `evaluarTitularidad`.
+   */
+  dniDetectado?: string | null
+  dniPerfil?: string | null
   /** `YYYY-MM-DD` que devolvió Gemini. Vacío si no la pudo leer. */
   fecha: string
   categoria: CategoriaDocumentoExtraida
@@ -207,10 +243,23 @@ export function evaluarDocumentoParaAutoCarga(
 ): VeredictoAutoCarga {
   const motivos: MotivoRevision[] = []
 
-  const paciente = (entrada.pacienteDetectado ?? "").trim()
-  if (paciente.length === 0) {
+  // Titularidad: decide el NOMBRE en forma difusa, el DNI solo corrobora, y
+  // ninguno de los tres veredictos que no son "coincide" descarta nada — los
+  // tres mandan el correo a la bandeja, con frases distintas. La regla entera,
+  // con la tabla y la evidencia real que la motiva, está en
+  // `evaluarTitularidad` (`lib/gmail/coincidencia-nombre.ts`).
+  const titularidad = evaluarTitularidad({
+    nombreDetectado: entrada.pacienteDetectado,
+    nombrePerfil: entrada.nombrePerfilDestino,
+    dniDetectado: entrada.dniDetectado,
+    dniPerfil: entrada.dniPerfil,
+  })
+
+  if (titularidad.veredicto === "indeterminado") {
     motivos.push("sin_nombre_de_paciente")
-  } else if (!coincideNombreDePaciente(paciente, entrada.nombrePerfilDestino)) {
+  } else if (titularidad.veredicto === "a_confirmar") {
+    motivos.push("titularidad_a_confirmar")
+  } else if (titularidad.veredicto === "no_coincide") {
     motivos.push("nombre_no_coincide")
   }
 

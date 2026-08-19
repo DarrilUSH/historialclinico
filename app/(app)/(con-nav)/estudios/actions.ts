@@ -215,7 +215,8 @@ const ERROR_INESPERADO_DESCARTE =
  * por eso, se sigue como si no hubiera métricas-, (2) revalidar la forma de
  * cada item con el mismo schema Zod que ya usa la extracción de Gemini
  * (`schemaExtraccionDocumento.shape.metricas`: nombre no vacío, valor
- * numérico finito, máx. 50 items) porque el campo oculto es JSON que viajó
+ * numérico finito, y el excedente por encima de 50 items recortado en vez de
+ * rechazado — Sprint 18) porque el campo oculto es JSON que viajó
  * por HTTP y no hay garantía de que el cliente no lo haya tocado, y (3)
  * normalizar con `prepararMetricas` (`lib/laboratorio/normalizacion.ts`):
  * resuelve el nombre canónico contra el diccionario de sinónimos, parsea el

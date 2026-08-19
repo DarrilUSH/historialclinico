@@ -1,0 +1,27 @@
+LABORATORIO CENTRAL DE TANDIL
+Análisis Clínicos - Buenos Aires
+Av. Avellaneda 1290, Tandil (B7000) - Tel: 0249-444-7723
+------------------------------------------------------------------
+
+Orden N°: P-55120
+
+Paciente: GREGORIO, MARIA LUJAN
+DNI: 28.114.902
+
+Médico solicitante: Dra. Norma Villalba (M.P. 5540)
+Fecha de extracción: 02/05/2026
+Fecha de informe:    30/04/2026
+
+------------------------------------------------------------------
+DETERMINACION           RESULTADO   UNIDAD        VALOR DE REF.
+------------------------------------------------------------------
+Glucemia                    98      mg/dl         70 - 100
+Urea                         32      mg/dl         10 - 50
+------------------------------------------------------------------
+
+Método: espectrofotometría automatizada.
+
+Bioquímico responsable: Bioq. Pablo Ledesma - M.P. 7743
+
+                                        __________________________
+                                              Bioq. Pablo Ledesma

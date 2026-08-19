@@ -16,6 +16,20 @@
 import { describe, it, expect } from 'vitest'
 import { validarExtraccion } from '@/lib/validacion/documento.schema'
 import type { DocumentoMedicoExtraido } from '@/lib/gemini/schemas'
+import { caso } from '@/tests/fixtures/documentos-sinteticos/casos'
+
+/**
+ * La extracción de un caso del banco sintético, SIN el campo `paciente`.
+ *
+ * `paciente` solo existe en el schema del camino automático
+ * (`schemaExtraccionDocumentoConPaciente`); el schema de siempre es `.strict()`
+ * y lo rechazaría como campo de más, que es exactamente lo que tiene que hacer.
+ */
+function extraccionSinPaciente(id: string): Record<string, unknown> {
+  const copia = { ...caso(id).extraccion }
+  delete copia.paciente
+  return copia
+}
 
 describe('lib/validacion/documento.schema.ts', () => {
   /**
@@ -204,7 +218,7 @@ describe('lib/validacion/documento.schema.ts', () => {
   // Caso 9: Array de métricas demasiado grande (51 elementos, máx 50)
   // ─────────────────────────────────────────────────────────────────────────
 
-  it('rechaza más de 50 métricas', () => {
+  it('RECORTA a 50 métricas en vez de tirar el documento entero', () => {
     const metricasGigantes = Array.from({ length: 51 }, (_, i) => ({
       nombre: `Métrica ${i + 1}`,
       valor: i + 1,
@@ -216,9 +230,12 @@ describe('lib/validacion/documento.schema.ts', () => {
       metricas: metricasGigantes,
     }
     const resultado = validarExtraccion(conMetricasExceso)
-    expect(resultado.ok).toBe(false)
-    if (!resultado.ok) {
-      expect(resultado.errores.some((e) => e.includes('demasiadas'))).toBe(true)
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.metricas).toHaveLength(50)
+      // Se queda con las PRIMERAS, no con una selección arbitraria.
+      expect(resultado.datos.metricas[0].nombre).toBe('Métrica 1')
+      expect(resultado.datos.metricas[49].nombre).toBe('Métrica 50')
     }
   })
 
@@ -226,16 +243,16 @@ describe('lib/validacion/documento.schema.ts', () => {
   // Caso 10: texto_completo excesivamente largo
   // ─────────────────────────────────────────────────────────────────────────
 
-  it('rechaza texto_completo mayor a 500 caracteres', () => {
+  it('RECORTA texto_completo mayor a 500 caracteres en vez de rechazar', () => {
     const textoExcesivo = 'a'.repeat(501)
     const conTextoBad = {
       ...ejemploValido,
       texto_completo: textoExcesivo,
     }
     const resultado = validarExtraccion(conTextoBad)
-    expect(resultado.ok).toBe(false)
-    if (!resultado.ok) {
-      expect(resultado.errores.some((e) => e.includes('extracto'))).toBe(true)
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.texto_completo).toHaveLength(500)
     }
   })
 
@@ -353,5 +370,172 @@ describe('lib/validacion/documento.schema.ts', () => {
     if (!resultado.ok) {
       expect(resultado.errores.some((e) => e.includes('resumen'))).toBe(true)
     }
+  })
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // SPRINT 18 — un campo descriptivo largo de más NUNCA tira el documento
+  //
+  // Los dos casos son REALES, medidos sobre los 47 documentos que el dueño
+  // cargó de verdad, pero se reproducen acá con el banco SINTÉTICO
+  // (`tests/fixtures/documentos-sinteticos/`): instituciones ficticias de
+  // otras provincias, otros rótulos, otros formatos. Si la regla fuera un
+  // ajuste al formato de una clínica puntual, acá se caería.
+  // ─────────────────────────────────────────────────────────────────────────
+
+  describe('Sprint 18 — recortar en vez de perder el documento', () => {
+    it('EL CASO REAL DEL RANGO — 116 caracteres contra un tope de 100: se recorta y las métricas entran TODAS', () => {
+      const extraccion = extraccionSinPaciente('12-laboratorio-rango-en-tres-renglones')
+      const metricas = extraccion.metricas as { nombre: string; rango: string }[]
+      const tsh = metricas.find((metrica) => metrica.nombre.includes('TSH'))
+
+      // El fixture tiene que seguir midiendo 116: es el número que hizo caer
+      // la extracción de 38 métricas del laboratorio más completo del
+      // historial. Si alguien lo "arregla", este test avisa.
+      expect(tsh?.rango).toHaveLength(116)
+
+      const resultado = validarExtraccion(extraccion)
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) {
+        // Ninguna métrica se perdió por culpa del rango largo.
+        expect(resultado.datos.metricas).toHaveLength(metricas.length)
+        const tshValidada = resultado.datos.metricas.find((metrica) =>
+          metrica.nombre.includes('TSH'),
+        )
+        expect(tshValidada?.rango).toHaveLength(100)
+        // El rango se recortó; el VALOR clínico llegó intacto.
+        expect(tshValidada?.valor).toBe(
+          (metricas as unknown as { nombre: string; valor: number }[]).find((metrica) =>
+            metrica.nombre.includes('TSH'),
+          )?.valor,
+        )
+      }
+    })
+
+    it('EL CASO REAL DEL TEXTO — 507 caracteres contra un tope de 500: se recorta y el documento entra', () => {
+      const extraccion = extraccionSinPaciente('13-consulta-texto-completo-507')
+
+      // Siete caracteres de más tiraban TRES extracciones completas.
+      expect(extraccion.texto_completo as string).toHaveLength(507)
+
+      const resultado = validarExtraccion(extraccion)
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) {
+        expect(resultado.datos.texto_completo).toHaveLength(500)
+        // Y lo importante: el documento llegó entero.
+        expect(resultado.datos.fecha).toBe(extraccion.fecha)
+        expect(resultado.datos.categoria).toBe(extraccion.categoria)
+      }
+    })
+
+    it('recorta especialidad, institución, médico, resumen, nombre y unidad — ninguno rechaza', () => {
+      const largo = (n: number) => 'x'.repeat(n)
+      const resultado = validarExtraccion({
+        ...ejemploValido,
+        especialidad: largo(300),
+        institucion: largo(400),
+        medico: largo(300),
+        resumen: largo(900),
+        metricas: [{ nombre: largo(250), valor: 1, unidad: largo(120), rango: largo(400) }],
+      })
+
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) {
+        expect(resultado.datos.especialidad).toHaveLength(100)
+        expect(resultado.datos.institucion).toHaveLength(150)
+        expect(resultado.datos.medico).toHaveLength(100)
+        expect(resultado.datos.resumen).toHaveLength(500)
+        expect(resultado.datos.metricas[0].nombre).toHaveLength(100)
+        expect(resultado.datos.metricas[0].unidad).toHaveLength(50)
+        expect(resultado.datos.metricas[0].rango).toHaveLength(100)
+      }
+    })
+
+    it('lo que está justo en el tope no se toca', () => {
+      const resultado = validarExtraccion({
+        ...ejemploValido,
+        texto_completo: 'y'.repeat(500),
+        especialidad: 'z'.repeat(100),
+      })
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) {
+        expect(resultado.datos.texto_completo).toHaveLength(500)
+        expect(resultado.datos.especialidad).toHaveLength(100)
+      }
+    })
+
+    it('LOS CAMPOS DE IDENTIDAD SIGUEN RECHAZANDO — nunca se recorta una fecha, una categoría ni un valor', () => {
+      // Una fecha recortada sería una fecha INVENTADA, y el detector de
+      // duplicados la usa como condición necesaria.
+      expect(validarExtraccion({ ...ejemploValido, fecha: '2026-03-155' }).ok).toBe(false)
+      expect(validarExtraccion({ ...ejemploValido, fecha: '2026-02-30' }).ok).toBe(false)
+      // Una categoría fuera del enum no se puede "recortar" a una válida sin
+      // elegir por el modelo.
+      expect(validarExtraccion({ ...ejemploValido, categoria: 'radiologia' }).ok).toBe(false)
+      // Un valor clínico no numérico es un dato falso, no un dato largo.
+      expect(
+        validarExtraccion({
+          ...ejemploValido,
+          metricas: [{ nombre: 'Glucemia', valor: 'noventa y cinco', unidad: 'mg/dl', rango: '' }],
+        }).ok,
+      ).toBe(false)
+      // Vacíos que siguen siendo un rechazo.
+      expect(validarExtraccion({ ...ejemploValido, resumen: '   ' }).ok).toBe(false)
+      expect(
+        validarExtraccion({
+          ...ejemploValido,
+          metricas: [{ nombre: '  ', valor: 1, unidad: 'mg/dl', rango: '' }],
+        }).ok,
+      ).toBe(false)
+    })
+
+    it('el banco sintético entero valida: 16 documentos de 16 instituciones ficticias distintas, ninguno se pierde', () => {
+      for (const id of [
+        '01-bioquimico-del-sur-protocolo',
+        '02-centro-vega-orden-alfanumerica',
+        '03-hospital-zonal-solicitud',
+        '04-imagenes-vega-registro-dos-medicos',
+        '05-radiografia-accesion-dicom',
+        '06-columna-lumbar-frente',
+        '07-columna-lumbar-perfil',
+        '08-guardia-numero-de-internacion',
+        '09-ecografia-codigo-de-equipo',
+        '10-informe-sin-numero-de-orden',
+        '11-laboratorio-dos-fechas-contradictorias',
+        '12-laboratorio-rango-en-tres-renglones',
+        '13-consulta-texto-completo-507',
+        '14-laboratorio-apellido-truncado',
+        '15-informe-paciente-codigo-interno',
+        '16-radiografia-dni-mal-leido',
+      ]) {
+        const resultado = validarExtraccion(extraccionSinPaciente(id))
+        expect(resultado.ok, `${id} no debería perderse`).toBe(true)
+      }
+    })
+
+    it('el número de orden se SANEA al validar: la accesión DICOM no llega a la Capa 2', () => {
+      const resultado = validarExtraccion(extraccionSinPaciente('05-radiografia-accesion-dicom'))
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) {
+        expect(resultado.datos.numero_orden).toBeUndefined()
+      }
+    })
+
+    it('el número de orden acreditado por su rótulo SÍ llega a la Capa 2', () => {
+      const resultado = validarExtraccion(
+        extraccionSinPaciente('01-bioquimico-del-sur-protocolo'),
+      )
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) {
+        expect(resultado.datos.numero_orden).toBe('24601')
+      }
+    })
+
+    it('un número de orden larguísimo tampoco tira el documento: se descarta el número, no la extracción', () => {
+      const resultado = validarExtraccion({ ...ejemploValido, numero_orden: 'N'.repeat(200) })
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) {
+        expect(resultado.datos.numero_orden).toBeUndefined()
+      }
+    })
   })
 })

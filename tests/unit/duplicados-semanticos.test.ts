@@ -23,9 +23,13 @@ import {
   buscarDuplicadoSemanticoEntreCandidatos,
   coincideNumeroOrden,
   coincidenTodosLosDatos,
+  contarSustanciaCompartida,
+  MIN_SUSTANCIA_CAPA_3,
   type CandidatoDuplicado,
   type DatosComparablesDocumento,
 } from "@/lib/documentos/duplicados-semanticos"
+import { validarExtraccion } from "@/lib/validacion/documento.schema"
+import { caso } from "@/tests/fixtures/documentos-sinteticos/casos"
 
 const METRICAS_LAB_AUSTRAL = [
   { nombre: "Glucemia", valor: 95, unidad: "mg/dl" },
@@ -258,5 +262,186 @@ describe("buscarDuplicadoSemanticoEntreCandidatos", () => {
     const nuevo = documento({ fecha: "2026-11-01", numeroOrden: "" })
     const yaCargado = candidato({ fecha: "2026-08-01", numeroOrden: "" })
     expect(buscarDuplicadoSemanticoEntreCandidatos(nuevo, [yaCargado])).toBeNull()
+  })
+})
+
+/* ------------------------------------------------------------------ *
+ *  SPRINT 18 — la Capa 3 exige SUSTANCIA
+ *
+ *  Los dos falsos positivos que se corrigen son REALES (medidos sobre los
+ *  47 documentos del dueño), pero se reproducen con el banco SINTÉTICO
+ *  -otra provincia, otra institución ficticia, otros formatos-, así que lo
+ *  que se prueba es la regla general y no un parche al formato de una
+ *  clínica puntual.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Un caso del banco, pasado por el validador REAL y convertido a lo que el
+ * detector compara. Que pase por `validarExtraccion` importa: ahí es donde el
+ * número de orden se sanea, y ese saneamiento es parte de lo que hace que
+ * estos pares dejen de marcarse como duplicados.
+ */
+function comparableDelBanco(id: string): DatosComparablesDocumento {
+  // `paciente` solo existe en el schema del camino automático; el de siempre
+  // es `.strict()` y lo rechazaría como campo de más.
+  const extraccion = { ...caso(id).extraccion }
+  delete extraccion.paciente
+  const validado = validarExtraccion(extraccion)
+  if (!validado.ok) {
+    throw new Error(`El caso ${id} no valida: ${validado.errores.join("; ")}`)
+  }
+  const datos = validado.datos
+  return {
+    fecha: datos.fecha,
+    categoria: datos.categoria,
+    institucion: datos.institucion,
+    medico: datos.medico,
+    numeroOrden: datos.numero_orden ?? "",
+    metricas: datos.metricas.map((metrica) => ({
+      nombre: metrica.nombre,
+      valor: metrica.valor,
+      unidad: metrica.unidad,
+    })),
+  }
+}
+
+function candidatoDelBanco(id: string): CandidatoDuplicado {
+  return { ...comparableDelBanco(id), documentoId: id, titulo: id }
+}
+
+describe("Capa 3 — los dos falsos positivos reales", () => {
+  it("FALSO POSITIVO 1 — dos estudios DISTINTOS del mismo día en el mismo lugar no son duplicados", () => {
+    // Una radiografía de tórax y una radiografía de tobillo, el mismo día, en
+    // la misma clínica. Las dos son `imaging`, ninguna trae métricas, ninguna
+    // trae médico informante legible: para la Capa 3 vieja "todos los datos"
+    // coincidían y una de las dos quedaba escondida detrás de un aviso de
+    // duplicado. Es el mismo mecanismo que marcó una radiografía de abdomen
+    // como duplicada de una ecografía en el historial real.
+    const torax = comparableDelBanco("05-radiografia-accesion-dicom")
+    const tobillo = comparableDelBanco("16-radiografia-dni-mal-leido")
+
+    // Todo lo que la Capa 3 compara coincide...
+    expect(torax.fecha).toBe(tobillo.fecha)
+    expect(torax.categoria).toBe(tobillo.categoria)
+    expect(torax.institucion).toBe(tobillo.institucion)
+    expect(torax.medico).toBe(tobillo.medico)
+    // ...y aun así NO son duplicados: no hay sustancia que lo sostenga.
+    expect(contarSustanciaCompartida(torax, tobillo)).toBeLessThan(MIN_SUSTANCIA_CAPA_3)
+    expect(coincidenTodosLosDatos(torax, tobillo)).toBe(false)
+    expect(buscarDuplicadoSemanticoEntreCandidatos(torax, [candidatoDelBanco("16-radiografia-dni-mal-leido")])).toBeNull()
+  })
+
+  it("FALSO POSITIVO 2 — dos vistas del MISMO estudio son dos documentos y los dos hacen falta", () => {
+    // Frente y perfil de la misma columna lumbar. Comparten hasta el número
+    // de accesión que el equipo les quemó en el encabezado (`11021738`), que
+    // es exactamente lo que en el historial real habría hecho que las cuatro
+    // vistas se taparan entre sí.
+    const frente = comparableDelBanco("06-columna-lumbar-frente")
+    const perfil = comparableDelBanco("07-columna-lumbar-perfil")
+
+    // El saneamiento ya les sacó la accesión: la Capa 2 no tiene con qué.
+    expect(frente.numeroOrden).toBe("")
+    expect(perfil.numeroOrden).toBe("")
+    expect(coincideNumeroOrden(frente, perfil)).toBe(false)
+
+    // Y la Capa 3 tampoco se pronuncia, por falta de sustancia.
+    expect(coincidenTodosLosDatos(frente, perfil)).toBe(false)
+    expect(buscarDuplicadoSemanticoEntreCandidatos(frente, [candidatoDelBanco("07-columna-lumbar-perfil")])).toBeNull()
+  })
+
+  it("las CUATRO vistas de la misma serie: ninguna tapa a ninguna", () => {
+    const vistas = [
+      "05-radiografia-accesion-dicom",
+      "06-columna-lumbar-frente",
+      "07-columna-lumbar-perfil",
+      "16-radiografia-dni-mal-leido",
+    ]
+    for (const id of vistas) {
+      const nuevo = comparableDelBanco(id)
+      const otras = vistas.filter((otro) => otro !== id).map(candidatoDelBanco)
+      expect(buscarDuplicadoSemanticoEntreCandidatos(nuevo, otras), `${id} no puede tener duplicado`).toBeNull()
+    }
+  })
+})
+
+describe("Capa 3 — lo que la exigencia de sustancia NO rompió", () => {
+  it("un laboratorio duplicado de verdad se sigue detectando (banco sintético, Bioquímico del Sur)", () => {
+    const original = candidatoDelBanco("01-bioquimico-del-sur-protocolo")
+    const regenerado = comparableDelBanco("01-bioquimico-del-sur-protocolo")
+
+    expect(contarSustanciaCompartida(regenerado, original)).toBeGreaterThanOrEqual(
+      MIN_SUSTANCIA_CAPA_3,
+    )
+    const encontrado = buscarDuplicadoSemanticoEntreCandidatos(regenerado, [original])
+    expect(encontrado).not.toBeNull()
+  })
+
+  it("un laboratorio SIN número de orden acreditado igual se detecta por la Capa 3 (Hospital Zonal, ficticio)", () => {
+    const sinOrden = { ...comparableDelBanco("03-hospital-zonal-solicitud"), numeroOrden: "" }
+    const original: CandidatoDuplicado = {
+      ...sinOrden,
+      documentoId: "ya-cargado",
+      titulo: "Análisis — enero",
+    }
+    const encontrado = buscarDuplicadoSemanticoEntreCandidatos(sinOrden, [original])
+    expect(encontrado?.motivo).toBe("datos_identicos")
+  })
+
+  it("REGLA 2 DEL USUARIO, intacta — fecha distinta sigue siendo JAMÁS duplicado", () => {
+    const control = comparableDelBanco("01-bioquimico-del-sur-protocolo")
+    const mismoAnalisisEnOtraFecha: CandidatoDuplicado = {
+      ...control,
+      fecha: "2026-09-04",
+      documentoId: "control-de-septiembre",
+      titulo: "Hemograma — septiembre",
+    }
+    expect(coincidenTodosLosDatos(control, mismoAnalisisEnOtraFecha)).toBe(false)
+  })
+})
+
+describe("contarSustanciaCompartida", () => {
+  it("cuenta una unidad por métrica compartida y una por cada dato de contexto en común", () => {
+    // 2 métricas + institución + médico + número de orden.
+    expect(contarSustanciaCompartida(documento(), documento())).toBe(5)
+  })
+
+  it("NO cuenta la fecha ni la categoría: dos estudios del mismo día en el mismo lugar comparten esas dos y no dicen nada", () => {
+    const sinContexto = documento({ institucion: "", medico: "", numeroOrden: "", metricas: [] })
+    expect(contarSustanciaCompartida(sinContexto, sinContexto)).toBe(0)
+  })
+
+  it("un dato presente en uno solo de los dos no cuenta", () => {
+    const conMedico = documento({ metricas: [], numeroOrden: "" })
+    const sinMedico = documento({ metricas: [], numeroOrden: "", medico: "" })
+    // Solo queda la institución en común.
+    expect(contarSustanciaCompartida(conMedico, sinMedico)).toBe(1)
+  })
+
+  it("solo cuentan las métricas que efectivamente coinciden", () => {
+    const nuevo = documento({ institucion: "", medico: "", numeroOrden: "" })
+    const existente = documento({
+      institucion: "",
+      medico: "",
+      numeroOrden: "",
+      metricas: [
+        { nombre: "Glucemia", valor: 95, unidad: "mg/dl" },
+        { nombre: "Colesterol total", valor: 999, unidad: "mg/dl" },
+      ],
+    })
+    expect(contarSustanciaCompartida(nuevo, existente)).toBe(1)
+  })
+})
+
+describe("Capa 3 — números de orden distintos", () => {
+  it("dos números de orden DISTINTOS: la propia institución dice que son dos estudios", () => {
+    const nuevo = documento({ numeroOrden: "PROT-1" })
+    const existente = documento({ numeroOrden: "PROT-2" })
+    expect(coincidenTodosLosDatos(nuevo, existente)).toBe(false)
+  })
+
+  it("que uno lo traiga y el otro no, en cambio, no corta nada", () => {
+    const nuevo = documento({ numeroOrden: "PROT-1" })
+    const existente = documento({ numeroOrden: "" })
+    expect(coincidenTodosLosDatos(nuevo, existente)).toBe(true)
   })
 })

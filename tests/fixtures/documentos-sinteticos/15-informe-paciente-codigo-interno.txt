@@ -1,0 +1,31 @@
+CENTRO DE MEDICINA NUCLEAR DEL PLATA
+La Plata, Buenos Aires
+Calle 47 N° 630, La Plata (B1900) - Tel: 0221-425-8804
+------------------------------------------------------------------
+
+Paciente: MDAHE15061985
+Fecha del estudio: 22/04/2026
+
+Estudio: Centellograma oseo corporal total
+
+Medico nuclear: Dr. Joaquin Ortiz (M.P. 6890)
+
+------------------------------------------------------------------
+                        INFORME
+------------------------------------------------------------------
+Se administra radiofarmaco por via endovenosa segun protocolo
+habitual. Adquisicion de imagenes de cuerpo entero a las 3 horas
+post inyeccion. Distribucion del trazador homogenea en el
+esqueleto axial y apendicular, sin focos de hipercaptacion
+patologica. Sistema genitourinario con eliminacion habitual del
+radiofarmaco.
+
+CONCLUSION: centellograma sin alteraciones significativas en la
+captacion evaluada.
+------------------------------------------------------------------
+
+Nota: el sistema identifica al paciente por codigo interno de
+turno en lugar de nombre completo.
+
+                                        __________________________
+                                              Dr. Joaquin Ortiz

@@ -47,6 +47,40 @@
  *   documento sea IDÉNTICO. Compararlos haría que la Capa 3 casi nunca
  *   dispare, exactamente el problema que se busca resolver.
  *
+ * ## La Capa 3 exige SUSTANCIA mínima (Sprint 18)
+ *
+ * La primera versión de la Capa 3 tenía un agujero medido con documentos
+ * reales: cuando los dos documentos no traen NINGUNA métrica -toda la
+ * radiología, las recetas, muchas consultas- y no hay número de orden, "todos
+ * los datos idénticos" se degrada a "misma fecha + misma categoría (+ la
+ * institución, que es la misma para todo el historial de una persona)". Con
+ * eso alcanzaba para dos falsos positivos reales:
+ *
+ * - una **radiografía de abdomen** marcada como duplicada de una **ecografía**
+ *   del mismo día en la misma clínica (las dos son `imaging`, ninguna trae
+ *   métricas, ninguna trae médico informante legible);
+ * - **dos hojas distintas del mismo estudio** de imágenes, que son dos
+ *   documentos diferentes y los dos hacen falta.
+ *
+ * Los dos comparten causa: una persona se hace VARIOS estudios el mismo día en
+ * el mismo lugar, y eso es lo normal, no una repetición. Así que a partir del
+ * Sprint 18 la Capa 3 pide, además de que todo coincida, **al menos
+ * `MIN_SUSTANCIA_CAPA_3` unidades de sustancia COMPARTIDA**
+ * (`contarSustanciaCompartida`): cada métrica en común cuenta una, y la
+ * institución, el médico y el número de orden cuentan una cada uno cuando
+ * están presentes en LOS DOS y coinciden.
+ *
+ * Fecha y categoría NO cuentan como sustancia -son los ejes por los que se
+ * agrupa el historial, no contenido del estudio-: si contaran, los dos falsos
+ * positivos de arriba llegarían a tres solo con la institución y el problema
+ * seguiría igual.
+ *
+ * El costo es conocido y aceptado: un estudio de imágenes REALMENTE duplicado,
+ * regenerado con otros bytes y sin número de orden, con menos de tres datos de
+ * contexto, ya no se detecta por esta capa. Es un falso NEGATIVO -la persona
+ * ve dos veces el mismo estudio y borra uno-, mientras que el falso positivo
+ * escondía un estudio que sí tenía. El error barato se elige a propósito.
+ *
  * ## Puro, sin red, sin `server-only`
  *
  * Recibe datos ya extraídos (de Gemini o de la base) y devuelve un veredicto.
@@ -188,6 +222,51 @@ export function coincideNumeroOrden(
 }
 
 /**
+ * Cuántas unidades de SUSTANCIA comparten los dos documentos.
+ *
+ * Cuenta uno por cada métrica en común -deduplicada, mismo criterio que
+ * `mismasMetricas`- y uno por cada dato de contexto que esté presente en LOS
+ * DOS y coincida: institución, médico, número de orden.
+ *
+ * Deliberadamente NO cuentan la fecha ni la categoría: son los ejes por los
+ * que se agrupa un historial -cualquier par de estudios del mismo día en la
+ * misma clínica los comparte- y no dicen nada sobre si el CONTENIDO es el
+ * mismo. Ver el bloque "La Capa 3 exige SUSTANCIA mínima" del encabezado.
+ *
+ * Se exporta para poder probarla sola y para que el número que decide sea
+ * inspeccionable, no un efecto lateral escondido dentro del `if`.
+ */
+export function contarSustanciaCompartida(
+  nuevo: DatosComparablesDocumento,
+  existente: DatosComparablesDocumento,
+): number {
+  let sustancia = 0
+
+  const clavesNuevo = new Set(nuevo.metricas.map(claveMetrica))
+  const clavesExistente = new Set(existente.metricas.map(claveMetrica))
+  for (const clave of clavesNuevo) {
+    if (clavesExistente.has(clave)) sustancia += 1
+  }
+
+  for (const campo of ["institucion", "medico", "numeroOrden"] as const) {
+    const valorNuevo = normalizar(nuevo[campo])
+    const valorExistente = normalizar(existente[campo])
+    if (valorNuevo.length > 0 && valorNuevo === valorExistente) sustancia += 1
+  }
+
+  return sustancia
+}
+
+/**
+ * Mínimo de unidades de sustancia compartida para que la Capa 3 se anime a
+ * declarar duplicado. Tres es lo que dejaba afuera a los dos falsos positivos
+ * reales -una institución sola, o una institución más un médico, no alcanzan-
+ * sin tocar ningún verdadero positivo de los medidos: un laboratorio duplicado
+ * llega a tres con dos métricas y la institución.
+ */
+export const MIN_SUSTANCIA_CAPA_3 = 3
+
+/**
  * Capa 3: ¿son EXACTAMENTE el mismo documento en todos los datos extraídos?
  *
  * La fecha se compara PRIMERO y es condición NECESARIA -regla 2 del usuario,
@@ -195,6 +274,12 @@ export function coincideNumeroOrden(
  * distintas, sin mirar ningún otro campo. El resto (categoría, institución,
  * médico, métricas) se normaliza antes de comparar: espacios repetidos,
  * mayúsculas y tildes NO cuentan como diferencia.
+ *
+ * Y aunque todo coincida, hace falta SUSTANCIA: al menos
+ * `MIN_SUSTANCIA_CAPA_3` datos de contenido compartidos. Sin eso, "todos los
+ * datos iguales" no significa "el mismo estudio", significa "dos estudios del
+ * mismo día en el mismo lugar", que es lo que le pasa a cualquiera que se hace
+ * una radiografía y una ecografía en la misma visita.
  */
 export function coincidenTodosLosDatos(
   nuevo: DatosComparablesDocumento,
@@ -207,7 +292,19 @@ export function coincidenTodosLosDatos(
   if (normalizar(nuevo.institucion) !== normalizar(existente.institucion)) return false
   if (normalizar(nuevo.medico) !== normalizar(existente.medico)) return false
 
-  return mismasMetricas(nuevo.metricas, existente.metricas)
+  // Dos números de orden DISTINTOS son la propia institución diciendo que son
+  // dos estudios distintos. Que uno lo traiga y el otro no, en cambio, no dice
+  // nada -el lector puede no haberlo leído en una de las dos copias- y no
+  // corta acá; simplemente no suma sustancia.
+  const ordenNuevo = normalizar(nuevo.numeroOrden)
+  const ordenExistente = normalizar(existente.numeroOrden)
+  if (ordenNuevo.length > 0 && ordenExistente.length > 0 && ordenNuevo !== ordenExistente) {
+    return false
+  }
+
+  if (!mismasMetricas(nuevo.metricas, existente.metricas)) return false
+
+  return contarSustanciaCompartida(nuevo, existente) >= MIN_SUSTANCIA_CAPA_3
 }
 
 /**

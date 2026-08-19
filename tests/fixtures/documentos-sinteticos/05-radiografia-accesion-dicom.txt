@@ -1,0 +1,21 @@
+CENTRO DE DIAGNOSTICO POR IMAGENES ACONCAGUA
+Radiologia Digital - Mendoza
+Av. San Martin 3080, Mendoza (M5500) - Tel: 0261-425-9931
+------------------------------------------------------------------
+PACIENTE: GREGORIO MARIA LUJAN          DNI: 28114902
+FECHA ESTUDIO: 18/05/2026               EQUIPO: CR DIGITAL
+ACC: 15570342.01                        SERIE: 2
+------------------------------------------------------------------
+
+RADIOGRAFIA DE TORAX (FRENTE)
+
+Campos pulmonares sin infiltrados ni consolidaciones. Silueta
+cardiaca de tamaño conservado. Senos costofrenicos libres.
+Estructuras oseas sin lesiones agudas visibles.
+
+CONCLUSION: radiografia de torax frente sin infiltrados ni
+consolidaciones, silueta cardiaca conservada.
+
+------------------------------------------------------------------
+Imagen generada automaticamente por equipo CR. Documento sin
+firma digital.

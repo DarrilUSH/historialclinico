@@ -1,0 +1,32 @@
+==================================================================
+              LABORATORIO BIOQUIMICO DEL SUR
+        Bioquimica y Analisis Clinicos - Rosario, Santa Fe
+     Cordoba 1847, Rosario (S2000) - Tel: 0341-425-6690
+              Director: Dr. Ezequiel Bracamonte - M.P. 10456
+==================================================================
+
+Protocolo N°: 24988
+
+Paciente: GREGORI, MARIA LUJAN
+DNI: 28.114.902                          Edad: 41 años
+
+Medico solicitante: Dr. Gustavo Peralta (M.P. 8820)
+Fecha de extraccion: 05/08/2026
+Fecha de informe:    06/08/2026
+
+------------------------------------------------------------------
+DETERMINACION           RESULTADO   UNIDAD        VALOR DE REF.
+------------------------------------------------------------------
+Glucemia                    88      mg/dl         70 - 100
+Colesterol total            178     mg/dl         Deseable: < 200
+------------------------------------------------------------------
+
+Metodologia: espectrofotometria automatizada.
+Tipo de muestra: sangre venosa en ayunas.
+
+                                          ________________________
+                                            Dr. Ezequiel Bracamonte
+                                            Bioquimico - M.P. 10456
+
+Nota del sistema: el apellido del paciente puede aparecer
+truncado por limite de caracteres de la etiqueta del tubo.

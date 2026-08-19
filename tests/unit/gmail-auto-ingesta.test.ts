@@ -326,3 +326,63 @@ describe("fraseDeMotivos", () => {
     }
   })
 })
+
+/* ------------------------------------------------------------------ *
+ *  SPRINT 18 — la titularidad en la compuerta
+ * ------------------------------------------------------------------ */
+
+describe("evaluarDocumentoParaAutoCarga — titularidad (Sprint 18)", () => {
+  it("el apellido truncado por el laboratorio ya NO se lee como «es de otra persona»", () => {
+    const veredicto = evaluarDocumentoParaAutoCarga({
+      ...DOCUMENTO_PERFECTO,
+      pacienteDetectado: "GOME, ROBERTO",
+      nombrePerfilDestino: "Roberto Gómez",
+    })
+    // Sigue yendo a revisión -la compuerta no se ablandó-, pero con la frase
+    // correcta: es una pregunta, no una acusación.
+    expect(veredicto.sinDudas).toBe(false)
+    expect(veredicto.motivos).toContain("titularidad_a_confirmar")
+    expect(veredicto.motivos).not.toContain("nombre_no_coincide")
+  })
+
+  it("un código interno donde va el nombre se lee como «no dice de quién es»", () => {
+    const veredicto = evaluarDocumentoParaAutoCarga({
+      ...DOCUMENTO_PERFECTO,
+      pacienteDetectado: "MDAHE15061985",
+    })
+    expect(veredicto.motivos).toContain("sin_nombre_de_paciente")
+    expect(veredicto.motivos).not.toContain("nombre_no_coincide")
+  })
+
+  it("un DNI que no corrobora NO cierra la compuerta con un rechazo: la manda a confirmar", () => {
+    const veredicto = evaluarDocumentoParaAutoCarga({
+      ...DOCUMENTO_PERFECTO,
+      dniDetectado: "31479089",
+      dniPerfil: "31473089",
+    })
+    expect(veredicto.motivos).toEqual(["titularidad_a_confirmar"])
+  })
+
+  it("el DNI que SÍ corrobora deja la compuerta abierta", () => {
+    const veredicto = evaluarDocumentoParaAutoCarga({
+      ...DOCUMENTO_PERFECTO,
+      dniDetectado: "31.473.089",
+      dniPerfil: "31473089",
+    })
+    expect(veredicto.sinDudas).toBe(true)
+  })
+
+  it("el estudio de otra persona sigue cerrando la compuerta con nombre_no_coincide", () => {
+    const veredicto = evaluarDocumentoParaAutoCarga({
+      ...DOCUMENTO_PERFECTO,
+      pacienteDetectado: "GOMEZ MARIA ELENA",
+    })
+    expect(veredicto.motivos).toContain("nombre_no_coincide")
+  })
+
+  it("el motivo nuevo tiene su frase para la bandeja", () => {
+    expect(TEXTO_MOTIVO.titularidad_a_confirmar).toBe(
+      "hay que confirmar que el estudio es de esta persona",
+    )
+  })
+})

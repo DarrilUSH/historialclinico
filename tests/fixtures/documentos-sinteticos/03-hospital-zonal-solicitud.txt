@@ -1,0 +1,27 @@
+HOSPITAL ZONAL DE TRELEW
+Servicio de Laboratorio - Chubut
+Av. Almirante Brown 1050, Trelew (U9100) - Tel: 02965-42-7710
+------------------------------------------------------------------
+
+N° de Solicitud: OP-3391
+
+Paciente: GREGORIO, MARIA LUJAN
+DNI: 28.114.902
+Sala: Consultorios Externos
+
+Medico solicitante: Dr. Hugo Aguirre (M.P. 3345)
+Fecha de toma de muestra: 21-01-2026
+
+------------------------------------------------------------------
+DETERMINACION           RESULTADO   UNIDAD        VALOR DE REF.
+------------------------------------------------------------------
+Glucemia                    92      mg/dl         70 - 100
+Creatinina                 0,78     mg/dl         0,50 - 1,10
+------------------------------------------------------------------
+
+Metodo: espectrofotometria automatizada.
+
+Bioquimica responsable: Lic. Carla Ojeda - M.P. 6678
+
+                                        __________________________
+                                              Lic. Carla Ojeda
