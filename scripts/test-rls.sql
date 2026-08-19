@@ -8966,7 +8966,7 @@ select pruebas_rls.registrar('27. Superficie de ejecución',
 
 -- ── 4–6. `authenticated`: exactamente las 19 previstas, ni una más.
 select pruebas_rls.registrar('27. Superficie de ejecución',
-       'authenticated ejecuta exactamente 19 funciones de public', '19',
+       'authenticated ejecuta exactamente 20 funciones de public', '20',
        (select count(*)::text
           from pg_proc p join pg_namespace n on n.oid = p.pronamespace
          where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'EXECUTE')));
@@ -8976,7 +8976,7 @@ select pruebas_rls.registrar('27. Superficie de ejecución',
 select pruebas_rls.registrar('27. Superficie de ejecución',
        'La lista de funciones que authenticated ejecuta es EXACTAMENTE la prevista  [CRITERIO DE ACEPTACIÓN]',
        'confirmar_documento_recien_subido,crear_perfil_gestionado,descartar_documento_recien_subido,'
-       || 'es_perfil_gestionado,es_sesion_de_usuario,es_titular,nombres_de_perfiles_vinculados,'
+       || 'es_perfil_gestionado,es_sesion_de_usuario,es_titular,especialidades_todas_no_vacias,nombres_de_perfiles_vinculados,'
        || 'perfil_actor,perfil_de_objeto_storage,perfil_id_por_email,puede_administrar_perfil,'
        || 'puede_arrancar_administracion,puede_cargar_en_perfil,puede_graduar_perfil,'
        || 'puede_otorgar_permisos,puede_ver_perfil,registrar_suscripcion_push,registrar_toma,revertir_toma',
@@ -8999,7 +8999,7 @@ select pruebas_rls.registrar('27. Superficie de ejecución',
 -- Las 23 que no están son las tres configurar_cron_*, las tres disparar_*,
 -- crear_perfil_de_cuenta() y las 16 de trigger y CHECK.
 select pruebas_rls.registrar('27. Superficie de ejecución',
-       'service_role ejecuta exactamente 39 funciones (no las 62 del esquema)', '39',
+       'service_role ejecuta exactamente 40 funciones (no las 62 del esquema)', '40',
        (select count(*)::text
           from pg_proc p join pg_namespace n on n.oid = p.pronamespace,
                lateral aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
