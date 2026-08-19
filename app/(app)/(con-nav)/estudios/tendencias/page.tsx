@@ -22,6 +22,7 @@ import { Suspense } from "react"
 
 import { ChartLineIcon, FlaskConicalIcon } from "lucide-react"
 
+import { Alerta } from "@/components/base/alerta"
 import { BotonVolverEstudios } from "@/components/estudios/boton-volver-estudios"
 import { ListaResultadosCualitativos } from "@/components/estudios/lista-resultados-cualitativos"
 import { PanelTendencias } from "@/components/estudios/panel-tendencias"
@@ -30,7 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { requerirSesion } from "@/lib/auth/guardas"
 import { obtenerTamano } from "@/lib/densidad/servidor"
 import type { Tamano } from "@/lib/densidad/tamano"
-import { parsearPeriodo } from "@/lib/laboratorio/periodo"
+import { debeAvisarMuestraChica, mensajeMuestraChica, parsearPeriodo } from "@/lib/laboratorio/periodo"
 import { obtenerResultadosCualitativos, obtenerSeries } from "@/lib/laboratorio/series"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 
@@ -92,10 +93,11 @@ async function ContenidoTendencias({
   // vive en su propia lista aparte (`ListaResultadosCualitativos`) en vez de
   // forzarlo dentro de `PanelTendencias`, que asume valores numéricos de
   // punta a punta (gráfico, tarjeta de "último valor", variación).
-  const [{ series, metricasDisponibles }, resultadosCualitativos] = await Promise.all([
-    obtenerSeries(supabase, perfilId, periodo),
-    obtenerResultadosCualitativos(supabase, perfilId, periodo),
-  ])
+  const [{ series, metricasDisponibles, estudiosEnPeriodo, hayEstudiosAnteriores }, resultadosCualitativos] =
+    await Promise.all([
+      obtenerSeries(supabase, perfilId, periodo),
+      obtenerResultadosCualitativos(supabase, perfilId, periodo),
+    ])
 
   if (metricasDisponibles.length === 0 && resultadosCualitativos.length === 0) {
     return <EstadoVacioTendencias periodo={periodo} />
@@ -103,8 +105,25 @@ async function ContenidoTendencias({
 
   return (
     <div className="flex flex-col gap-4 chica:gap-3">
+      {/* Aviso de "muestra chica" (pedido en vivo, 2026-08-19): con el
+          filtro "6 meses" el usuario vio solo 2 métricas y no entendía por
+          qué -el motivo real: un único estudio de laboratorio cae en esa
+          ventana-. El comportamiento es correcto (menos datos, menos
+          chips), pero confuso sin explicación; esto lo dice con el número
+          real, sin ocultar que la muestra es chica. Vive DENTRO del
+          `<Suspense key={periodo}>` -depende del resultado de la consulta,
+          no puede vivir junto a `<SelectorPeriodo>` en `PaginaTendencias`-. */}
+      {periodo !== "todo" && debeAvisarMuestraChica(periodo, estudiosEnPeriodo, hayEstudiosAnteriores) && (
+        <Alerta variante="info">{mensajeMuestraChica(periodo, estudiosEnPeriodo)}</Alerta>
+      )}
+
       {metricasDisponibles.length > 0 && (
-        <PanelTendencias series={series} metricasDisponibles={metricasDisponibles} tamano={tamano} />
+        <PanelTendencias
+          series={series}
+          metricasDisponibles={metricasDisponibles}
+          tamano={tamano}
+          periodo={periodo}
+        />
       )}
 
       <ListaResultadosCualitativos resultados={resultadosCualitativos} />

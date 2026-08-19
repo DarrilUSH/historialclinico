@@ -98,14 +98,22 @@ export class ErrorPermisoDenegado extends ErrorGuarda {
 /** La base no pudo responder si hay permiso (red caída, función ausente, etc.). */
 export class ErrorVerificacionPermiso extends ErrorGuarda {
   readonly causa?: string
+  /**
+   * `true` cuando el fallo es de los que se arreglan solos con el tiempo (red
+   * caída, 5xx, desfasaje de reloj) y ya se reintentó una vez sin suerte.
+   * `false` cuando es un fallo que reintentar no iba a arreglar (la función no
+   * existe, la firma del token no valida).
+   */
+  readonly transitorio: boolean
 
-  constructor(causa?: string) {
+  constructor(causa?: string, transitorio = false) {
     super(
       "fallo_de_verificacion",
       "No pudimos verificar tus permisos. Probá de nuevo en unos minutos.",
     )
     this.name = "ErrorVerificacionPermiso"
     this.causa = causa
+    this.transitorio = transitorio
   }
 }
 
@@ -127,6 +135,182 @@ const FUNCION_POR_VERBO = {
 
 const PATRON_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/* ────────────────────────────────────────────────────────────────────────
+ * Fallos transitorios de verificación
+ *
+ * ## Quién valida el token, y contra qué reloj (medido, no supuesto)
+ *
+ * El 2026-08-19 a las 13:22 `/estudios` devolvió un 500 en producción con
+ * `causa: 'JWT issued at future'`. Ese mensaje NO lo emite ni
+ * `@supabase/auth-js` ni el servidor de Auth: lo emite **PostgREST**, el
+ * servicio que está atrás de `supabase.rpc(...)` y de cualquier `.from(...)`.
+ *
+ * La cadena de una request tiene DOS validadores de JWT, y solo uno mira el
+ * `iat`:
+ *
+ *   1. `sesionDeLaRequest()` → `auth.getUser()` → `GET /auth/v1/user`.
+ *      Lo valida **el servidor de Auth**, que NO chequea `iat`. Verificado
+ *      contra el stack local (GoTrue v2.195.0): un token con `iat` una hora
+ *      en el futuro pasa la validación y llega a consultar la base; uno con
+ *      la firma rota corta antes con `403 bad_jwt`. Por eso el incidente NO
+ *      terminó en un redirect a `/login`: la sesión se resolvió bien.
+ *   2. `requerirPermiso()` → `supabase.rpc('puede_ver_perfil')` → PostgREST.
+ *      Acá SÍ se comparan las claims temporales (`iat`, `nbf`, `exp`) contra
+ *      **el reloj de PostgREST**, y acá fue donde reventó.
+ *
+ * ## Cuánta tolerancia hay, y por qué no la podemos subir
+ *
+ * Medido contra el PostgREST del stack local (v16.1, el mismo motor que
+ * corre la Data API de Supabase Cloud), firmando tokens con `iat` desplazado
+ * y bisecando el límite:
+ *
+ *   iat = ahora +30 s → 200
+ *   iat = ahora +31 s → 401 `PGRST303` "JWT issued at future"
+ *   exp = ahora −30 s → 200
+ *   exp = ahora −31 s → 401 `PGRST303` "JWT expired"
+ *
+ * O sea: **PostgREST ya aplica exactamente 30 segundos de tolerancia de
+ * reloj, en ambas direcciones.** No hay ningún `clockSkew` / `leeway` que
+ * configurar del lado de la aplicación —la validación no ocurre en nuestro
+ * proceso, ocurre dentro de un servicio administrado por Supabase— y el
+ * margen que se pediría (30-60 s) ya está concedido en su mayor parte. Que
+ * el error igual aparezca significa que el desfasaje real superó esos 30 s:
+ * es un reloj que se corrigió de golpe del lado del servidor, no un
+ * redondeo. Medido el 2026-08-19 con los headers `Date`, ya pasado el
+ * incidente, Auth y Data API estaban a menos de 300 ms uno del otro y
+ * ambos dentro de ~100 ms de dos referencias externas: el desfasaje es
+ * TRANSITORIO, no una condición estable del proyecto.
+ *
+ * ## Lo que NO se hace, a propósito
+ *
+ * Forzar `auth.refreshSession()` al ver este error parece la solución
+ * obvia —un token nuevo traería un `iat` nuevo— y es una trampa. Primero,
+ * solo ayudaría si el reloj adelantado fuera el de Auth; si el atrasado es
+ * el de PostgREST, un token más nuevo está MÁS en el futuro y empeora el
+ * caso. Segundo, y decisivo: un Server Component no puede escribir cookies
+ * (`lib/supabase/server.ts`), así que el refresh token rotado se perdería y
+ * la próxima request presentaría el viejo. Arriesgar deslogueos para tapar
+ * un hipo de reloj es peor que el hipo.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Código con el que PostgREST reporta que las claims TEMPORALES del JWT no
+ * validan (`iat`/`nbf`/`exp`). Su primo `PGRST301` es el de las claims
+ * estructurales —firma que no valida, token mal formado— y ese no se
+ * reintenta: no se arregla esperando.
+ */
+const CODIGO_CLAIMS_TEMPORALES = "PGRST303"
+
+/**
+ * Los dos mensajes de `PGRST303` en los que **esperar sirve**: el token es
+ * válido pero todavía no "empezó" para el reloj de PostgREST. `JWT expired`
+ * comparte código y no entra acá: ese ya pasó, esperar solo lo empeora.
+ */
+const MENSAJES_DE_TOKEN_ADELANTADO = /JWT (issued at future|not yet valid)/i
+
+export type MotivoTransitorio = "reloj" | "red" | "servidor"
+
+/** Forma mínima de un error de PostgREST, para no atarse al tipo generado. */
+interface ErrorConsulta {
+  code?: string | null
+  message?: string | null
+}
+
+/**
+ * ¿Este fallo de la RPC de permisos se arregla solo con el tiempo?
+ *
+ * Se exporta para `tests/unit/guardas.test.ts`: es la frontera entre "esto
+ * hay que reintentarlo" y "esto es un problema de verdad", y una frontera que
+ * se ensancha sin querer convierte un bug real en un reintento silencioso.
+ *
+ * @param status Estado HTTP que devuelve `supabase.rpc(...)`. Es `0` cuando
+ *   `fetch` ni siquiera llegó a tener respuesta (DNS, TCP, timeout).
+ */
+export function motivoTransitorio(
+  error: ErrorConsulta | null | undefined,
+  status?: number,
+): MotivoTransitorio | null {
+  if (!error) {
+    return null
+  }
+  if (
+    error.code === CODIGO_CLAIMS_TEMPORALES &&
+    MENSAJES_DE_TOKEN_ADELANTADO.test(error.message ?? "")
+  ) {
+    return "reloj"
+  }
+  // `status: 0` es lo que pone `@supabase/postgrest-js` cuando el `fetch`
+  // falló antes de haber respuesta (ver su `PostgrestBuilder`).
+  if (status === 0) {
+    return "red"
+  }
+  if (typeof status === "number" && status >= 500) {
+    return "servidor"
+  }
+  return null
+}
+
+/**
+ * Respiro entre el intento que falló y el único reintento.
+ *
+ * 400 ms es un número elegido por lo que cuesta, no por lo que cura: es el
+ * tope de lo que se le puede sumar a una pantalla que ya está tardando sin
+ * que la persona sienta que se colgó, y solo se paga en el camino de error
+ * (el camino feliz no espera ni un milisegundo, así que la optimización de
+ * ingreso del commit `fc6f4dc` queda intacta).
+ *
+ * Honestidad sobre qué cubre: para un hipo de red o un 5xx suelto, 400 ms
+ * alcanzan de sobra. Para el desfasaje de reloj NO alcanzan casi nunca
+ * —PostgREST ya perdona 30 s, así que un rechazo implica más de 30 s de
+ * diferencia—, y por eso el arreglo de ese caso no es el reintento sino la
+ * degradación digna: `app/(app)/error.tsx`. El reintento igual se hace,
+ * porque es gratis y sí gana el borde (el desfasaje justo cruzando el
+ * umbral mientras se corrige).
+ *
+ * Esperar más sería peor: cada segundo acá es un segundo de pantalla en
+ * blanco para alguien que ya vio que algo no anda.
+ */
+const ESPERA_ANTES_DEL_REINTENTO_MS = 400
+
+const dormir = (ms: number) => new Promise<void>((listo) => setTimeout(listo, ms))
+
+/**
+ * Decodifica el `iat` del access token y lo compara contra NUESTRO reloj.
+ *
+ * No participa de ninguna decisión: existe **solo para el log**. Cuando esto
+ * vuelva a pasar, la línea de error va a traer el número exacto de segundos
+ * de adelanto en vez de obligar a adivinar, que es justo lo que faltó para
+ * diagnosticar el incidente del 2026-08-19. Nunca lanza y nunca imprime el
+ * token.
+ *
+ * `getSession()` acá no sale a la red ni emite el aviso de "storage inseguro":
+ * `sesionDeLaRequest()` ya corrió `getUser()` contra el servidor de Auth en
+ * este mismo request, y `@supabase/auth-js` silencia el aviso después de eso.
+ */
+async function adelantoDelTokenEnSegundos(
+  supabase: ClienteSupabaseServidor,
+): Promise<number | null> {
+  try {
+    const { data } = await supabase.auth.getSession()
+    const cuerpo = data.session?.access_token?.split(".")[1]
+    if (!cuerpo) {
+      return null
+    }
+    // `atob` en vez de `Buffer`: funciona igual en el runtime de Node y en el
+    // del borde. El JWT viene en base64url, que hay que traducir a base64.
+    const base64 = cuerpo.replace(/-/g, "+").replace(/_/g, "/")
+    const claims = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "="))) as {
+      iat?: unknown
+    }
+    if (typeof claims.iat !== "number") {
+      return null
+    }
+    return claims.iat - Math.floor(Date.now() / 1000)
+  } catch {
+    return null
+  }
+}
 
 export interface SesionServidor {
   usuario: User
@@ -283,12 +467,34 @@ export async function requerirPermiso(
       desde: opciones.desde,
     }))
 
-  const { data, error } = await sesion.supabase.rpc(FUNCION_POR_VERBO[verbo], {
-    perfil: perfilId,
-  })
+  const preguntar = () =>
+    sesion.supabase.rpc(FUNCION_POR_VERBO[verbo], { perfil: perfilId })
+
+  let { data, error, status } = await preguntar()
+  let motivo = motivoTransitorio(error, status)
+
+  // Un fallo transitorio se reintenta UNA vez y nada más. Ver
+  // `ESPERA_ANTES_DEL_REINTENTO_MS` para el porqué del número y para qué
+  // cubre de verdad; el caso que no cubre lo atajan los `error.tsx`.
+  if (motivo) {
+    await dormir(ESPERA_ANTES_DEL_REINTENTO_MS)
+    ;({ data, error, status } = await preguntar())
+    motivo = motivoTransitorio(error, status)
+  }
 
   if (error) {
-    throw new ErrorVerificacionPermiso(error.message)
+    // Una sola línea con todo lo que hace falta para diagnosticar la próxima
+    // vez: qué contestó PostgREST, si se reintentó, y —cuando el motivo es el
+    // reloj— cuántos segundos de adelanto tenía el token contra nuestro reloj.
+    // Nunca se registra el token ni ninguna claim más que `iat`.
+    const adelanto = motivo === "reloj" ? await adelantoDelTokenEnSegundos(sesion.supabase) : null
+    console.error(
+      `[guardas] ${FUNCION_POR_VERBO[verbo]} no pudo responder ` +
+        `(código ${error.code || "sin código"}, HTTP ${status}): ${error.message}` +
+        (motivo ? ` — clasificado como transitorio (${motivo}), reintentado una vez sin suerte` : "") +
+        (adelanto === null ? "" : ` — el iat del token está ${adelanto} s adelantado respecto de este servidor`),
+    )
+    throw new ErrorVerificacionPermiso(error.message, motivo !== null)
   }
   if (data !== true) {
     throw new ErrorPermisoDenegado(verbo, perfilId)

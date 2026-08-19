@@ -407,8 +407,11 @@ export const SCHEMA_FICHA_CONSULTA: Schema = {
     ),
     estudiosRecientes: schemaSeccionFicha(
       TITULOS_SECCION_FICHA.estudiosRecientes,
-      'Listado breve (con guiones "- ", uno por línea) de los estudios recientes: fecha, categoría ' +
-        'y qué mostraron en una frase. Si no hay estudios, decilo explícitamente.',
+      'Historial clínico contado por episodios (con guiones "- ", uno por línea), del más reciente ' +
+        'al más viejo: qué le pasó, qué se le encontró y qué se le hizo en cada uno. UNA línea por ' +
+        'episodio, nunca una por documento, y nunca una línea que describa el papel (su fecha, su ' +
+        'tipo o dónde se emitió) en lugar de lo que ocurrió. Si no hay episodios, decilo ' +
+        'explícitamente.',
     ),
     valoresFueraDeRango: schemaSeccionFicha(
       TITULOS_SECCION_FICHA.valoresFueraDeRango,
@@ -530,7 +533,13 @@ export const FichaGeneradaSchema = z
     motivoConsulta: seccionFichaSchema(TITULOS_SECCION_FICHA.motivoConsulta, 400),
     antecedentesRelevantes: seccionFichaSchema(TITULOS_SECCION_FICHA.antecedentesRelevantes, 900),
     medicacionActual: seccionFichaSchema(TITULOS_SECCION_FICHA.medicacionActual, 900),
-    estudiosRecientes: seccionFichaSchema(TITULOS_SECCION_FICHA.estudiosRecientes, 900),
+    // 1200, no 900 como las otras: desde la versión 2 del contexto
+    // (`lib/ficha/armado.ts`) esta sección cuenta el historial AGRUPADO POR
+    // EPISODIO -una internación entera en una línea- en vez de listar los
+    // cinco archivos más nuevos. Es el techo de una sección que ahora abarca
+    // años, no un permiso para escribir de más: el prompt le sigue pidiendo a
+    // Gemini que todo entre en una hoja A4.
+    estudiosRecientes: seccionFichaSchema(TITULOS_SECCION_FICHA.estudiosRecientes, 1200),
     valoresFueraDeRango: seccionFichaSchema(TITULOS_SECCION_FICHA.valoresFueraDeRango, 600),
 
     preguntasSugeridas: z

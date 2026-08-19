@@ -106,6 +106,19 @@ export interface ResultadoSeries {
   /** Ordenadas alfabéticamente por `etiqueta` (`localeCompare` es-AR), mismo criterio que `obtenerInstitucionesDistintas`. */
   series: SerieMetrica[]
   metricasDisponibles: MetricaDisponible[]
+  /**
+   * Cantidad de estudios DISTINTOS (ver `contarEstudiosDistintos`) con al
+   * menos una métrica dentro del período elegido. Alimenta el aviso de
+   * "muestra chica" de `tendencias/page.tsx`
+   * (`lib/laboratorio/periodo.ts#debeAvisarMuestraChica`).
+   */
+  estudiosEnPeriodo: number
+  /**
+   * `true` si existe al menos una medición ANTERIOR al corte del período
+   * elegido -es decir, si cambiar a "Todo" mostraría más datos-. Siempre
+   * `false` para `periodo === "todo"` (no hay "antes" de eso).
+   */
+  hayEstudiosAnteriores: boolean
 }
 
 /** Fila cruda de `lab_metrics`, con los únicos campos que necesita este módulo. */
@@ -220,6 +233,26 @@ export function agruparEnSeries(filas: readonly FilaLabMetrica[]): SerieMetrica[
   return series
 }
 
+/**
+ * Cuenta estudios DISTINTOS entre filas crudas de `lab_metrics`: agrupa por
+ * `document_id` cuando lo hay -un documento subido es, por definición, UN
+ * estudio, sin importar cuántas métricas o filas produzca-, y por
+ * `measurement_date` cuando no -sin ese vínculo, la fecha es la mejor
+ * aproximación disponible: dos filas sin documento en la misma fecha se
+ * asumen del mismo estudio-.
+ *
+ * Pura -recibe solo los dos campos que necesita, no toda `FilaLabMetrica`-
+ * para poder testearla sin construir filas completas ni tocar Supabase.
+ * Usada por `obtenerSeries` para `estudiosEnPeriodo` (ver el aviso de
+ * "muestra chica" en `lib/laboratorio/periodo.ts`).
+ */
+export function contarEstudiosDistintos(
+  filas: readonly Pick<FilaLabMetrica, "document_id" | "measurement_date">[],
+): number {
+  const claves = new Set(filas.map((fila) => fila.document_id ?? `fecha:${fila.measurement_date}`))
+  return claves.size
+}
+
 /** Resumen de "última medición" por serie, para los chips del selector de métrica. */
 export function obtenerMetricasDisponibles(series: readonly SerieMetrica[]): MetricaDisponible[] {
   const metricas: MetricaDisponible[] = []
@@ -278,7 +311,7 @@ export async function obtenerSeries(
   const { data, error } = await consulta
 
   if (error || !data) {
-    return { series: [], metricasDisponibles: [] }
+    return { series: [], metricasDisponibles: [], estudiosEnPeriodo: 0, hayEstudiosAnteriores: false }
   }
 
   // El filtro de arriba ya garantiza esto en tiempo de ejecución; el type
@@ -290,7 +323,31 @@ export async function obtenerSeries(
   )
 
   const series = agruparEnSeries(filasNumericas)
-  return { series, metricasDisponibles: obtenerMetricasDisponibles(series) }
+  const estudiosEnPeriodo = contarEstudiosDistintos(filasNumericas)
+
+  // Consulta liviana aparte -`head: true`, sin traer filas, mismo patrón
+  // que `existenMetricasDeLaboratorio` más abajo-, SOLO cuando hay corte:
+  // con `periodo === "todo"` no hay "antes" que buscar. Alimenta el aviso
+  // de "muestra chica" (`lib/laboratorio/periodo.ts#debeAvisarMuestraChica`):
+  // sin esto no hay forma de distinguir "el período recortó datos" de "el
+  // período ya contiene todo el historial", y sugerir "Todo" en el segundo
+  // caso sería un consejo roto.
+  let hayEstudiosAnteriores = false
+  if (fechaCorte) {
+    const { count } = await supabase
+      .from("lab_metrics")
+      .select("id", { count: "exact", head: true })
+      .eq("profile_id", perfilId)
+      .lt("measurement_date", fechaCorte)
+    hayEstudiosAnteriores = (count ?? 0) > 0
+  }
+
+  return {
+    series,
+    metricasDisponibles: obtenerMetricasDisponibles(series),
+    estudiosEnPeriodo,
+    hayEstudiosAnteriores,
+  }
 }
 
 /** Un resultado CUALITATIVO ("Negativo", "No reactivo") dentro del período elegido, sin curva. */
