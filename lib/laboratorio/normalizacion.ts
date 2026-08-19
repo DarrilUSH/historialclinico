@@ -20,6 +20,13 @@
  *      dos veces el mismo `metric_name` — y aunque no lo violaran, dos
  *      "Glucosa" el mismo día no son dos mediciones reales, son la misma
  *      métrica leída dos veces del documento. Gana la PRIMERA aparición.
+ *   4. Acepta un resultado CUALITATIVO ("Negativo", "No reactivo") cuando no
+ *      hay valor numérico (Sprint 18): antes se descartaba en silencio
+ *      cualquier métrica sin `valor` numérico -perdiendo resultados
+ *      clínicamente importantes que el estudio SÍ trae-; ahora se guarda en
+ *      `value_text` si `metrica.valorTexto` viene con texto. Ver
+ *      `FilaLabMetricPreparada` para el contrato exacto (al menos uno de
+ *      `value`/`value_text`, nunca los dos `null`).
  *
  * Es un módulo puro: no toca Supabase ni hace red, para poder testearlo sin
  * mocks (`tests/unit/laboratorio.test.ts`). La ÚLTIMA palabra de validación
@@ -30,11 +37,21 @@
 import { normalizarMetrica, normalizarTexto } from '@/lib/laboratorio/diccionario'
 import type { MetricaExtraida } from '@/lib/gemini/schemas'
 
-/** Fila lista para insertar en `lab_metrics` (mismos nombres de columna, sin `id`/`profile_id`/`document_id`: esos los completa el llamador). */
+/**
+ * Fila lista para insertar en `lab_metrics` (mismos nombres de columna, sin
+ * `id`/`profile_id`/`document_id`: esos los completa el llamador).
+ *
+ * `value`/`value_text` son mutuamente opcionales pero no mutuamente
+ * excluyentes -mismo contrato que el CHECK `lab_metrics_valor_o_texto`
+ * (`supabase/migrations/20260819190000_lab_metrics_resultados_cualitativos.sql`):
+ * al menos uno de los dos no es `null`, nunca los dos-. Ver el comentario de
+ * `prepararMetricas` para cómo se decide cuál se completa.
+ */
 export interface FilaLabMetricPreparada {
   metric_name: string
   metric_canonical: string | null
-  value: number
+  value: number | null
+  value_text: string | null
   unit: string | null
   reference_range: string | null
   reference_min: number | null
@@ -55,13 +72,124 @@ export interface ResultadoPrepararMetricas {
   duplicadas: MetricaDuplicada[]
 }
 
-const PATRON_RANGO = /^(-?\d+(?:[.,]\d+)?)\s*-\s*(-?\d+(?:[.,]\d+)?)/
-const PATRON_MENOR = /^<\s*=?\s*(-?\d+(?:[.,]\d+)?)/
-const PATRON_HASTA = /^hasta\s+(-?\d+(?:[.,]\d+)?)/i
-const PATRON_MAYOR = /^>\s*=?\s*(-?\d+(?:[.,]\d+)?)/
+const NUM = '(-?\\d+(?:[.,]\\d+)?)'
+const PATRON_RANGO = new RegExp(`^${NUM}\\s*-\\s*${NUM}`)
+const PATRON_DE_A = new RegExp(`^de\\s+${NUM}\\s+a\\s+${NUM}`, 'i')
+const PATRON_MENOR = new RegExp(`^<\\s*=?\\s*${NUM}`)
+const PATRON_MENOR_PALABRA = new RegExp(`^menor\\s+(?:a|de|que)\\s+${NUM}`, 'i')
+const PATRON_HASTA = new RegExp(`^hasta\\s+${NUM}`, 'i')
+const PATRON_MAYOR = new RegExp(`^>\\s*=?\\s*${NUM}`)
+const PATRON_MAYOR_PALABRA = new RegExp(`^mayor\\s+(?:a|de|que)\\s+${NUM}`, 'i')
+
+/**
+ * Palabras que, en un rango MULTILÍNEA/multi-etiqueta ("Deficiencia: menor a
+ * 10.0 / Insuficiencia: menor a 30.0 / Suficiencia: de 30.00 a 100.0"),
+ * marcan cuál de los segmentos es el rango de NORMALIDAD -el que hay que
+ * usar- y no una categoría de severidad. `\b` (límite de palabra) es
+ * necesario: "insuficiencia" contiene "suficiencia" como substring y NO
+ * tiene que matchear.
+ */
+const PALABRAS_NORMALIDAD = ['normal', 'suficiencia', 'deseable', 'optimo', 'adecuado', 'recomendado']
+
+/** Separador de segmentos en un rango multi-etiqueta: salto de línea, o " / " con espacios (no "mg/dl"). */
+const SEPARADOR_SEGMENTOS = /\r?\n|\s+\/\s+/
 
 function aNumero(crudo: string): number {
   return Number(crudo.replace(',', '.'))
+}
+
+/** ¿Este segmento está marcado como el rango "normal" (ver `PALABRAS_NORMALIDAD`)? */
+function segmentoEsNormal(segmento: string): boolean {
+  const normalizado = normalizarTexto(segmento)
+  return PALABRAS_NORMALIDAD.some((palabra) => new RegExp(`\\b${palabra}\\b`).test(normalizado))
+}
+
+/**
+ * Quita un prefijo de ETIQUETA CUALITATIVA seguido de dos puntos ("Valor
+ * óptimo: menor a 100" → "menor a 100", "Deseable: menor de 200" → "menor de
+ * 200"). Sin el prefijo, el resto del texto queda intacto.
+ */
+function quitarPrefijoEtiqueta(texto: string): string {
+  const conPrefijo = texto.match(/^[\p{L}\s]{1,40}:\s*(.+)$/u)
+  return conPrefijo ? conPrefijo[1] : texto
+}
+
+/** El texto ya empieza con algo que un patrón numérico reconoce (número, comparador o palabra clave). */
+const PATRON_INICIO_RECONOCIDO = /^(?:[<>]|-?\d|menor\b|mayor\b|hasta\b|de\s+-?\d)/i
+
+/**
+ * Quita una PRIMERA PALABRA cualitativa que antecede al umbral sin dos
+ * puntos ("Negativo < 5.0" → "< 5.0"). Solo actúa cuando el texto NO
+ * arranca ya con algo reconocible -así no le come la palabra "hasta" ni
+ * "menor"/"mayor" a los patrones que las necesitan-.
+ */
+function quitarPrefijoCualitativo(texto: string): string {
+  if (PATRON_INICIO_RECONOCIDO.test(texto)) return texto
+  const sinPrimeraPalabra = texto.replace(/^[^\s<>=\d]+[\s:]*/, '')
+  return sinPrimeraPalabra || texto
+}
+
+interface LimitesParseados {
+  reference_min: number | null
+  reference_max: number | null
+}
+
+/**
+ * Intenta las siete formas numéricas reconocidas sobre UN segmento (ya sin
+ * saltos de línea ni etiquetas de severidad). `null` si ninguna matchea.
+ */
+function intentarParsearSegmento(segmentoOriginal: string): LimitesParseados | null {
+  const segmento = quitarPrefijoCualitativo(quitarPrefijoEtiqueta(segmentoOriginal))
+
+  const rango = segmento.match(PATRON_RANGO)
+  if (rango) {
+    const min = aNumero(rango[1])
+    const max = aNumero(rango[2])
+    if (Number.isFinite(min) && Number.isFinite(max) && min <= max) {
+      return { reference_min: min, reference_max: max }
+    }
+  }
+
+  const deA = segmento.match(PATRON_DE_A)
+  if (deA) {
+    const min = aNumero(deA[1])
+    const max = aNumero(deA[2])
+    if (Number.isFinite(min) && Number.isFinite(max) && min <= max) {
+      return { reference_min: min, reference_max: max }
+    }
+  }
+
+  const menor = segmento.match(PATRON_MENOR)
+  if (menor) {
+    const max = aNumero(menor[1])
+    if (Number.isFinite(max)) return { reference_min: null, reference_max: max }
+  }
+
+  const menorPalabra = segmento.match(PATRON_MENOR_PALABRA)
+  if (menorPalabra) {
+    const max = aNumero(menorPalabra[1])
+    if (Number.isFinite(max)) return { reference_min: null, reference_max: max }
+  }
+
+  const hasta = segmento.match(PATRON_HASTA)
+  if (hasta) {
+    const max = aNumero(hasta[1])
+    if (Number.isFinite(max)) return { reference_min: null, reference_max: max }
+  }
+
+  const mayor = segmento.match(PATRON_MAYOR)
+  if (mayor) {
+    const min = aNumero(mayor[1])
+    if (Number.isFinite(min)) return { reference_min: min, reference_max: null }
+  }
+
+  const mayorPalabra = segmento.match(PATRON_MAYOR_PALABRA)
+  if (mayorPalabra) {
+    const min = aNumero(mayorPalabra[1])
+    if (Number.isFinite(min)) return { reference_min: min, reference_max: null }
+  }
+
+  return null
 }
 
 export interface RangoParseado {
@@ -71,20 +199,36 @@ export interface RangoParseado {
 }
 
 /**
- * Parsea un rango de referencia textual a límites numéricos cuando tiene una
- * de las cuatro formas que traen los estudios argentinos:
+ * Parsea un rango de referencia textual a límites numéricos. Formas
+ * reconocidas (todas admiten coma decimal, "70 - 110"/"70,5 - 110,2", y
+ * unidad pegada, "< 200 mg/dl" — los patrones no exigen que la cadena
+ * TERMINE en el número):
  *
- *   - Intervalo: "70 - 110" (admite coma decimal: "4,5 - 5,5")
- *   - Techo con "<" o "<=": "< 200", "<= 200"
- *   - Techo en palabras: "hasta 200"
- *   - Piso con ">" o ">=": ">= 40", "> 40"
+ *   - Intervalo con guion: "70 - 110".
+ *   - Intervalo en palabras: "de 13,5 a 17,0".
+ *   - Techo con "<"/"<=": "< 200", "<= 200".
+ *   - Techo en palabras: "hasta 200", "menor a 45", "menor de 200".
+ *   - Piso con ">"/">=": ">= 40", "> 40".
+ *   - Piso en palabras: "mayor a 40", "mayor de 40".
  *
- * El texto puede traer la unidad pegada ("70 - 110 mg/dl"): los patrones no
- * exigen que la cadena TERMINE en el número, así que el sufijo se ignora.
+ * Sobre esas siete formas, dos capas más ANTES de intentar matchear (ver
+ * `quitarPrefijoEtiqueta`/`quitarPrefijoCualitativo`): un prefijo de
+ * ETIQUETA con dos puntos ("Valor óptimo: menor a 100") y una palabra
+ * cualitativa suelta antes del umbral ("Negativo < 5.0"). Ninguna de las dos
+ * toca `reference_range`: el texto que se persiste es SIEMPRE el original
+ * completo, la limpieza es solo para encontrar el número.
  *
- * Si no matchea ninguna forma, se conserva el texto tal cual en
- * `reference_range` y los límites quedan en `null` — no es un error, es un
- * rango que solo un humano puede interpretar ("según método", "no aplica").
+ * Y una capa MULTILÍNEA (ver `SEPARADOR_SEGMENTOS`/`segmentoEsNormal`) para
+ * el caso de un laboratorio que imprime varios niveles de severidad
+ * ("Deficiencia: menor a 10.0 / Insuficiencia: menor a 30.0 / Suficiencia:
+ * de 30.00 a 100.0"): se usa el segmento marcado como normal/deseable si hay
+ * exactamente uno, o -si ninguna etiqueta lo distingue sin ambigüedad- se
+ * prueba desde el ÚLTIMO segmento hacia el primero, porque los laboratorios
+ * argentinos ordenan de mayor a menor severidad y terminan en el rango sano.
+ *
+ * Si nada matchea, se conserva el texto tal cual en `reference_range` y los
+ * límites quedan en `null` — no es un error, es un rango que solo un humano
+ * puede interpretar ("según método", "no aplica").
  */
 export function parsearRangoReferencia(rangoCrudo: string | null | undefined): RangoParseado {
   const texto = rangoCrudo?.trim()
@@ -92,37 +236,29 @@ export function parsearRangoReferencia(rangoCrudo: string | null | undefined): R
     return { reference_range: null, reference_min: null, reference_max: null }
   }
 
-  const rango = texto.match(PATRON_RANGO)
-  if (rango) {
-    const min = aNumero(rango[1])
-    const max = aNumero(rango[2])
-    if (Number.isFinite(min) && Number.isFinite(max) && min <= max) {
-      return { reference_range: texto, reference_min: min, reference_max: max }
-    }
+  const segmentos = texto
+    .split(SEPARADOR_SEGMENTOS)
+    .map((segmento) => segmento.trim())
+    .filter(Boolean)
+
+  if (segmentos.length <= 1) {
+    const limites = intentarParsearSegmento(texto)
+    return limites
+      ? { reference_range: texto, ...limites }
+      : { reference_range: texto, reference_min: null, reference_max: null }
   }
 
-  const menor = texto.match(PATRON_MENOR)
-  if (menor) {
-    const max = aNumero(menor[1])
-    if (Number.isFinite(max)) {
-      return { reference_range: texto, reference_min: null, reference_max: max }
-    }
-  }
+  // Multi-segmento: preferir el ÚNICO marcado como normal; si no hay uno
+  // solo inequívoco, probar de atrás para adelante (ver el porqué arriba).
+  const normales = segmentos.filter(segmentoEsNormal)
+  const ordenIntento =
+    normales.length === 1
+      ? [normales[0], ...[...segmentos].reverse().filter((s) => s !== normales[0])]
+      : [...segmentos].reverse()
 
-  const hasta = texto.match(PATRON_HASTA)
-  if (hasta) {
-    const max = aNumero(hasta[1])
-    if (Number.isFinite(max)) {
-      return { reference_range: texto, reference_min: null, reference_max: max }
-    }
-  }
-
-  const mayor = texto.match(PATRON_MAYOR)
-  if (mayor) {
-    const min = aNumero(mayor[1])
-    if (Number.isFinite(min)) {
-      return { reference_range: texto, reference_min: min, reference_max: null }
-    }
+  for (const segmento of ordenIntento) {
+    const limites = intentarParsearSegmento(segmento)
+    if (limites) return { reference_range: texto, ...limites }
   }
 
   return { reference_range: texto, reference_min: null, reference_max: null }
@@ -158,7 +294,20 @@ export function prepararMetricas(
     const nombreCrudo = typeof metrica.nombre === 'string' ? metrica.nombre.trim() : ''
     if (!nombreCrudo) continue
 
-    if (typeof metrica.valor !== 'number' || !Number.isFinite(metrica.valor)) continue
+    // Valor numérico O resultado cualitativo (Sprint 18): una métrica sin
+    // NINGUNO de los dos no tiene nada que guardar -mismo descarte
+    // silencioso que antes hacía "sin valor numérico", mismo criterio de
+    // "el resto del documento sigue"-. `valorTexto` viene de
+    // `MetricaExtraida.valorTexto` (ver su comentario: hoy solo lo puebla un
+    // llamador que no pasa por la extracción en vivo de Gemini, ver deuda en
+    // el Resumen de Entrega del Sprint 18).
+    const valorNumerico =
+      typeof metrica.valor === 'number' && Number.isFinite(metrica.valor) ? metrica.valor : null
+    const valorTexto =
+      typeof metrica.valorTexto === 'string' && metrica.valorTexto.trim().length > 0
+        ? metrica.valorTexto.trim()
+        : null
+    if (valorNumerico === null && valorTexto === null) continue
 
     const { canonico } = normalizarMetrica(nombreCrudo)
     const claveDedup = normalizarTexto(canonico ?? nombreCrudo)
@@ -180,7 +329,8 @@ export function prepararMetricas(
     filas.push({
       metric_name: nombreCrudo,
       metric_canonical: canonico,
-      value: metrica.valor,
+      value: valorNumerico,
+      value_text: valorTexto,
       unit: unidad || null,
       reference_range,
       reference_min,

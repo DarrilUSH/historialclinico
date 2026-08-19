@@ -147,6 +147,13 @@ export async function leerFuentesClinicas(
       .from("lab_metrics")
       .select(COLUMNAS_METRICA)
       .eq("profile_id", perfilId)
+      // Sprint 18 (resultados cualitativos): `value` pasó a nullable y esta
+      // consulta alimenta `armarMetricas` (`lib/ficha/armado.ts`), que hace
+      // aritmética con `fila.value` -mismo motivo que el `.not()` de
+      // `lib/laboratorio/series.ts#obtenerSeries`-. Un resultado cualitativo
+      // no tiene curva ni "fuera de rango" que ofrecerle a Gemini todavía;
+      // sumarlo a la ficha es una ampliación a futuro, no de esta migración.
+      .not("value", "is", null)
       .order("measurement_date", { ascending: true }),
     supabase
       .from("vital_signs")

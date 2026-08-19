@@ -918,7 +918,8 @@ export type Database = {
           reference_min: number | null
           reference_range: string | null
           unit: string | null
-          value: number
+          value: number | null
+          value_text: string | null
         }
         Insert: {
           created_at?: string
@@ -933,7 +934,8 @@ export type Database = {
           reference_min?: number | null
           reference_range?: string | null
           unit?: string | null
-          value: number
+          value?: number | null
+          value_text?: string | null
         }
         Update: {
           created_at?: string
@@ -948,7 +950,8 @@ export type Database = {
           reference_min?: number | null
           reference_range?: string | null
           unit?: string | null
-          value?: number
+          value?: number | null
+          value_text?: string | null
         }
         Relationships: [
           {

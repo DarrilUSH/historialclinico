@@ -73,14 +73,18 @@ function formatearFechaLarga(fechaIso: string): string {
 interface FilaMetrica {
   id: string
   metric_name: string
-  value: number
+  value: number | null
+  /** Resultado cualitativo (Sprint 18) cuando `value` es `null` — "Negativo", "No reactivo", etc. */
+  value_text: string | null
   unit: string | null
   reference_range: string | null
   reference_min: number | null
   reference_max: number | null
 }
 
+/** `false` para una métrica cualitativa (`value === null`): sin número no hay "fuera de rango" que calcular. */
 function estaFueraDeRango(metrica: FilaMetrica): boolean {
+  if (metrica.value === null) return false
   if (metrica.reference_min !== null && metrica.value < metrica.reference_min) return true
   if (metrica.reference_max !== null && metrica.value > metrica.reference_max) return true
   return false
@@ -120,7 +124,7 @@ export default async function PaginaDetalleEstudio({
 
   const { data: metricasCrudas } = await supabase
     .from("lab_metrics")
-    .select("id, metric_name, value, unit, reference_range, reference_min, reference_max")
+    .select("id, metric_name, value, value_text, unit, reference_range, reference_min, reference_max")
     .eq("document_id", id)
     .eq("profile_id", activo.perfil.id)
     .order("metric_name", { ascending: true })
@@ -241,15 +245,24 @@ export default async function PaginaDetalleEstudio({
                         {metrica.metric_name}
                       </td>
                       <td className="py-2 pr-3">
-                        <span
-                          className={cn(
-                            "numeros-clinicos",
-                            fueraDeRango ? "font-semibold text-advertencia-fuerte" : "text-foreground",
-                          )}
-                        >
-                          {metrica.value}
-                          {metrica.unit ? ` ${metrica.unit}` : ""}
-                        </span>
+                        {metrica.value !== null ? (
+                          <span
+                            className={cn(
+                              "numeros-clinicos",
+                              fueraDeRango ? "font-semibold text-advertencia-fuerte" : "text-foreground",
+                            )}
+                          >
+                            {metrica.value}
+                            {metrica.unit ? ` ${metrica.unit}` : ""}
+                          </span>
+                        ) : (
+                          // Resultado CUALITATIVO (Sprint 18): no hay número
+                          // ni rango que evaluar, así que se muestra el texto
+                          // tal cual lo informó el laboratorio, sin la
+                          // tipografía tabular de "numeros-clinicos" (que es
+                          // para números, no para "Negativo"/"No reactivo").
+                          <span className="font-medium text-foreground">{metrica.value_text}</span>
+                        )}
                         {fueraDeRango && (
                           <span className="mt-1 flex items-center gap-1 text-sm font-medium text-advertencia-fuerte">
                             <TriangleAlertIcon className="size-3.5 shrink-0" aria-hidden="true" />

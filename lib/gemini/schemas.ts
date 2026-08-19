@@ -225,6 +225,26 @@ export interface MetricaExtraida {
   valor: number;
   unidad: string;
   rango: string;
+  /**
+   * Resultado CUALITATIVO cuando el estudio no produce un valor numérico
+   * ("Negativo", "No reactivo", "No se observan espermatozoides") — Sprint
+   * 18, tarea de resultados cualitativos. Espejo de `lab_metrics.value_text`
+   * (`supabase/migrations/20260819190000_lab_metrics_resultados_cualitativos.sql`).
+   *
+   * OPCIONAL y ADITIVO a propósito: ni `SCHEMA_DOCUMENTO_MEDICO` (arriba, el
+   * `responseSchema` real que Gemini recibe) ni
+   * `lib/validacion/documento.schema.ts` piden o aceptan todavía este campo
+   * -los dos siguen exigiendo `valor` numérico en cada métrica-, así que
+   * agregarlo acá no cambia en nada el contrato de la extracción en vivo.
+   * Sirve hoy para que `lib/laboratorio/normalizacion.ts#prepararMetricas`
+   * (y sus tests) tengan un campo tipado con el que trabajar; cablear la
+   * extracción real (prompt + `responseSchema` + validación Zod) es una
+   * ampliación pendiente, documentada como deuda en el Resumen de Entrega
+   * del Sprint 18 -esos tres archivos quedaron fuera del alcance de esa
+   * tarea por trabajo en paralelo sobre `lib/gemini/prompt-documento.ts` y
+   * `lib/validacion/documento.schema.ts`-.
+   */
+  valorTexto?: string;
 }
 
 /**

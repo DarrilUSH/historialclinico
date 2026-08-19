@@ -14,7 +14,7 @@
 
 import { describe, it, expect, vi } from 'vitest'
 
-import { normalizarMetrica, normalizarTexto } from '@/lib/laboratorio/diccionario'
+import { limpiarSufijoMetodo, normalizarMetrica, normalizarTexto } from '@/lib/laboratorio/diccionario'
 import { parsearRangoReferencia, prepararMetricas } from '@/lib/laboratorio/normalizacion'
 
 describe('lib/laboratorio/diccionario.ts', () => {
@@ -67,6 +67,101 @@ describe('lib/laboratorio/diccionario.ts', () => {
     it('devuelve canonico null para una métrica que no está en el diccionario', () => {
       expect(normalizarMetrica('Ácido úrico').canonico).toBeNull()
       expect(normalizarMetrica('Ferritina').canonico).toBeNull()
+    })
+
+    // Sprint 18 — recorte de método pegado al nombre (causa #1 de la
+    // cobertura baja original: 38/257, 15%). Los cuatro ejemplos son
+    // literales del historial real que motivó el sprint.
+    it('recorta el método pegado con "- Método ..." (ejemplos reales del Sprint 18)', () => {
+      expect(normalizarMetrica('Glucemia - Método Glucosa-oxidasa').canonico).toBe('Glucosa')
+      expect(normalizarMetrica('TSH - Meia Ultrasensible - Método CMIA').canonico).toBe('TSH')
+      expect(normalizarMetrica('PSA total - Método CMIA').canonico).toBe('PSA')
+      expect(normalizarMetrica('Colesterol total - Método enzimático').canonico).toBe(
+        'Colesterol total',
+      )
+    })
+
+    it('recorta un paréntesis con "método" en cualquier posición', () => {
+      expect(normalizarMetrica('Colesterol total (método enzimático)').canonico).toBe(
+        'Colesterol total',
+      )
+    })
+
+    it('recorta " por <técnica>" al final', () => {
+      expect(normalizarMetrica('Urea por método ureasa').canonico).toBe('Urea')
+    })
+
+    it('recorta un paréntesis al final aunque no diga "método" (sigla, aclaración)', () => {
+      expect(normalizarMetrica('Hemoglobina A1c (HbA1c)').canonico).toBe('Hemoglobina glicosilada')
+      expect(normalizarMetrica('Sodio (ionograma)').canonico).toBe('Sodio')
+      expect(normalizarMetrica('P.C.R. (Proteína C Reactiva)').canonico).toBe('Proteína C reactiva')
+    })
+
+    it('encadena paréntesis final + técnica tras guion, en cualquier orden', () => {
+      // El paréntesis queda "al final" recién después de sacar la técnica
+      // tras el guion -ver el comentario de `limpiarSufijoMetodo`-.
+      expect(normalizarMetrica('Hemoglobina A1c (HbA1c) - HPLC').canonico).toBe(
+        'Hemoglobina glicosilada',
+      )
+    })
+
+    it('NO recorta un guion sin espacios alrededor (nombre legítimo, no método)', () => {
+      // "HDL-Colesterol" es un nombre real, no "HDL" + método "Colesterol".
+      expect(normalizarMetrica('HDL-Colesterol').canonico).toBe('Colesterol HDL')
+      expect(limpiarSufijoMetodo('17-OH-Progesterona')).toBe('17-OH-Progesterona')
+    })
+
+    it('reconoce siglas con puntos como las mismas siglas sin puntos', () => {
+      expect(normalizarMetrica('P.C.R.').canonico).toBe('Proteína C reactiva')
+      expect(normalizarMetrica('T.S.H.').canonico).toBe('TSH')
+    })
+
+    it('reconoce los sinónimos nuevos pedidos por el roadmap del Sprint 18', () => {
+      expect(normalizarMetrica('Uremia').canonico).toBe('Urea')
+      expect(normalizarMetrica('Creatinina en sangre').canonico).toBe('Creatinina')
+      expect(normalizarMetrica('Recuento de plaquetas').canonico).toBe('Plaquetas')
+      expect(normalizarMetrica('HDL-Colesterol').canonico).toBe('Colesterol HDL')
+      expect(normalizarMetrica('Colesterol HDL').canonico).toBe('Colesterol HDL')
+      expect(normalizarMetrica('GOT/AST').canonico).toBe('TGO/AST')
+      expect(normalizarMetrica('GPT/ALT').canonico).toBe('TGP/ALT')
+      expect(normalizarMetrica('Eritrosedimentación').canonico).toBe('Eritrosedimentación')
+      expect(normalizarMetrica('VES').canonico).toBe('Eritrosedimentación')
+      expect(normalizarMetrica('VSG').canonico).toBe('Eritrosedimentación')
+    })
+
+    it('reconoce los dieciséis canónicos NUEVOS del Sprint 18, con y sin método pegado', () => {
+      expect(normalizarMetrica('PCR - Método turbidimetría').canonico).toBe('Proteína C reactiva')
+      expect(normalizarMetrica('TGO - Método cinético UV').canonico).toBe('TGO/AST')
+      expect(normalizarMetrica('TGP - Método cinético UV').canonico).toBe('TGP/ALT')
+      expect(normalizarMetrica('FAL - Método cinético').canonico).toBe('Fosfatasa alcalina')
+      expect(normalizarMetrica('GGT').canonico).toBe('GGT')
+      expect(normalizarMetrica('Bilirrubina total').canonico).toBe('Bilirrubina total')
+      expect(normalizarMetrica('Bilirrubina directa').canonico).toBe('Bilirrubina directa')
+      expect(normalizarMetrica('Bilirrubina indirecta').canonico).toBe('Bilirrubina indirecta')
+      expect(normalizarMetrica('Sodio - Método potenciometría indirecta').canonico).toBe('Sodio')
+      expect(normalizarMetrica('Potasio').canonico).toBe('Potasio')
+      expect(normalizarMetrica('Cloro').canonico).toBe('Cloro')
+      expect(normalizarMetrica('PSA - Método CMIA').canonico).toBe('PSA')
+      expect(normalizarMetrica('Vitamina D - Método CMIA').canonico).toBe('Vitamina D')
+      expect(normalizarMetrica('25-OH Vitamina D').canonico).toBe('Vitamina D')
+      expect(normalizarMetrica('Vitamina B12').canonico).toBe('Vitamina B12')
+      expect(normalizarMetrica('Hierro sérico').canonico).toBe('Ferremia')
+      expect(normalizarMetrica('Procalcitonina').canonico).toBe('Procalcitonina')
+      expect(normalizarMetrica('LDH').canonico).toBe('LDH')
+      expect(normalizarMetrica('Amilasa').canonico).toBe('Amilasa')
+    })
+  })
+
+  describe('limpiarSufijoMetodo', () => {
+    it('es idempotente: aplicarla dos veces da el mismo resultado que una', () => {
+      const nombre = 'TSH - Meia Ultrasensible - Método CMIA'
+      const unaVez = limpiarSufijoMetodo(nombre)
+      expect(limpiarSufijoMetodo(unaVez)).toBe(unaVez)
+    })
+
+    it('no toca un nombre que ya viene limpio', () => {
+      expect(limpiarSufijoMetodo('Glucosa')).toBe('Glucosa')
+      expect(limpiarSufijoMetodo('Colesterol total')).toBe('Colesterol total')
     })
   })
 })
@@ -127,6 +222,89 @@ describe('lib/laboratorio/normalizacion.ts', () => {
         reference_min: null,
         reference_max: null,
       })
+    })
+
+    // Sprint 18 — formas reales que traen los laboratorios argentinos y que
+    // el parser original (32%, 81/257) no entendía.
+    it('parsea un techo en palabras: "menor a"/"menor de"', () => {
+      expect(parsearRangoReferencia('Menor a 45 UI/L')).toMatchObject({
+        reference_min: null,
+        reference_max: 45,
+      })
+      expect(parsearRangoReferencia('menor de 200')).toMatchObject({
+        reference_min: null,
+        reference_max: 200,
+      })
+    })
+
+    it('parsea un piso en palabras: "mayor a"/"mayor de"', () => {
+      expect(parsearRangoReferencia('Mayor a 40')).toMatchObject({ reference_min: 40, reference_max: null })
+    })
+
+    it('parsea "hasta" con coma decimal', () => {
+      expect(parsearRangoReferencia('hasta 4,00')).toMatchObject({ reference_min: null, reference_max: 4 })
+    })
+
+    it('ignora una palabra cualitativa suelta antes del umbral ("Negativo < 5.0")', () => {
+      expect(parsearRangoReferencia('Negativo < 5.0')).toMatchObject({
+        reference_min: null,
+        reference_max: 5,
+      })
+    })
+
+    it('quita un prefijo de etiqueta cualitativa con dos puntos', () => {
+      expect(parsearRangoReferencia('Valor óptimo: menor a 100')).toMatchObject({
+        reference_min: null,
+        reference_max: 100,
+      })
+      expect(parsearRangoReferencia('Deseable: menor de 200')).toMatchObject({
+        reference_min: null,
+        reference_max: 200,
+      })
+    })
+
+    it('parsea un intervalo en palabras "de X a Y" con coma decimal', () => {
+      expect(parsearRangoReferencia('de 13,5 a 17,0')).toMatchObject({
+        reference_min: 13.5,
+        reference_max: 17,
+      })
+    })
+
+    it('un intervalo con guion y coma decimal ya andaba, sigue andando', () => {
+      expect(parsearRangoReferencia('41,0 - 52,0 %')).toMatchObject({ reference_min: 41, reference_max: 52 })
+    })
+
+    it('rango multilínea con etiquetas: usa el segmento de NORMALIDAD y descarta el resto', () => {
+      const texto =
+        'Deficiencia: menor a 10.0 / Insuficiencia: menor a 30.0 / Suficiencia: de 30.00 a 100.0'
+      const resultado = parsearRangoReferencia(texto)
+      expect(resultado.reference_min).toBe(30)
+      expect(resultado.reference_max).toBe(100)
+      // El texto ORIGINAL completo se conserva para mostrarlo en pantalla,
+      // no solo el segmento "Suficiencia".
+      expect(resultado.reference_range).toBe(texto)
+    })
+
+    it('rango multilínea sin etiqueta de normalidad reconocible: prueba desde el último segmento', () => {
+      const resultado = parsearRangoReferencia('Bajo: menor a 10 / Alto: mayor a 50')
+      // Ningún segmento dice "normal"/"suficiencia"/"deseable"/etc.: se
+      // prueba de atrás para adelante y el ÚLTIMO que parsea gana.
+      expect(resultado).toMatchObject({ reference_min: 50, reference_max: null })
+    })
+
+    it('salto de línea real también separa segmentos (no solo " / ")', () => {
+      const resultado = parsearRangoReferencia('Deficiencia: menor a 10.0\nSuficiencia: de 30.0 a 100.0')
+      expect(resultado).toMatchObject({ reference_min: 30, reference_max: 100 })
+    })
+
+    it('"insuficiencia" no matchea la palabra clave "suficiencia" (límite de palabra)', () => {
+      // Si matcheara por substring, "Insuficiencia: menor a 30.0" y
+      // "Suficiencia: de 30 a 100" empatarían como "ambiguo" en vez de
+      // elegir el segundo sin ambigüedad.
+      const resultado = parsearRangoReferencia(
+        'Insuficiencia: menor a 30.0 / Suficiencia: de 30.0 a 100.0',
+      )
+      expect(resultado).toMatchObject({ reference_min: 30, reference_max: 100 })
     })
   })
 
@@ -236,6 +414,69 @@ describe('lib/laboratorio/normalizacion.ts', () => {
       expect(prepararMetricas([], '2026-08-01')).toEqual({ filas: [], duplicadas: [] })
       expect(prepararMetricas(null, '2026-08-01')).toEqual({ filas: [], duplicadas: [] })
       expect(prepararMetricas(undefined, '2026-08-01')).toEqual({ filas: [], duplicadas: [] })
+    })
+
+    // Sprint 18 — resultados CUALITATIVOS ("Strep A: Negativo", "No se
+    // observan espermatozoides"): antes se descartaban en silencio por no
+    // tener `valor` numérico.
+    describe('resultados cualitativos (value_text)', () => {
+      it('acepta una métrica SIN valor numérico pero CON valorTexto', () => {
+        const { filas } = prepararMetricas(
+          [{ nombre: 'Strep A', valorTexto: 'Negativo', unidad: '', rango: '' }],
+          '2026-08-01',
+        )
+        expect(filas).toHaveLength(1)
+        expect(filas[0]).toMatchObject({
+          metric_name: 'Strep A',
+          value: null,
+          value_text: 'Negativo',
+        })
+      })
+
+      it('recorta espacios de valorTexto y descarta un valorTexto vacío/solo-espacios', () => {
+        const { filas } = prepararMetricas(
+          [
+            { nombre: 'HIV', valorTexto: '  No reactivo  ', unidad: '', rango: '' },
+            { nombre: 'Sin nada', valorTexto: '   ', unidad: '', rango: '' },
+          ],
+          '2026-08-01',
+        )
+        expect(filas).toHaveLength(1)
+        expect(filas[0].value_text).toBe('No reactivo')
+      })
+
+      it('descarta en silencio una métrica sin valor numérico NI valorTexto (mismo criterio que antes)', () => {
+        const { filas } = prepararMetricas(
+          [{ nombre: 'Sin ningún valor', unidad: '', rango: '' }],
+          '2026-08-01',
+        )
+        expect(filas).toHaveLength(0)
+      })
+
+      it('un resultado cualitativo también resuelve nombre canónico, rango y deduplica', () => {
+        const avisos = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+        const { filas, duplicadas } = prepararMetricas(
+          [
+            { nombre: 'VDRL', valorTexto: 'No reactivo', unidad: '', rango: '' },
+            { nombre: 'VDRL', valorTexto: 'Repetido', unidad: '', rango: '' },
+          ],
+          '2026-08-01',
+        )
+        expect(filas).toHaveLength(1)
+        expect(filas[0].value_text).toBe('No reactivo')
+        expect(duplicadas).toHaveLength(1)
+
+        avisos.mockRestore()
+      })
+
+      it('conserva value numérico Y value_text cuando las dos vienen juntas', () => {
+        const { filas } = prepararMetricas(
+          [{ nombre: 'Plaquetas', valor: 450000, valorTexto: 'Aumentadas', unidad: '/mm3', rango: '' }],
+          '2026-08-01',
+        )
+        expect(filas[0]).toMatchObject({ value: 450000, value_text: 'Aumentadas' })
+      })
     })
   })
 })

@@ -156,7 +156,9 @@ export function estaFueraDeRango(
  * literal ("mi_metrica_rara") sigue siendo más honesto que inventarle
  * espaciado a un texto que no se sabe si de verdad los lleva.
  */
-function resolverClaveYEtiqueta(fila: FilaLabMetrica): { clave: string; etiqueta: string } {
+function resolverClaveYEtiqueta(
+  fila: Pick<FilaLabMetrica, "metric_canonical" | "metric_name">,
+): { clave: string; etiqueta: string } {
   const base = fila.metric_canonical?.trim() || fila.metric_name.trim()
   const candidatoParaDiccionario = base.replace(/[_-]+/g, " ")
   const { canonico } = normalizarMetrica(candidatoParaDiccionario)
@@ -255,12 +257,18 @@ export async function obtenerSeries(
 ): Promise<ResultadoSeries> {
   const fechaCorte = calcularFechaCorte(periodo, ahora)
 
+  // `.not("value", "is", null)` (Sprint 18, resultados cualitativos):
+  // `lab_metrics.value` pasó a nullable -una fila puede traer en cambio
+  // `value_text`-, y esta consulta alimenta el GRÁFICO numérico, que no
+  // sabe qué hacer con un punto sin número. Los resultados cualitativos
+  // tienen su propio camino, ver `obtenerResultadosCualitativos` más abajo.
   let consulta = supabase
     .from("lab_metrics")
     .select(
       "metric_name, metric_canonical, value, unit, reference_range, reference_min, reference_max, measurement_date, document_id",
     )
     .eq("profile_id", perfilId)
+    .not("value", "is", null)
     .order("measurement_date", { ascending: true })
 
   if (fechaCorte) {
@@ -273,8 +281,76 @@ export async function obtenerSeries(
     return { series: [], metricasDisponibles: [] }
   }
 
-  const series = agruparEnSeries(data)
+  // El filtro de arriba ya garantiza esto en tiempo de ejecución; el type
+  // guard es lo que hace falta para que TypeScript lo sepa también -el tipo
+  // generado de la columna sigue siendo `number | null` sin importar el
+  // `.not()`, que Supabase no refleja en el tipo estático de la consulta-.
+  const filasNumericas = data.filter(
+    (fila): fila is typeof fila & { value: number } => fila.value !== null,
+  )
+
+  const series = agruparEnSeries(filasNumericas)
   return { series, metricasDisponibles: obtenerMetricasDisponibles(series) }
+}
+
+/** Un resultado CUALITATIVO ("Negativo", "No reactivo") dentro del período elegido, sin curva. */
+export interface ResultadoCualitativo {
+  /** Misma clave de agrupación que `SerieMetrica.clave` (por si algún día hace falta cruzar con una serie numérica de la misma métrica). */
+  clave: string
+  etiqueta: string
+  valorTexto: string
+  /** `measurement_date`, `YYYY-MM-DD`. */
+  fecha: string
+  documentoId: string | null
+}
+
+/**
+ * Resultados de laboratorio CUALITATIVOS (Sprint 18): mismo perfil y mismo
+ * corte de período que `obtenerSeries`, pero para filas con `value_text` en
+ * vez de `value` -no tienen curva posible, así que no entran en
+ * `agruparEnSeries`-. `/estudios/tendencias` los muestra como una lista
+ * aparte ("marca sin curva", ver `components/estudios/lista-resultados-cualitativos.tsx`),
+ * más reciente primero.
+ *
+ * Reusa `resolverClaveYEtiqueta` -la única razón de que esa función tomara
+ * un `Pick` en vez de `FilaLabMetrica` completa- para que "PCR" cualitativo
+ * y "PCR" numérico (si algún día coexisten) resuelvan a la MISMA etiqueta
+ * canónica que el resto de la app.
+ */
+export async function obtenerResultadosCualitativos(
+  supabase: ClienteSupabaseServidor,
+  perfilId: string,
+  periodo: PeriodoSerie,
+  ahora: Date = new Date(),
+): Promise<ResultadoCualitativo[]> {
+  const fechaCorte = calcularFechaCorte(periodo, ahora)
+
+  let consulta = supabase
+    .from("lab_metrics")
+    .select("metric_name, metric_canonical, value_text, measurement_date, document_id")
+    .eq("profile_id", perfilId)
+    .not("value_text", "is", null)
+    .order("measurement_date", { ascending: false })
+
+  if (fechaCorte) {
+    consulta = consulta.gte("measurement_date", fechaCorte)
+  }
+
+  const { data, error } = await consulta
+  if (error || !data) return []
+
+  return data
+    .filter((fila): fila is typeof fila & { value_text: string } => fila.value_text !== null)
+    .map((fila) => {
+      const { clave, etiqueta } = resolverClaveYEtiqueta(fila)
+      return {
+        clave,
+        etiqueta,
+        valorTexto: fila.value_text,
+        fecha: fila.measurement_date,
+        documentoId: fila.document_id,
+      }
+    })
 }
 
 /**
