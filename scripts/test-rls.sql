@@ -1457,6 +1457,161 @@ select pruebas_rls.registrar('8e. resultados cualitativos',
 
 
 -- =============================================================================
+-- BLOQUE 8f — parámetro `nuevo_doctor_id` del RPC (hotfix "Vincular",
+-- 20260819210000_extraccion_recuperable.sql)
+-- -----------------------------------------------------------------------------
+-- `confirmar_documento_recien_subido` se extendió con un ONCEAVO parámetro
+-- `nuevo_doctor_id uuid DEFAULT NULL` que persiste en `documents.doctor_id`
+-- -la columna que existía desde el esquema inicial y que ningún flujo
+-- escribía-. La guarda 7 exige que ese médico sea del MISMO perfil del
+-- documento: `documents_doctor_id_fkey` sólo pide que la fila exista en
+-- `doctors`, no que sea del mismo historial, así que sin este chequeo un campo
+-- oculto editado a mano dejaría el documento apuntando al médico de OTRA
+-- persona.
+--
+-- Se prueban cuatro cosas: el caso feliz (mismo perfil, queda persistido), el
+-- hostil (médico de otro perfil, se rechaza la llamada COMPLETA de forma
+-- atómica), el de compatibilidad (llamar con 10 argumentos, sin el parámetro
+-- nuevo, sigue resolviendo contra la MISMA función) y la limpieza de la copia
+-- cruda de la lectura automática al confirmar.
+--
+-- El médico ajeno se siembra como `postgres` (BYPASSRLS, igual que la sección
+-- 2 del arnés) y vive en el directorio de :p_b, la otra CUENTA: A no puede ni
+-- verlo. Es el caso realista de un campo oculto manipulado a mano con un id
+-- que quien envía nunca podría haber elegido de una lista.
+-- =============================================================================
+\echo '### BLOQUE 8f — parámetro doctor_id del RPC de confirmación'
+
+insert into public.doctors (id, profile_id, full_name, specialties) values
+    ('d0c70402-0000-4000-8000-000000000002', :p_b, 'Dr. Ajeno de la otra cuenta', '{"Clínica médica"}');
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+insert into public.doctors (id, profile_id, full_name, specialties) values
+    ('d0c70401-0000-4000-8000-000000000001', :p_a, 'Dr. Propio del Perfil A', '{"Clínica médica"}');
+
+insert into public.documents (id, profile_id, title, category, document_date, storage_path) values
+    ('f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f1', :p_a, 'Análisis para vincular (sin revisar)',     'other', '2026-08-13', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8f-ok.pdf'),
+    ('f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f2', :p_a, 'Análisis con médico ajeno (sin revisar)',  'other', '2026-08-14', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8f-ajeno.pdf'),
+    ('f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f3', :p_a, 'Análisis sin vincular nada (sin revisar)', 'other', '2026-08-15', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/2026/bloque8f-sin.pdf');
+
+-- Se siembra a mano la copia cruda de la lectura automática en el documento
+-- del caso feliz, para poder comprobar que la confirmación la limpia. En el
+-- flujo real la escribe `lib/documentos/extraccion-admin.ts` con service_role;
+-- acá alcanza con un UPDATE de A, que sobre su propio perfil es titular.
+update public.documents
+   set ai_extraction        = '{"titulo":"algo"}'::jsonb,
+       ai_extraction_status = 'listo'
+ where id = 'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f1';
+
+commit;
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f1',
+            'Análisis vinculado — agosto', 'laboratory', '2026-08-13', null, null,
+            'Sanatorio San Jorge', 'Clínica médica', 'Dr. Propio del Perfil A',
+            null, 'd0c70401-0000-4000-8000-000000000001');
+        v := coalesce((select doctor_id::text from public.documents
+                        where id = 'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f1'),
+                      'NULL');
+    exception when others then v := 'error ' || sqlstate || ' ' || sqlerrm;
+    end;
+    perform pruebas_rls.registrar('8f. médico vinculado',
+        'A confirma vinculando un médico de SU MISMO perfil: queda persistido en documents.doctor_id',
+        'd0c70401-0000-4000-8000-000000000001', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8f. médico vinculado',
+       'La confirmación deja la copia cruda de la lectura automática en NULL (minimización de datos)',
+       'sin copia cruda',
+       coalesce((select case when ai_extraction is null
+                              and ai_extraction_duplicate is null
+                              and ai_extraction_error is null
+                         then 'sin copia cruda' else 'quedó algo' end
+                   from public.documents
+                  where id = 'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f1'),
+                'NO ENCONTRADO'));
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f2',
+            'Análisis con médico ajeno', 'laboratory', '2026-08-14', null, null,
+            null, null, null, null, 'd0c70402-0000-4000-8000-000000000002');
+        v := 'confirmado (no debería)';
+    exception when invalid_parameter_value then v := 'rechazado (22023)';
+             when others                   then v := 'error ' || sqlstate;
+    end;
+    perform pruebas_rls.registrar('8f. médico vinculado',
+        'A confirma un documento de :p_a vinculando un médico de OTRA cuenta (guarda 7): se rechaza la llamada completa  [CRITERIO DE ACEPTACIÓN]',
+        'rechazado (22023)', v);
+end $$;
+
+commit;
+
+select pruebas_rls.registrar('8f. médico vinculado',
+       'El rechazo por guarda 7 es atómico: el documento sigue SIN confirmar y sin doctor_id',
+       'sin confirmar, sin doctor_id',
+       case when exists (
+                 select 1 from public.documents
+                  where id = 'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f2'
+                    and confirmed_at is null
+                    and doctor_id is null
+                    and title = 'Análisis con médico ajeno (sin revisar)')
+            then 'sin confirmar, sin doctor_id'
+            else 'estado inesperado' end);
+
+begin;
+select set_config('request.jwt.claims', :jwt_a, true);
+set local role authenticated;
+
+do $$
+declare v text;
+begin
+    begin
+        perform public.confirmar_documento_recien_subido(
+            'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f3',
+            'Análisis sin vincular', 'laboratory', '2026-08-15', null, null,
+            null, null, 'Dr. Escrito A Mano', '778899');
+        v := case when exists (select 1 from public.documents
+                                where id = 'f0f0f0f0-f0f0-4f0f-8f0f-f0f0f0f0f0f3'
+                                  and confirmed_at is not null
+                                  and doctor_id is null
+                                  and doctor_name = 'Dr. Escrito A Mano')
+                  then 'confirmado, sin vínculo'
+                  else 'estado inesperado' end;
+    exception when others then v := 'error ' || sqlstate || ' ' || sqlerrm;
+    end;
+    perform pruebas_rls.registrar('8f. médico vinculado',
+        'Llamando con 10 argumentos (sin el parámetro nuevo) sigue resolviendo contra la MISMA función: vincular es opcional',
+        'confirmado, sin vínculo', v);
+end $$;
+
+commit;
+
+-- Mismo criterio que el cierre de 8b/8d/8e: no se borran acá, la limpieza
+-- final del script los arrastra por CASCADE al borrar auth.users.
+
+
+-- =============================================================================
 -- BLOQUE 9 — recordatorios de turnos: infraestructura cerrada (tarea 6.4)
 -- -----------------------------------------------------------------------------
 -- `appointment_reminders` y sus funciones son INFRAESTRUCTURA: las escriben

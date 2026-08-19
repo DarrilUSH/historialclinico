@@ -397,6 +397,11 @@ export type Database = {
       documents: {
         Row: {
           ai_confidence: number | null
+          ai_extraction: Json | null
+          ai_extraction_duplicate: Json | null
+          ai_extraction_error: string | null
+          ai_extraction_started_at: string | null
+          ai_extraction_status: string
           ai_summary: string | null
           auto_ingest_source: string | null
           category: Database["public"]["Enums"]["doc_category"]
@@ -421,6 +426,11 @@ export type Database = {
         }
         Insert: {
           ai_confidence?: number | null
+          ai_extraction?: Json | null
+          ai_extraction_duplicate?: Json | null
+          ai_extraction_error?: string | null
+          ai_extraction_started_at?: string | null
+          ai_extraction_status?: string
           ai_summary?: string | null
           auto_ingest_source?: string | null
           category?: Database["public"]["Enums"]["doc_category"]
@@ -445,6 +455,11 @@ export type Database = {
         }
         Update: {
           ai_confidence?: number | null
+          ai_extraction?: Json | null
+          ai_extraction_duplicate?: Json | null
+          ai_extraction_error?: string | null
+          ai_extraction_started_at?: string | null
+          ai_extraction_status?: string
           ai_summary?: string | null
           auto_ingest_source?: string | null
           category?: Database["public"]["Enums"]["doc_category"]
@@ -1645,6 +1660,7 @@ export type Database = {
           nueva_especialidad?: string
           nueva_fecha: string
           nueva_institucion?: string
+          nuevo_doctor_id?: string
           nuevo_medico?: string
           nuevo_numero_orden?: string
           nuevo_resumen: string
@@ -1652,6 +1668,11 @@ export type Database = {
         }
         Returns: {
           ai_confidence: number | null
+          ai_extraction: Json | null
+          ai_extraction_duplicate: Json | null
+          ai_extraction_error: string | null
+          ai_extraction_started_at: string | null
+          ai_extraction_status: string
           ai_summary: string | null
           auto_ingest_source: string | null
           category: Database["public"]["Enums"]["doc_category"]
@@ -1726,6 +1747,11 @@ export type Database = {
         Args: { doc_id: string }
         Returns: {
           ai_confidence: number | null
+          ai_extraction: Json | null
+          ai_extraction_duplicate: Json | null
+          ai_extraction_error: string | null
+          ai_extraction_started_at: string | null
+          ai_extraction_status: string
           ai_summary: string | null
           auto_ingest_source: string | null
           category: Database["public"]["Enums"]["doc_category"]

@@ -138,6 +138,15 @@ function documentoDe(parcial: Partial<Documento>): Documento {
     // Hotfix de duplicados semánticos (20260818180000): la ficha no lo mira,
     // pero la fila del fixture tiene que ser una fila COMPLETA de `documents`.
     numero_orden: null,
+    // Hotfix "la extracción sobrevive al bloqueo de pantalla" (20260819210000):
+    // mismo caso que `numero_orden`. Un documento CONFIRMADO -como este
+    // fixture- tiene la copia cruda de la lectura ya limpiada, y ése es
+    // justamente el estado que deja el RPC de confirmación.
+    ai_extraction: null,
+    ai_extraction_duplicate: null,
+    ai_extraction_status: "listo",
+    ai_extraction_error: null,
+    ai_extraction_started_at: null,
     ...parcial,
   }
 }

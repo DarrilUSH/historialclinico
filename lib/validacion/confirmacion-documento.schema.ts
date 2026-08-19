@@ -128,6 +128,29 @@ export const schemaConfirmacionDocumento = z.object({
     .max(60, 'El número de orden es demasiado largo (máx. 60 caracteres).')
     .optional()
     .transform((valor) => (valor && valor.length > 0 ? valor : undefined)),
+
+  // Médico VINCULADO del directorio (hotfix "Vincular", 19/08/2026): campo
+  // OCULTO que `formulario-revision.tsx` llena al tocar "Vincular" o
+  // "Agregar" en la franja de cotejo, y que deja vacío el resto del tiempo
+  // -vincular es opcional: el campo de texto "Médico" sigue existiendo solo,
+  // igual que antes-. Cadena vacía se normaliza a `undefined` (mismo patrón
+  // que los campos de texto de arriba), y cualquier otra cosa tiene que tener
+  // forma de uuid.
+  //
+  // Que la forma sea válida NO alcanza: el RPC verifica además que ese médico
+  // sea del MISMO perfil del documento (guarda 7 de
+  // `20260819210000_extraccion_recuperable.sql`), porque un campo oculto viaja
+  // en el `FormData` como cualquier otro input y nada impide editarlo a mano.
+  // Mismo reparto que `resolverDoctorId` para `appointments.doctor_id`.
+  doctorId: z
+    .string({ message: 'El médico elegido no es válido.' })
+    .trim()
+    .optional()
+    .transform((valor) => (valor && valor.length > 0 ? valor : undefined))
+    .refine(
+      (valor) => valor === undefined || PATRON_UUID.test(valor),
+      'El médico elegido no es válido, o no pertenece a este directorio. Volvé a elegirlo de la lista.',
+    ),
 })
 
 export type ConfirmacionDocumento = z.infer<typeof schemaConfirmacionDocumento>

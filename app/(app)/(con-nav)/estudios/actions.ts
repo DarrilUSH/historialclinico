@@ -225,6 +225,20 @@ const ERROR_INESPERADO_DESCARTE =
  * no esta acción-, así que acá alcanza con un filtrado razonable, no con
  * paranoia total.
  *
+ * ## `doctorId`: el vínculo con el directorio (hotfix "Vincular", 19/08/2026)
+ *
+ * `documents.doctor_id` existía en el esquema desde el primer día pero ningún
+ * flujo lo escribía: "Vincular" en la franja de cotejo de médicos sólo
+ * normalizaba el TEXTO del campo "Médico" -y cuando el nombre extraído ya
+ * coincidía exactamente con el del directorio, eso no cambiaba nada y el botón
+ * parecía roto (reporte del dueño: *"al tocarlo no hace absolutamente nada"*)-.
+ * Ahora la franja además avisa QUÉ médico se vinculó, y el id viaja en el
+ * campo oculto `doctorId` hasta el RPC, que lo persiste después de verificar
+ * que sea un médico del MISMO perfil del documento (guarda 7). Vincular nunca
+ * crea un médico: eso sigue siendo exclusivamente de "Agregar"
+ * (`crearMedicoDesdeCruce`), así que confirmar no puede dejar un duplicado en
+ * el directorio.
+ *
  * Firma `(prevState, formData)` para poder usarse con `useActionState` desde
  * `formulario-revision.tsx`, mismo patrón que `familia/actions.ts`.
  */
@@ -242,6 +256,7 @@ export async function confirmarDocumento(
     especialidad: formData.get("especialidad"),
     medico: formData.get("medico"),
     numeroOrden: formData.get("numeroOrden"),
+    doctorId: formData.get("doctorId"),
   }
 
   const validacion = validarConfirmacionDocumento(crudo)
@@ -259,6 +274,7 @@ export async function confirmarDocumento(
     especialidad,
     medico,
     numeroOrden,
+    doctorId,
   } = validacion.datos
 
   // Las métricas son best-effort: un campo oculto roto o con forma inesperada
@@ -321,6 +337,16 @@ export async function confirmarDocumento(
       // vez de `null` (el tipo generado del parámetro no lleva `| null`),
       // aunque el RPC trata las dos formas igual.
       nuevo_numero_orden: numeroOrden ?? "",
+      // El vínculo con el directorio (hotfix "Vincular", 19/08/2026). Acá NO
+      // se puede mandar string vacía: es un `uuid` y `''::uuid` explota en el
+      // cast. Se manda `undefined`, que `JSON.stringify` directamente omite
+      // del cuerpo, y entonces el parámetro toma su `DEFAULT NULL`.
+      //
+      // La pertenencia al perfil del documento la verifica el RPC (guarda 7),
+      // no esta acción: es la última palabra y ya tiene `fila.profile_id` a
+      // mano. Si el id no es de ese directorio, el RPC devuelve el mensaje en
+      // español que el formulario muestra tal cual.
+      nuevo_doctor_id: doctorId ?? undefined,
     })
 
     if (error) {

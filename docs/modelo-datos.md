@@ -272,6 +272,45 @@ Eso cambia tres cosas respecto del resto del modelo, y las tres están documenta
 
 ---
 
+### 15. La lectura automática es un ESTADO de la fila, no una respuesta HTTP (19/08/2026)
+
+`documents` lleva cinco columnas que describen la lectura con IA del documento
+mientras dura la revisión: `ai_extraction` (la extracción validada, jsonb),
+`ai_extraction_duplicate` (el duplicado semántico cotejado), `ai_extraction_status`
+(`pendiente` | `procesando` | `listo` | `error`), `ai_extraction_error` (el mensaje
+en español que corresponde mostrar) y `ai_extraction_started_at` (cuándo se tomó la
+corrida en curso).
+
+**Por qué están en la fila y no sólo en la respuesta del route handler.** Hasta el
+hotfix del 19/08/2026, la extracción entera -título, fecha, categoría, institución,
+médico, número de orden, métricas- viajaba ÚNICAMENTE en el cuerpo de
+`POST /api/documentos/extraer`, y de todo eso la fila guardaba sólo `ai_summary` y
+`raw_ocr_text`. Cuando Android congelaba la pestaña (bloqueo de pantalla, cambio de
+app), el `fetch` del cliente moría y el trabajo se perdía entero: el servidor
+terminaba bien y gastaba la cuota de Gemini igual. Un resultado que la persona pagó
+tiene que sobrevivir a que se le apague la pantalla, y para eso tiene que estar en la
+base.
+
+**Son transitorias a propósito.** `confirmar_documento_recien_subido` pone
+`ai_extraction`, `ai_extraction_duplicate` y `ai_extraction_error` en NULL en el mismo
+`UPDATE` que sella `confirmed_at`: para entonces los datos ya viven en las columnas de
+verdad (`title`, `document_date`, `category`, `institution`, `specialty`,
+`doctor_name`, `numero_orden`) y en `lab_metrics`, así que conservar una segunda copia
+de datos de salud sería guardar de más (`docs/minimizacion-datos.md`).
+
+**Quién las escribe.** `lib/documentos/extraccion-admin.ts`, con `service_role`, por el
+mismo motivo -y con el mismo contrato- que `lib/documentos/huella-admin.ts` escribe
+`content_sha256`: `documents_update_administrador` exige `can_manage` para cualquier
+`UPDATE`, y quien sube puede tener sólo `can_upload`. No es un dato que dicte el
+cliente: es 100 % derivado por el servidor a partir de bytes que ya estaban en el
+bucket bajo ese mismo `profile_id`, después de que el route handler verificó sesión,
+fila (RLS) y `requerirPermiso(perfil, "upload")`.
+
+**`ai_extraction_started_at` no es decorativo:** una corrida que se toma el estado
+`procesando` y muere (función serverless reiniciada) dejaría el documento clavado para
+siempre. Con la marca de tiempo, pasada la ventana de `VENTANA_RECLAMO_MS`, otra
+corrida puede retomarlo.
+
 ## 4. Índices
 
 Se indexaron los accesos que la aplicación hace de verdad, no todas las columnas.
@@ -282,6 +321,7 @@ Se indexaron los accesos que la aplicación hace de verdad, no todas las columna
 | `documents_profile_categoria_fecha_idx` | `documents (profile_id, category, document_date DESC)` | Filtro por categoría |
 | `documents_profile_institution_idx` | `documents (profile_id, institution)` | Filtro por institución |
 | `documents_doctor_id_idx` | `documents (doctor_id)` parcial | Estudios de un profesional |
+| `documents_extraccion_en_curso_idx` | `documents (ai_extraction_started_at)` parcial por `ai_extraction_status = 'procesando'` | Lecturas automáticas colgadas (el único acceso que no es por `id`) |
 | `lab_metrics_profile_nombre_fecha_idx` | `lab_metrics (profile_id, metric_name, measurement_date DESC)` | Serie temporal por métrica |
 | `lab_metrics_profile_canonico_fecha_idx` | `lab_metrics (profile_id, metric_canonical, measurement_date DESC)` parcial | Serie temporal normalizada y "último valor" |
 | `appointments_profile_fecha_idx` | `appointments (profile_id, appointment_date)` | Agenda completa |

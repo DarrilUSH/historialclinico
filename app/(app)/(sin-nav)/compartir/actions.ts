@@ -14,6 +14,17 @@
  * ya existe desde el Sprint 4. Ningún archivo queda "guardado" hasta que esa
  * pantalla se confirma: la IA nunca guarda sola, la regla vale igual acá.
  *
+ * ## Elegir un destino acá ES entrar a ese perfil (hotfix del 19/08/2026)
+ *
+ * `elegirPerfilParaCompartido` además deja el perfil elegido como PERFIL
+ * ACTIVO. Ésta es la única pantalla del producto donde el perfil sobre el que
+ * se opera no sale de la cookie sino de un selector propio, y hasta este
+ * hotfix el resto del recorrido no se enteraba: el cartel de la revisión
+ * nombraba al titular en vez del perfil elegido (reporte real del dueño), el
+ * cruce de médicos cotejaba contra el directorio equivocado, y al confirmar se
+ * aterrizaba en el listado de otra persona. El porqué completo está en el
+ * comentario de la línea donde se fija.
+ *
  * ## Duplicado (hotfix de huella digital, Sprint 17 en vivo)
  *
  * Si `ingestarDocumento` encuentra un archivo idéntico ya cargado en el
@@ -37,6 +48,7 @@ import {
 } from "@/lib/auth/guardas"
 import { esTokenCompartidoValido, yaVencio } from "@/lib/documentos/compartir-temporal"
 import { ErrorIngesta, ingestarDocumento } from "@/lib/documentos/ingesta"
+import { fijarPerfilActivo } from "@/lib/perfil-activo"
 import { BUCKETS, borrarObjeto, descargarObjeto } from "@/lib/storage-admin"
 
 export interface EstadoDescarteCompartido {
@@ -129,6 +141,39 @@ export async function elegirPerfilParaCompartido(
           `&doc=${resultado.existente.documentoId}&perfil=${perfilId}`
       } else {
         await limpiarTemporal(supabase, archivoId, fila.storage_path)
+
+        // El perfil ELEGIDO pasa a ser el ACTIVO (hotfix del 19/08/2026).
+        //
+        // Ésta es la única pantalla del producto donde el perfil sobre el que
+        // se opera NO sale de la cookie sino de un selector propio, y hasta
+        // acá el resto del recorrido no se enteraba: la revisión decía "Antes
+        // de sumarlo al historial de <el titular>" -reporte real del dueño-,
+        // la franja "¿Es este médico que ya tenés?" cotejaba contra el
+        // directorio del perfil activo, "Agregar" habría dado de alta el
+        // médico en el historial equivocado, y al confirmar se aterrizaba en
+        // el listado de OTRA persona. Todo eso es la misma causa: elegir un
+        // destino acá es, para la persona, "entrar" a ese historial, y la
+        // cookie no lo reflejaba.
+        //
+        // `fijarPerfilActivo` revalida `view` contra la base antes de escribir
+        // -acá ya está garantizado: `requerirPermiso(perfilId, "upload")` pasó
+        // más arriba, y `upload` implica `view`- y audita `ver_perfil`, que es
+        // exactamente lo que corresponde registrar: la persona entró a ese
+        // perfil.
+        //
+        // Best-effort a propósito: el documento YA está ingestado en el perfil
+        // correcto y la pantalla de revisión resuelve el nombre, los médicos y
+        // los títulos desde la FILA del documento, así que si esto fallara la
+        // revisión seguiría siendo correcta. No hay motivo para convertir un
+        // fallo de cookie en un error de carga.
+        try {
+          await fijarPerfilActivo(perfilId)
+        } catch (error) {
+          console.error(
+            `[compartir] No se pudo dejar activo el perfil ${perfilId} después de recibir el archivo:`,
+            error instanceof Error ? error.message : error,
+          )
+        }
 
         revalidatePath("/estudios")
         destino = `/estudios/nuevo/procesando?doc=${resultado.documento.documentoId}`

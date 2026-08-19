@@ -1,13 +1,58 @@
 /**
- * `POST /api/documentos/extraer` — dispara la lectura automática de un
- * documento médico ya subido con Gemini y guarda la extracción CRUDA.
+ * `/api/documentos/extraer` — la lectura automática de un documento médico ya
+ * subido, con Gemini.
  *
- * Es un Route Handler (no una Server Action) a propósito: la pantalla
- * `/estudios/nuevo/procesando` necesita poder invocarlo desde un Client
- * Component vía `fetch` y mostrar un estado de carga mientras la llamada a
- * Gemini está en curso (hasta 30s + 1 reintento, ver `lib/gemini/client.ts`),
- * algo que una Server Action invocada como `<form action>` no ofrece igual de
- * simple.
+ * Dos métodos, un solo recurso: "el estado de la lectura de este documento".
+ *
+ * - **`POST { documentoId }`** — pide que la lectura ARRANQUE. Contesta
+ *   enseguida (no espera a Gemini) con el estado en el que quedó el documento.
+ * - **`GET ?doc={id}`** — pregunta en qué anda. Es lo que usa la pantalla de
+ *   revisión al volver del bloqueo de pantalla.
+ *
+ * ## Por qué el `POST` ya no espera a Gemini (hotfix del 19/08/2026)
+ *
+ * Reporte del dueño, usando la app en su teléfono: *"cuando está analizando un
+ * archivo y se bloquea el celular o se cambia de aplicación se corta y larga
+ * error, ¿no se puede hacer que quede en segundo plano y finalice?"*.
+ *
+ * Antes este handler hacía TODO adentro de la request -descarga, hasta tres
+ * intentos contra Gemini (peor caso ≈ 94 s), cotejo de duplicados- y devolvía
+ * la extracción entera en el cuerpo. La pantalla, del otro lado, mantenía ese
+ * `fetch` abierto durante todo ese tiempo. Cuando Android congela la pestaña
+ * -bloqueo de pantalla, cambio de app- ese `fetch` muere, y con él moría el
+ * trabajo: el servidor terminaba bien, la cuota de Gemini se gastaba igual, y
+ * la persona veía "No pudimos conectarnos para leer el documento" con el
+ * formulario vacío. Reproducido en local abortando el `fetch` del cliente a
+ * los 400 ms: la fila quedaba con `ai_summary` escrito (el servidor SÍ había
+ * terminado) y la pantalla mostraba el error terminal.
+ *
+ * Ahora el trabajo pesado va en `after()` (`next/server`), que ejecuta después
+ * de que la respuesta se terminó de mandar y que -según su propia
+ * documentación- **corre aunque la respuesta no haya llegado bien**. En Vercel
+ * se apoya en `waitUntil`, que extiende la vida de la invocación hasta que la
+ * promesa termina; `maxDuration` sigue acotando el total. El resultado se
+ * guarda en la fila (`lib/documentos/extraccion-admin.ts`), así que:
+ *
+ * - el `POST` del cliente dura milisegundos en vez de un minuto y medio: la
+ *   ventana en la que congelar la pestaña puede romper algo se vuelve
+ *   minúscula;
+ * - y aunque se rompa, no se pierde nada: la lectura sigue del lado del
+ *   servidor y el `GET` la entrega cuando la persona vuelve.
+ *
+ * ## Un `fetch` muerto ya no significa "la lectura falló"
+ *
+ * Ver `lib/documentos/lectura-automatica.ts`: el ÉXITO DE LA REQUEST lo dice
+ * el status HTTP; el ESTADO DE LA LECTURA lo dice `estado`, dentro del cuerpo,
+ * y sale de la base. Son dos cosas distintas y ahora se leen por separado.
+ *
+ * ## Nunca dos llamadas a Gemini por el mismo documento
+ *
+ * Con el cliente reintentando al volver a primer plano, dos `POST` pueden
+ * llegar casi juntos. `reclamarLectura` (`extraccion-admin.ts`) hace la
+ * transición `pendiente|error → procesando` en un solo `UPDATE` condicional:
+ * gana uno solo. El que pierde recibe `procesando` y se pone a esperar; si la
+ * lectura ya estaba `listo`, la respuesta trae el resultado guardado sin
+ * pasar por Gemini.
  *
  * ## Guardas, en orden (mismo criterio que `subirDocumento`, `estudios/actions.ts`)
  *
@@ -19,11 +64,13 @@
  *    "no existe" de "no tenés permiso" -principio 3 de
  *    `docs/modelo-permisos.md`- y contesta el mismo 404 genérico en los dos
  *    casos.
- * 3. **`requerirPermiso(profile_id_del_documento, "upload")`.** Extraer es
- *    parte del flujo de carga, no de la simple visualización: dispara una
- *    llamada real a la API de Gemini (consumo de cuota), así que un
- *    `can_view` -que puede ABRIR el documento pero no subió nada- no puede
- *    gatillarla. Se reutiliza la sesión ya resuelta en el paso 1
+ * 3. **`requerirPermiso(profile_id_del_documento, "upload")` en el `POST`,
+ *    `"view"` en el `GET`.** Arrancar una lectura es parte del flujo de carga
+ *    y dispara una llamada real a la API de Gemini (consumo de cuota), así que
+ *    un `can_view` -que puede ABRIR el documento pero no subió nada- no puede
+ *    gatillarla. PREGUNTAR en qué anda, en cambio, no gasta nada y no muestra
+ *    ningún dato que quien tiene `view` no pueda ver igual abriendo el
+ *    documento. Se reutiliza la sesión ya resuelta en el paso 1
  *    (`opciones.sesion`) para no pagar un `auth.getUser()` de más.
  *
  * ## Por qué la descarga del archivo va con el cliente del USUARIO
@@ -32,67 +79,50 @@
  * pero el ARCHIVO en Storage es un recurso aparte con su propia política
  * (`objetos_select_puede_ver_perfil`, `supabase/migrations/20260812230000_storage.sql`).
  * Descargar con `supabase.storage.download()` del cliente del usuario hace que
- * esa política vuelva a decidir -exactamente el mismo criterio que
- * `lib/storage-admin.ts` documenta en su encabezado ("quien llama es
- * responsable de haber verificado el permiso antes"): acá NO hace falta el
- * cliente admin porque el permiso ya se verificó dos veces (fila + upload) y
- * el path sale de la propia fila, nunca del cliente.
+ * esa política vuelva a decidir. Esto NO cambió con el hotfix: lo único que
+ * pasó a `service_role` es la ESCRITURA del resultado, y el porqué está
+ * documentado en el encabezado de `lib/documentos/extraccion-admin.ts` (es el
+ * mismo motivo por el que `lib/documentos/huella-admin.ts` escribe
+ * `content_sha256` con `service_role`: `documents_update_administrador` exige
+ * `can_manage`, que quien sube no necesariamente tiene).
  *
- * ## Qué persiste este handler y qué NO
+ * ## Qué persiste y qué NO
  *
- * Guarda `ai_summary` y `raw_ocr_text` -la extracción CRUDA, tal como la
- * devolvió Gemini-. La CONFIRMACIÓN del usuario (título/fecha/categoría
- * finales editados a mano + `lab_metrics`) es de las tareas 4.5/4.6 del
- * roadmap y este handler no la implementa: no toca `title`, `category`,
- * `document_date`, `specialty`, `institution` ni `doctor_name`, y no inserta
- * en `lab_metrics`.
- *
- * **El `UPDATE` de persistencia va con el cliente del USUARIO, nunca con
- * `service_role`, y puede no aplicarse.** La política
- * `documents_update_administrador` (`20260812220000_rls.sql`) exige
- * `puede_administrar_perfil` (`can_manage`) para CUALQUIER `UPDATE` sobre
- * `documents` -deliberado, ver el comentario de esa política ("Si la
- * extracción de IA quedó mal, NO puede corregirlo después: eso es una edición
- * y requiere `can_manage`") y el caso "3. can_upload" de
- * `scripts/test-rls.sql` ("no corrige ni su propia carga")-. Un actor con
- * `can_upload` pero SIN `can_manage` puede disparar la extracción -Gemini
- * cuesta cuota igual- y esta respuesta le devuelve el JSON completo para que
- * la pantalla lo muestre, pero el `UPDATE` no afecta ninguna fila: RLS lo deja
- * pasar en silencio (0 filas, sin error) porque así es como Postgres responde
- * a un `USING` que no matchea, no como un permiso rechazado explícito. Este
- * handler no lo trata como una falla -la extracción en sí funcionó-, solo lo
- * deja anotado en el log del servidor (prefijo `[extraccion]`, mismo criterio
- * que `[auditoria]` e `[ingesta]`) para que no sea un silencio invisible. Con
- * los datos de prueba de `supabase/seed.sql`, María administra a Roberto
- * (`can_manage` incluido), así que el `UPDATE` sí se aplica en el flujo real
- * de verificación de esta tarea.
+ * Guarda la extracción CRUDA validada (`ai_extraction`), el duplicado
+ * semántico cotejado (`ai_extraction_duplicate`), el resumen (`ai_summary`) y
+ * el extracto de texto (`raw_ocr_text`). La CONFIRMACIÓN del usuario
+ * -título/fecha/categoría finales editados a mano + `lab_metrics`- sigue
+ * siendo del RPC `confirmar_documento_recien_subido`: este handler no toca
+ * `title`, `category`, `document_date`, `specialty`, `institution`,
+ * `doctor_name` ni `doctor_id`, y no inserta en `lab_metrics`. La IA nunca
+ * guarda sola.
  *
  * ## Duplicados SEMÁNTICOS (Capas 2 y 3, hotfix sobre la huella byte-a-byte)
  *
- * Justo después de validar la extracción -y antes de devolver la respuesta-
- * este handler coteja los datos recién leídos contra los documentos YA
- * CONFIRMADOS del mismo perfil (`lib/documentos/duplicados-semanticos-consulta.ts`):
- * mismo laboratorio + mismo N° de orden (Capa 2), o TODOS los datos
- * extraídos exactamente iguales -fecha primero, es condición necesaria- (Capa
- * 3). Es el único momento del flujo humano en el que existen datos
- * estructurados con los que comparar: la huella (Capa 1) corre ANTES, dentro
- * de `ingestarDocumento`, sobre los bytes crudos. Si encuentra uno,
- * `duplicadoSemantico` viaja en la respuesta con la fecha YA FORMATEADA
- * (`formatearFechaDuplicado`, servidor) para que `FormularioRevision` solo
+ * Justo después de validar la extracción, esta lectura coteja los datos recién
+ * leídos contra los documentos YA CONFIRMADOS del mismo perfil
+ * (`lib/documentos/duplicados-semanticos-consulta.ts`): mismo laboratorio +
+ * mismo N° de orden (Capa 2), o TODOS los datos extraídos exactamente iguales
+ * -fecha primero, es condición necesaria- (Capa 3). Es el único momento del
+ * flujo humano en el que existen datos estructurados con los que comparar: la
+ * huella (Capa 1) corre ANTES, dentro de `ingestarDocumento`, sobre los bytes
+ * crudos. Si encuentra uno, viaja con la fecha YA FORMATEADA
+ * (`formatearFechaDuplicado`, servidor) para que `FormularioRevision` sólo
  * tenga que mostrarla. Es best-effort: un error en el cotejo se loguea y no
  * bloquea la extracción ya conseguida.
  *
  * ## Errores de Gemini: mensajes en español, nunca un 500 sin cuerpo
  *
- * `extraerJson` (`lib/gemini/client.ts`) ya resuelve el timeout y el único
- * reintento; acá solo queda traducir sus excepciones tipadas a un mensaje
- * mostrable. El caso de cuota (HTTP 429) tiene mensaje propio por la regla de
+ * `extraerJson` (`lib/gemini/client.ts`) ya resuelve el timeout y los dos
+ * reintentos; acá sólo queda traducir sus excepciones tipadas a un mensaje
+ * mostrable, que ahora se GUARDA en `ai_extraction_error` en vez de viajar
+ * suelto. El caso de cuota (HTTP 429) tiene mensaje propio por la regla de
  * costo cero del proyecto: NUNCA se le sugiere a la persona pagar por más
- * cuota, se la manda a cargar los datos a mano -la pantalla de edición manual
- * es la tarea 4.5, pero el mensaje ya la anticipa-.
+ * cuota, se la manda a cargar los datos a mano.
  */
 
 import { NextResponse } from "next/server"
+import { after } from "next/server"
 
 import {
   GeminiApiError,
@@ -103,10 +133,28 @@ import {
 } from "@/lib/gemini/client"
 import { PROMPT_DOCUMENTO_MEDICO } from "@/lib/gemini/prompt-documento"
 import { SCHEMA_DOCUMENTO_MEDICO, type DocumentoMedicoExtraido } from "@/lib/gemini/schemas"
-import { type ErrorGuarda, esErrorDeGuarda, requerirPermiso, requerirSesion } from "@/lib/auth/guardas"
+import {
+  type ErrorGuarda,
+  type SesionServidor,
+  esErrorDeGuarda,
+  requerirPermiso,
+  requerirSesion,
+} from "@/lib/auth/guardas"
 import { formatearFechaDuplicado } from "@/lib/documentos/huella"
 import { buscarDuplicadoSemantico } from "@/lib/documentos/duplicados-semanticos-consulta"
 import type { DuplicadoSemanticoParaCliente } from "@/lib/documentos/duplicados-semanticos"
+import {
+  guardarLectura,
+  leerLectura,
+  reclamarLectura,
+  registrarFalloLectura,
+  type LecturaDocumento,
+} from "@/lib/documentos/extraccion-admin"
+import {
+  PARAM_DOCUMENTO,
+  type RespuestaLectura,
+  type RespuestaLecturaFallida,
+} from "@/lib/documentos/lectura-automatica"
 import { BUCKETS } from "@/lib/storage-admin"
 import { validarExtraccion } from "@/lib/validacion/documento.schema"
 
@@ -119,26 +167,16 @@ export const runtime = "nodejs"
  * Tope de duración de la función serverless, en segundos (Sprint 19). Con
  * `MAX_REINTENTOS = 2` y `TIMEOUT_MS = 30s` en `lib/gemini/client.ts`, el peor
  * caso de `extraerJson` solo (3 intentos + las dos esperas entre reintentos)
- * ronda los 94s; sumale la descarga del archivo y las dos escrituras a la
- * base y 120s deja margen real sin acercarse al límite. Sin este número
- * explícito, la plataforma aplicaría su default -que en algunos planes es
- * bastante menor a lo que este handler ya necesitaba incluso ANTES de sumar
- * el segundo reintento-.
+ * ronda los 94s; sumale la descarga del archivo y las escrituras a la base y
+ * 120s deja margen real sin acercarse al límite.
+ *
+ * Sigue valiendo -y ahora es todavía más importante- con el trabajo movido a
+ * `after()`: la documentación de `after` es explícita en que la tarea corre
+ * "for the platform's default or configured max duration of your route". Este
+ * número es lo que le da a Vercel permiso para mantener viva la invocación
+ * mientras Gemini contesta, aunque la respuesta ya se haya mandado.
  */
 export const maxDuration = 120
-
-export interface RespuestaExtraccionOk {
-  extraccion: DocumentoMedicoExtraido
-  /**
-   * `null` si no se encontró ningún duplicado semántico (Capas 2/3), o si el
-   * cotejo falló -es best-effort, nunca bloquea la extracción-.
-   */
-  duplicadoSemantico: DuplicadoSemanticoParaCliente | null
-}
-
-export interface RespuestaExtraccionError {
-  error: string
-}
 
 const PATRON_UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -170,8 +208,18 @@ const MENSAJE_LECTURA_FALLIDA =
 const MENSAJE_INESPERADO =
   "Ocurrió un problema y no pudimos leer el documento. Podés cargar los datos a mano."
 
-function json(body: RespuestaExtraccionOk | RespuestaExtraccionError, status: number) {
+function json(body: RespuestaLectura | RespuestaLecturaFallida, status: number) {
   return NextResponse.json(body, { status })
+}
+
+/** `LecturaDocumento` (lo que sabe la base) → el cuerpo que espera el cliente. */
+function respuestaDe(lectura: LecturaDocumento): RespuestaLectura {
+  return {
+    estado: lectura.estado,
+    extraccion: lectura.extraccion,
+    duplicadoSemantico: lectura.duplicadoSemantico,
+    error: lectura.error,
+  }
 }
 
 /** Mapea el código de `ErrorGuarda` al HTTP status correspondiente. */
@@ -189,81 +237,100 @@ function estadoDeErrorGuarda(error: ErrorGuarda): number {
 }
 
 /**
- * Traduce las excepciones tipadas de `lib/gemini/client.ts` a `{ status, mensaje }`.
- * Todos los mensajes en español y todos terminan sugiriendo la carga manual:
- * la subida NUNCA queda bloqueada por la IA (ROADMAP_SPRINTS.md, Sprint 4).
+ * Traduce las excepciones tipadas de `lib/gemini/client.ts` al mensaje EN
+ * ESPAÑOL que corresponde guardar en `ai_extraction_error`. Todos terminan
+ * sugiriendo la carga manual: la subida NUNCA queda bloqueada por la IA
+ * (ROADMAP_SPRINTS.md, Sprint 4).
+ *
+ * Ya no devuelve un status HTTP: el desenlace de la lectura viaja en el cuerpo
+ * (ver el encabezado y `lib/documentos/lectura-automatica.ts`), y para cuando
+ * esto corre la respuesta HTTP ya se mandó.
  */
-function respuestaDeErrorGemini(error: unknown): { status: number; mensaje: string } {
+function mensajeDeErrorGemini(error: unknown): string {
   if (error instanceof GeminiApiError && error.status === 429) {
-    return { status: 429, mensaje: MENSAJE_CUOTA }
+    return MENSAJE_CUOTA
   }
   if (error instanceof GeminiTimeoutError) {
     console.error("[extraccion] Timeout llamando a Gemini:", error.message)
-    return { status: 504, mensaje: MENSAJE_TIMEOUT }
+    return MENSAJE_TIMEOUT
   }
   if (error instanceof GeminiParseError) {
     console.error("[extraccion] Respuesta de Gemini no parseable:", error.message)
-    return { status: 502, mensaje: MENSAJE_RESPUESTA_INVALIDA }
+    return MENSAJE_RESPUESTA_INVALIDA
   }
   if (error instanceof GeminiConfigError) {
     // No es culpa de la persona ni transitorio: falta configuración del
     // servidor (típicamente GEMINI_API_KEY). Se loguea completo porque el
     // mensaje de este error nunca contiene la clave en sí.
     console.error("[extraccion] Gemini mal configurado:", error.message)
-    return { status: 500, mensaje: MENSAJE_SERVICIO_NO_DISPONIBLE }
+    return MENSAJE_SERVICIO_NO_DISPONIBLE
   }
   if (error instanceof GeminiApiError) {
     // Incluye el caso "modelo inexistente" (GEMINI_MODEL_ID mal seteada):
     // Gemini responde 404/400 y `extraerJson` ya no reintenta un 4xx.
     console.error(`[extraccion] Gemini devolvió un error HTTP ${error.status ?? "?"}:`, error.message)
-    return { status: 502, mensaje: MENSAJE_LECTURA_FALLIDA }
+    return MENSAJE_LECTURA_FALLIDA
   }
   console.error("[extraccion] Error inesperado al extraer el documento:", error)
-  return { status: 500, mensaje: MENSAJE_INESPERADO }
+  return MENSAJE_INESPERADO
 }
 
-export async function POST(request: Request): Promise<Response> {
-  let cuerpo: unknown
-  try {
-    cuerpo = await request.json()
-  } catch {
-    return json({ error: MENSAJE_SIN_DOCUMENTO_ID }, 400)
+interface DocumentoResuelto {
+  sesion: SesionServidor
+  documento: { id: string; profile_id: string; storage_path: string; mime_type: string | null }
+}
+
+/**
+ * Guardas 1-3, compartidas por `GET` y `POST`. Devuelve la fila del documento
+ * y la sesión ya resuelta, o una `Response` de error lista para devolver.
+ */
+async function resolverDocumento(
+  documentoId: string,
+  permiso: "view" | "upload",
+): Promise<DocumentoResuelto | Response> {
+  const sesion = await requerirSesion({ siNoHaySesion: "lanzar" })
+  const { supabase } = sesion
+
+  const { data: documento, error: errorDocumento } = await supabase
+    .from("documents")
+    .select("id, profile_id, storage_path, mime_type")
+    .eq("id", documentoId)
+    .maybeSingle()
+
+  if (errorDocumento) {
+    console.error("[extraccion] Fallo al leer la fila de documents:", errorDocumento.message)
+    return json({ error: MENSAJE_INESPERADO }, 500)
+  }
+  if (!documento) {
+    return json({ error: MENSAJE_DOCUMENTO_NO_ENCONTRADO }, 404)
   }
 
-  const documentoId =
-    cuerpo && typeof cuerpo === "object" && "documentoId" in cuerpo
-      ? (cuerpo as { documentoId: unknown }).documentoId
-      : undefined
+  // Ver el encabezado: `upload` para arrancar la lectura, `view` para
+  // preguntar en qué anda.
+  await requerirPermiso(documento.profile_id, permiso, { sesion, siNoHaySesion: "lanzar" })
 
-  if (typeof documentoId !== "string" || !PATRON_UUID.test(documentoId)) {
-    return json({ error: MENSAJE_SIN_DOCUMENTO_ID }, 400)
-  }
+  return { sesion, documento }
+}
+
+/**
+ * El trabajo pesado: descargar el archivo, leerlo con Gemini, validar, cotejar
+ * duplicados y GUARDAR el resultado. Corre dentro de `after()`, después de que
+ * la respuesta se mandó.
+ *
+ * No lanza nunca: cualquier desenlace -éxito o falla- termina escrito en la
+ * fila, que es lo único que el cliente va a mirar después. Un `throw` que se
+ * escapara acá dejaría el documento clavado en `procesando` hasta que venza la
+ * reserva.
+ */
+async function correrLectura(
+  sesion: SesionServidor,
+  documento: DocumentoResuelto["documento"],
+): Promise<void> {
+  const { supabase } = sesion
+  const documentoId = documento.id
+  const perfilId = documento.profile_id
 
   try {
-    const sesion = await requerirSesion({ siNoHaySesion: "lanzar" })
-    const { supabase } = sesion
-
-    const { data: documento, error: errorDocumento } = await supabase
-      .from("documents")
-      .select("id, profile_id, storage_path, mime_type")
-      .eq("id", documentoId)
-      .maybeSingle()
-
-    if (errorDocumento) {
-      console.error("[extraccion] Fallo al leer la fila de documents:", errorDocumento.message)
-      return json({ error: MENSAJE_INESPERADO }, 500)
-    }
-    if (!documento) {
-      return json({ error: MENSAJE_DOCUMENTO_NO_ENCONTRADO }, 404)
-    }
-
-    // Paso 3: `upload`, no `view` — ver el encabezado del archivo.
-    await requerirPermiso(documento.profile_id, "upload", { sesion, siNoHaySesion: "lanzar" })
-
-    if (!documento.mime_type || !MIME_SOPORTADOS.has(documento.mime_type)) {
-      return json({ error: MENSAJE_TIPO_NO_SOPORTADO }, 422)
-    }
-
     const { data: archivo, error: errorDescarga } = await supabase.storage
       .from(BUCKETS.documentos)
       .download(documento.storage_path)
@@ -273,7 +340,8 @@ export async function POST(request: Request): Promise<Response> {
         `[extraccion] No se pudo descargar ${BUCKETS.documentos}/${documento.storage_path}:`,
         errorDescarga?.message,
       )
-      return json({ error: MENSAJE_ARCHIVO_NO_DISPONIBLE }, 500)
+      await registrarFalloLectura(documentoId, perfilId, MENSAJE_ARCHIVO_NO_DISPONIBLE)
+      return
     }
 
     const base64 = Buffer.from(await archivo.arrayBuffer()).toString("base64")
@@ -282,7 +350,9 @@ export async function POST(request: Request): Promise<Response> {
     try {
       const extraccionCruda = await extraerJson<DocumentoMedicoExtraido>({
         prompt: PROMPT_DOCUMENTO_MEDICO,
-        media: { mimeType: documento.mime_type, data: base64 },
+        // `mime_type` ya se verificó contra `MIME_SOPORTADOS` en el `POST`,
+        // antes de reservar la lectura.
+        media: { mimeType: documento.mime_type as string, data: base64 },
         schema: SCHEMA_DOCUMENTO_MEDICO,
       })
 
@@ -293,57 +363,32 @@ export async function POST(request: Request): Promise<Response> {
           `[extraccion] Validación Zod fallida para ${documentoId}:`,
           validacion.errores.join(" | "),
         )
-        return json({ error: MENSAJE_RESPUESTA_INVALIDA }, 502)
+        await registrarFalloLectura(documentoId, perfilId, MENSAJE_RESPUESTA_INVALIDA)
+        return
       }
 
       extraccion = validacion.datos
     } catch (error) {
-      const { status, mensaje } = respuestaDeErrorGemini(error)
-      return json({ error: mensaje }, status)
+      await registrarFalloLectura(documentoId, perfilId, mensajeDeErrorGemini(error))
+      return
     }
 
-    // Persistencia de la extracción CRUDA (ai_summary + raw_ocr_text). Ver el
-    // bloque "Qué persiste este handler y qué NO" del encabezado: puede no
-    // aplicarse si el actor no tiene `can_manage`, y eso no es un error de
-    // esta request.
-    const textoCompleto = extraccion.texto_completo?.trim()
-    const rawOcrText = textoCompleto && textoCompleto.length > 0 ? textoCompleto.slice(0, MAX_TEXTO_COMPLETO) : null
-
-    try {
-      const { data: filasActualizadas, error: errorUpdate } = await supabase
-        .from("documents")
-        .update({ ai_summary: extraccion.resumen, raw_ocr_text: rawOcrText })
-        .eq("id", documentoId)
-        .select("id")
-
-      if (errorUpdate) {
-        console.error(`[extraccion] No se pudo guardar la extracción de ${documentoId}:`, errorUpdate.message)
-      } else if (!filasActualizadas || filasActualizadas.length === 0) {
-        console.warn(
-          `[extraccion] La extracción de ${documentoId} no se persistió: el actor no tiene can_manage ` +
-            `sobre el perfil (documents_update_administrador). La extracción igual se devuelve en la respuesta.`,
-        )
-      }
-    } catch (error) {
-      console.error(`[extraccion] Fallo inesperado guardando la extracción de ${documentoId}:`, error)
-    }
-
-    // Duplicados SEMÁNTICOS (Capas 2 y 3, hotfix sobre la huella byte-a-byte):
-    // recién acá existen datos estructurados con los que cotejar. Best-effort
-    // -igual que el backfill de huellas de `ingestarDocumento`-: si la
-    // consulta falla, la pantalla de revisión simplemente no muestra la
-    // franja, nunca bloquea la extracción ya conseguida.
+    // Duplicados SEMÁNTICOS (Capas 2 y 3): recién acá existen datos
+    // estructurados con los que cotejar. Best-effort -igual que el backfill de
+    // huellas de `ingestarDocumento`-: si la consulta falla, la pantalla de
+    // revisión simplemente no muestra la franja, nunca bloquea la extracción
+    // ya conseguida.
     //
     // Si `extraccion.fecha` es `null` (Sprint 19: el modelo ya no inventa
-    // fecha cuando el documento no imprime la suya, ver
-    // `lib/gemini/schemas.ts`), directamente NO se cotejan duplicados:
-    // `coincidenTodosLosDatos` resuelve `null` a "no hay con qué evaluar la
-    // condición necesaria de fecha" (ver su guarda), así que preguntarle a la
-    // base acá sería una consulta que de antemano no puede aportar nada.
+    // fecha cuando el documento no imprime la suya, ver `lib/gemini/schemas.ts`),
+    // directamente NO se cotejan duplicados: `coincidenTodosLosDatos` resuelve
+    // `null` a "no hay con qué evaluar la condición necesaria de fecha", así
+    // que preguntarle a la base acá sería una consulta que de antemano no
+    // puede aportar nada.
     let duplicadoSemantico: DuplicadoSemanticoParaCliente | null = null
     if (extraccion.fecha) {
       try {
-        const encontrado = await buscarDuplicadoSemantico(supabase, documento.profile_id, documentoId, {
+        const encontrado = await buscarDuplicadoSemantico(supabase, perfilId, documentoId, {
           fecha: extraccion.fecha,
           categoria: extraccion.categoria,
           institucion: extraccion.institucion,
@@ -377,7 +422,113 @@ export async function POST(request: Request): Promise<Response> {
       }
     }
 
-    return json({ extraccion, duplicadoSemantico }, 200)
+    const textoCompleto = extraccion.texto_completo?.trim()
+    const textoOcr =
+      textoCompleto && textoCompleto.length > 0 ? textoCompleto.slice(0, MAX_TEXTO_COMPLETO) : null
+
+    await guardarLectura(documentoId, perfilId, {
+      extraccion,
+      duplicadoSemantico,
+      resumen: extraccion.resumen,
+      textoOcr,
+    })
+  } catch (error) {
+    console.error(`[extraccion] Fallo inesperado leyendo ${documentoId}:`, error)
+    await registrarFalloLectura(documentoId, perfilId, MENSAJE_INESPERADO).catch(() => {
+      // Si ni siquiera se pudo anotar el fallo, la reserva vence sola
+      // (`VENTANA_RECLAMO_MS`) y la próxima consulta puede volver a intentar.
+    })
+  }
+}
+
+/** `GET /api/documentos/extraer?doc={id}` — ¿en qué anda la lectura? */
+export async function GET(request: Request): Promise<Response> {
+  const documentoId = new URL(request.url).searchParams.get(PARAM_DOCUMENTO)
+
+  if (typeof documentoId !== "string" || !PATRON_UUID.test(documentoId)) {
+    return json({ error: MENSAJE_SIN_DOCUMENTO_ID }, 400)
+  }
+
+  try {
+    const resuelto = await resolverDocumento(documentoId, "view")
+    if (resuelto instanceof Response) return resuelto
+
+    const lectura = await leerLectura(documentoId, resuelto.documento.profile_id)
+    if (!lectura) {
+      return json({ error: MENSAJE_DOCUMENTO_NO_ENCONTRADO }, 404)
+    }
+
+    return json(respuestaDe(lectura), 200)
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return json({ error: error.message }, estadoDeErrorGuarda(error))
+    }
+    console.error("[extraccion] Fallo inesperado consultando el estado de la lectura:", error)
+    return json({ error: MENSAJE_INESPERADO }, 500)
+  }
+}
+
+/** `POST /api/documentos/extraer` con `{ documentoId }` — arrancá la lectura. */
+export async function POST(request: Request): Promise<Response> {
+  let cuerpo: unknown
+  try {
+    cuerpo = await request.json()
+  } catch {
+    return json({ error: MENSAJE_SIN_DOCUMENTO_ID }, 400)
+  }
+
+  const documentoId =
+    cuerpo && typeof cuerpo === "object" && "documentoId" in cuerpo
+      ? (cuerpo as { documentoId: unknown }).documentoId
+      : undefined
+
+  if (typeof documentoId !== "string" || !PATRON_UUID.test(documentoId)) {
+    return json({ error: MENSAJE_SIN_DOCUMENTO_ID }, 400)
+  }
+
+  try {
+    const resuelto = await resolverDocumento(documentoId, "upload")
+    if (resuelto instanceof Response) return resuelto
+
+    const { sesion, documento } = resuelto
+
+    if (!documento.mime_type || !MIME_SOPORTADOS.has(documento.mime_type)) {
+      // No es transitorio: este archivo no se va a poder leer nunca. Se anota
+      // como fallo de lectura para que la pantalla ofrezca la carga a mano y
+      // no siga preguntando.
+      await registrarFalloLectura(documentoId, documento.profile_id, MENSAJE_TIPO_NO_SOPORTADO)
+      return json(
+        {
+          estado: "error",
+          extraccion: null,
+          duplicadoSemantico: null,
+          error: MENSAJE_TIPO_NO_SOPORTADO,
+        },
+        200,
+      )
+    }
+
+    const reclamo = await reclamarLectura(documentoId, documento.profile_id)
+    if (!reclamo) {
+      return json({ error: MENSAJE_DOCUMENTO_NO_ENCONTRADO }, 404)
+    }
+
+    // Ya estaba leído (o hay otra corrida en curso): no se le vuelve a pagar a
+    // Gemini, se contesta lo que la base ya sabe.
+    if (!reclamo.reclamada) {
+      return json(respuestaDe(reclamo.lectura), 200)
+    }
+
+    // La reserva es nuestra: el trabajo pesado arranca DESPUÉS de contestar.
+    // Ver el bloque "Por qué el POST ya no espera a Gemini" del encabezado.
+    after(async () => {
+      await correrLectura(sesion, documento)
+    })
+
+    return json(
+      { estado: "procesando", extraccion: null, duplicadoSemantico: null, error: null },
+      202,
+    )
   } catch (error) {
     if (esErrorDeGuarda(error)) {
       return json({ error: error.message }, estadoDeErrorGuarda(error))

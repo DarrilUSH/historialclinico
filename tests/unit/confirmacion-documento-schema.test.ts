@@ -111,6 +111,38 @@ describe('lib/validacion/confirmacion-documento.schema.ts — confirmación', ()
       expect(resultado.datos.resumen).toBe('Todo bien')
     }
   })
+
+  // `doctorId`: el vínculo con el directorio de médicos (hotfix "Vincular",
+  // 19/08/2026). Vincular es OPCIONAL: el campo oculto viaja vacío casi
+  // siempre, y eso tiene que ser tan válido como traer un uuid. Lo que NO
+  // puede pasar es que llegue basura con forma de texto y termine en un
+  // `::uuid` del RPC.
+  it('acepta doctorId ausente o vacío (vincular es opcional)', () => {
+    for (const valor of [undefined, '', '   ']) {
+      const resultado = validarConfirmacionDocumento({ ...base, doctorId: valor })
+      expect(resultado.ok).toBe(true)
+      if (resultado.ok) expect(resultado.datos.doctorId).toBeUndefined()
+    }
+  })
+
+  it('acepta un doctorId con forma de uuid', () => {
+    const resultado = validarConfirmacionDocumento({
+      ...base,
+      doctorId: '990e8400-e29b-41d4-a716-446655440001',
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.doctorId).toBe('990e8400-e29b-41d4-a716-446655440001')
+    }
+  })
+
+  it('rechaza un doctorId que no tiene forma de uuid', () => {
+    const resultado = validarConfirmacionDocumento({ ...base, doctorId: 'el-de-siempre' })
+    expect(resultado.ok).toBe(false)
+    if (!resultado.ok) {
+      expect(resultado.error).toContain('El médico elegido no es válido')
+    }
+  })
 })
 
 describe('lib/validacion/confirmacion-documento.schema.ts — descarte', () => {

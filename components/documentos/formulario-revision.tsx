@@ -63,12 +63,42 @@
  * `documents` no tiene columnas propias de dirección/ciudad/provincia/
  * coordenadas -a diferencia de `appointments`-, así que "Usar este" acá solo
  * reemplaza el NOMBRE de la institución por el oficial del registro; no hay
- * nada de geocodificación que ganar en esta pantalla. Y `documents.doctor_id`
- * existe en el esquema pero ningún flujo de la app lo persiste todavía (solo
- * `doctor_name`, texto): "Vincular" acá tampoco intenta escribirlo, solo
- * normaliza el texto de "Médico" al nombre tal como está cargado en el
- * directorio -mismo criterio de "no exagerar el alcance" que ya declaró esta
- * tarea para el resto del cruce de lugares-.
+ * nada de geocodificación que ganar en esta pantalla.
+ *
+ * ## "Vincular" no hacía nada: el arreglo (hotfix del 19/08/2026)
+ *
+ * Reporte del dueño, con captura: *"cuando me detecta un doctor que ya está
+ * cargado aparece el botón 'Vincular' pero al tocarlo no hace absolutamente
+ * nada"*.
+ *
+ * Y era literal. `usarMedicoDelDirectorio` hacía UNA sola cosa,
+ * `setMedico(doctor.full_name)`, y la franja se escondía sola sólo cuando el
+ * campo dejaba de coincidir con lo que había detectado la IA
+ * (`medico === medicoInicial`). Pero el cotejo de
+ * `lib/medicos/coincidencia-nombre.ts` es por SUBCONJUNTO de tokens, y el caso
+ * más común -y el de la captura- es que el nombre extraído sea EXACTAMENTE el
+ * que está en el directorio: entonces ese `setMedico` escribía el mismo valor
+ * que ya había, el estado no cambiaba, la franja seguía en pantalla y no
+ * pasaba nada visible. La misma trampa tenía "Usar este" de institución.
+ *
+ * Dos cambios, y el botón hace lo que promete:
+ *
+ * 1. **Se guarda QUE se vinculó, no sólo el texto resultante.**
+ *    `medicoVinculado` (y su equivalente `institucionResuelta`) son estado
+ *    propio: la franja se esconde porque la persona la resolvió, no porque el
+ *    texto haya cambiado de casualidad. En su lugar aparece "Vinculado a X",
+ *    con un "Quitar" para deshacerlo.
+ * 2. **El vínculo se PERSISTE.** `documents.doctor_id` existía en el esquema
+ *    desde el primer día y ningún flujo lo escribía; ahora el id viaja en el
+ *    campo oculto `doctorId` y `confirmar_documento_recien_subido` lo guarda,
+ *    después de verificar que ese médico sea del mismo perfil del documento
+ *    (guarda 7, `20260819210000_extraccion_recuperable.sql`).
+ *
+ * "Vincular" NUNCA crea un médico -eso es exclusivamente de "Agregar", que
+ * aparece cuando no hay ninguno parecido-, así que confirmar no puede dejar un
+ * duplicado en el directorio. Editar el campo "Médico" a mano después de
+ * vincular corta el vínculo: `doctor_id` y `doctor_name` no pueden decir cosas
+ * distintas.
  *
  * ## La franja de duplicado SEMÁNTICO (Capas 2 y 3, hotfix sobre la huella)
  *
@@ -139,7 +169,7 @@ import * as React from "react"
 import { useActionState } from "react"
 import Link from "next/link"
 
-import { CircleCheckIcon, FlaskConicalIcon } from "lucide-react"
+import { CircleCheckIcon, FlaskConicalIcon, XIcon } from "lucide-react"
 
 import {
   confirmarDocumento,
@@ -321,6 +351,14 @@ export function FormularioRevision({
   const [institucion, setInstitucion] = React.useState(institucionInicial)
   const [medico, setMedico] = React.useState(medicoInicial)
 
+  // Hotfix "Vincular" (19/08/2026) — ver el bloque del encabezado. Estos dos
+  // estados existen para que TOCAR el botón se note SIEMPRE, incluso cuando lo
+  // que el botón hace con el texto es no cambiar nada porque ya coincidía.
+  const [institucionResuelta, setInstitucionResuelta] = React.useState(false)
+  const [medicoVinculado, setMedicoVinculado] = React.useState<MedicoParaAutocompletar | null>(
+    null,
+  )
+
   // El título pasa a controlado por el mismo motivo que institución y médico,
   // pero por otra razón: el aviso de "ya tenés un estudio con este nombre"
   // tiene que seguir a lo que la persona escribe, no al valor inicial.
@@ -331,21 +369,46 @@ export function FormularioRevision({
   // "Analizar de nuevo": ver el comentario de cabecera). Cada franja se
   // esconde sola apenas el campo deja de coincidir con esto -la persona lo
   // tipeó de nuevo, o ya tocó "Usar este"/"Vincular"-.
+  // `institucionResuelta` / `medicoVinculado` se suman a la condición: sin
+  // ellos, tocar el botón cuando el texto YA coincidía con la sugerencia
+  // dejaba la franja en pantalla, exactamente igual que antes de tocarla.
   const institucionParaFranja: LugarExtraidoParaCotejo | null =
-    catalogoDisponible && institucionInicial.length > 0 && institucion === institucionInicial
+    catalogoDisponible &&
+    institucionInicial.length > 0 &&
+    !institucionResuelta &&
+    institucion === institucionInicial
       ? { nombre: institucionInicial, direccion: "", ciudad: "", provincia: "" }
       : null
   const medicoParaFranja =
-    medicoInicial.length > 0 && medico === medicoInicial ? medicoInicial : null
+    medicoInicial.length > 0 && !medicoVinculado && medico === medicoInicial ? medicoInicial : null
 
   /** "Usar este" de la franja de institución: acá no hay dirección/ciudad/provincia/coordenadas que completar -`documents` no las tiene-, solo el nombre oficial. */
   function usarInstitucionDelCatalogo(centro: CentroSugerido) {
     setInstitucion(centro.nombre)
+    setInstitucionResuelta(true)
   }
 
-  /** "Vincular"/"Agregar" de la franja de médico: normaliza "Médico" al nombre tal como está (o quedó) en el directorio. `documents.doctor_id` no se toca -ver el comentario de cabecera-. */
+  /**
+   * "Vincular"/"Agregar" de la franja de médico: normaliza "Médico" al nombre
+   * tal como está (o quedó) en el directorio Y guarda el vínculo, que viaja al
+   * servidor en el campo oculto `doctorId` y termina en `documents.doctor_id`.
+   */
   function usarMedicoDelDirectorio(doctor: MedicoParaAutocompletar) {
     setMedico(doctor.full_name)
+    setMedicoVinculado(doctor)
+  }
+
+  /**
+   * Editar el campo "Médico" a mano rompe el vínculo si el texto deja de
+   * nombrar al médico vinculado: `doctor_id` y `doctor_name` no pueden decir
+   * cosas distintas sobre el mismo documento. Volver a escribir exactamente el
+   * mismo nombre no lo rompe (es el caso de "toqué una tecla y la deshice").
+   */
+  function cambiarMedico(valor: string) {
+    setMedico(valor)
+    if (medicoVinculado && valor.trim() !== medicoVinculado.full_name.trim()) {
+      setMedicoVinculado(null)
+    }
   }
 
   return (
@@ -392,6 +455,10 @@ export function FormularioRevision({
         <input type="hidden" name="documentoId" value={documentoId} />
         <input type="hidden" name="metricas" value={JSON.stringify(metricas)} />
         <input type="hidden" name="numeroOrden" value={numeroOrden} />
+        {/* Vínculo con el directorio de médicos (hotfix "Vincular",
+            19/08/2026). Vacío = sin vínculo, que es el estado normal: vincular
+            es opcional y el campo de texto "Médico" sigue valiendo solo. */}
+        <input type="hidden" name="doctorId" value={medicoVinculado?.id ?? ""} />
 
         <CampoTexto
           id="titulo"
@@ -491,7 +558,7 @@ export function FormularioRevision({
             id="medico"
             label="Médico"
             value={medico}
-            onChange={(evento) => setMedico(evento.target.value)}
+            onChange={(evento) => cambiarMedico(evento.target.value)}
             maxLength={100}
             ayuda={medicoDetectado ? AYUDA_DETECTADO : AYUDA_NO_DETECTADO}
           />
@@ -504,19 +571,49 @@ export function FormularioRevision({
           se renderiza nada.
         */}
         <FranjaCandidatoLugar extraido={institucionParaFranja} onUsar={usarInstitucionDelCatalogo} />
-        <FranjaCotejoMedico
-          nombreExtraido={medicoParaFranja}
-          directorio={medicos}
-          contexto={{
-            especialidad: mapearEspecialidadCatalogo(especialidadInicial),
-            institucion,
-            direccion: "",
-            ciudad: "",
-            provincia: "",
-          }}
-          onVincular={usarMedicoDelDirectorio}
-          onAgregado={usarMedicoDelDirectorio}
-        />
+
+        {medicoVinculado ? (
+          /* La confirmación que faltaba: tocar "Vincular" ahora se VE. El
+             `role="status"` hace que un lector de pantalla lo anuncie -es una
+             respuesta a una acción de la persona, no un cartel que estaba ahí
+             desde el arranque, así que acá sí corresponde región viva-. */
+          <div
+            role="status"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-sm chica:px-2.5 chica:py-1.5 chica:text-xs"
+          >
+            <p className="flex min-w-0 flex-1 items-center gap-2 text-foreground">
+              <CircleCheckIcon className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              <span className="min-w-0">
+                Vinculado a <strong className="font-semibold">{medicoVinculado.full_name}</strong>,
+                de tus médicos.
+              </span>
+            </p>
+            <Boton
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="shrink-0"
+              onClick={() => setMedicoVinculado(null)}
+            >
+              <XIcon aria-hidden="true" />
+              Quitar
+            </Boton>
+          </div>
+        ) : (
+          <FranjaCotejoMedico
+            nombreExtraido={medicoParaFranja}
+            directorio={medicos}
+            contexto={{
+              especialidad: mapearEspecialidadCatalogo(especialidadInicial),
+              institucion,
+              direccion: "",
+              ciudad: "",
+              provincia: "",
+            }}
+            onVincular={usarMedicoDelDirectorio}
+            onAgregado={usarMedicoDelDirectorio}
+          />
+        )}
 
         <CampoTextarea
           id="resumen"
