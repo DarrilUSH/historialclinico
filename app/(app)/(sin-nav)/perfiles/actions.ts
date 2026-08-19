@@ -3,11 +3,44 @@
 /**
  * Server Action del selector de perfiles: fija el perfil elegido como activo
  * y navega a `/inicio`.
+ *
+ * ## De paso, siembra la cookie `tamano` si el dispositivo no tiene una (P0 de rendimiento, 2026-08-18)
+ *
+ * `obtenerTamano()` (`lib/densidad/servidor.ts`) resuelve el modo de letra de
+ * CADA request autenticado -corre en el layout raíz- y, si no hay cookie
+ * `tamano`, cae a consultar `profiles.display_density` **en cada una de esas
+ * requests, para siempre**: `fijarCookieTamano` no puede escribir la cookie
+ * durante el render de un Server Component (Next.js solo lo permite desde una
+ * Server Action o un Route Handler), así que ese camino nunca se cierra solo.
+ *
+ * `iniciarSesion`, `registrarse` (con sesión) y `aceptarTerminos`
+ * (`app/(auth)/actions.ts`) ya siembran esa cookie vía `sincronizarCookieTamano()`
+ * -y ahí SÍ conviene que pisen cualquier cookie preexistente: son los tres
+ * momentos en que la base es autoritativa (docs/densidad.md §3), típicamente
+ * porque esta cuenta recién empieza a usar ESTE navegador-. Pero no son el
+ * único camino hasta acá: una cuenta nueva con confirmación de correo no pasa
+ * sesión a `registrarse` (`data.session` llega `null` en producción, ver el
+ * encabezado de `app/(auth)/actions.ts`) y puede llegar a `/perfiles` sin
+ * haber pasado por `iniciarSesion` en ESTE dispositivo. `elegirPerfil` es el
+ * único punto que SÍ atraviesa toda sesión antes de ver una sola pantalla con
+ * datos, así que sembrar acá -con `obtenerTamano()`, que nunca pisa una
+ * cookie que ya esté puesta (docs/densidad.md §1: es la preferencia de
+ * DISPOSITIVO de quien MIRA, no del perfil elegido, y pisarla en cada
+ * selección pelearía contra un A/a tocado a propósito en este equipo)- cierra
+ * el resto de los caminos sin duplicar la semántica de "pisar siempre" que sí
+ * corresponde en login/registro/aceptar-términos.
+ *
+ * El costo es UNA consulta extra a `profiles`, y solo la primera vez que este
+ * dispositivo elige un perfil sin cookie: `obtenerTamano()` devuelve de
+ * inmediato, sin tocar la base, en cuanto la cookie exista. A partir de ahí,
+ * ninguna pantalla de la cuenta vuelve a pagar los ~167ms de ida y vuelta a
+ * Supabase (Oregón) solo para saber qué tamaño de letra mostrar.
  */
 
 import { redirect } from "next/navigation"
 
 import { RUTA_ACEPTAR_TERMINOS } from "@/lib/auth/rutas"
+import { obtenerTamano } from "@/lib/densidad/servidor"
 import { cuentaAceptoLegalesDeAlta } from "@/lib/legales"
 import { esErrorDeGuarda, fijarPerfilActivo } from "@/lib/perfil-activo"
 
@@ -48,6 +81,13 @@ export async function elegirPerfil(
   if (!(await cuentaAceptoLegalesDeAlta())) {
     redirect(RUTA_ACEPTAR_TERMINOS)
   }
+
+  // Siembra oportunista de la cookie `tamano` si todavía falta (ver el
+  // comentario de cabecera del archivo). Independiente de `perfilId` y de si
+  // el permiso más abajo termina siendo válido: la preferencia de letra es de
+  // la CUENTA que elige, no del perfil elegido, así que corre siempre que hay
+  // sesión y nunca puede hacer fallar esta acción (`obtenerTamano` no lanza).
+  await obtenerTamano()
 
   let permisoValido = true
 
