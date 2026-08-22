@@ -1,36 +1,22 @@
 # Cómo terminar el deploy a producción — pasos que necesitan tus claves
 
-> **Por qué estos pasos los hacés vos y no yo:** cargar API keys / tokens / secretos en un formulario (las env vars de Vercel, tu login de Supabase, el `CRON_SECRET` del Vault) es exactamente lo que mi límite de seguridad me impide hacer — es la regla que te protege de que esas claves se filtren. Todo lo demás (código, framework de Vercel, páginas legales, el esquema de la base listo para aplicar) ya está hecho y pusheado. Lo que sigue son **4 pasos y ~15 minutos**.
+> **Documento histórico (deploy inicial, Sprint 12, 2026-08-14).** Producción ya está viva desde entonces y estos 4 pasos ya se completaron — se conserva como referencia por si algún día hace falta rearmar el deploy desde cero (proyecto Supabase nuevo, Vercel nuevo, etc.). Para el uso del día a día de hoy en adelante, el flujo es mucho más corto: **cada migración nueva → `npx supabase db push` ANTES de pushear el código que la usa** (ver el recuadro de advertencias en `docs/migracion-maquina.md`). Las env vars de Vercel y el cron ya están configurados y no hace falta repetirlos salvo que rotes una clave.
 >
-> **Dónde están tus valores:** todas las claves cloud están en el archivo local `F:\Proyectos\historialclinico\.env.cloud-respaldo` (está git-ignoreado, nunca se sube). De ahí copiás y pegás.
+> **Por qué estos pasos los hacía el usuario y no el asistente:** cargar API keys / tokens / secretos en un formulario (las env vars de Vercel, el login de Supabase, el `CRON_SECRET` del Vault) es exactamente lo que el límite de seguridad del asistente le impide hacer — es la regla que protege de que esas claves se filtren.
+>
+> **Dónde están los valores:** todas las claves cloud están en el archivo local `.env.cloud-respaldo`, en la raíz del proyecto (git-ignoreado, nunca se sube) — la ruta exacta depende de en qué carpeta tengas el proyecto en tu máquina. De ahí se copia y se pega.
 
 ---
 
-## ⚠️ HOTFIX pendiente de aplicar a la base de producción (2026-08-14)
+## ✅ HOTFIX ya aplicado a producción (2026-08-14) — sección histórica
 
-> Este documento describe el deploy INICIAL, cuando la base cloud todavía estaba vacía. Producción ya está viva, así que lo único que falta aplicar es la migración nueva:
->
-> **`supabase/migrations/20260814140000_alta_de_cuenta.sql`** — arregla el bug por el cual una cuenta recién registrada quedaba sin perfil ("Todavía no hay perfiles disponibles para tu cuenta") y sin consentimiento registrado.
->
-> ```bash
-> npx supabase db push
-> ```
->
-> Se aplica sola con el resto del flujo del Paso 1 (`login` + `link` ya hechos → directo `db push`). **Pushear el código a `main` NO alcanza**: el deploy de Vercel no toca la base. Hasta que corras `db push`, las cuentas nuevas van a seguir naciendo rotas.
->
-> La migración incluye un **backfill** que repara las cuentas ya afectadas. Al aplicarla vas a ver un `NOTICE` diciendo cuántos perfiles y consentimientos creó. Para verificar después, en el SQL Editor del Dashboard:
->
-> ```sql
-> select count(*) from auth.users u
->  where not exists (select 1 from public.profiles p where p.user_id = u.id);
-> -- tiene que dar 0
-> ```
+> **`supabase/migrations/20260814140000_alta_de_cuenta.sql`** — arreglaba el bug por el cual una cuenta recién registrada quedaba sin perfil ("Todavía no hay perfiles disponibles para tu cuenta") y sin consentimiento registrado. Se aplicó a producción el mismo 2026-08-14, junto con el resto de las migraciones que se sumaron después (38 en total al 2026-08-21, todas local=remoto). Se deja este párrafo como registro del incidente, no como pendiente.
 
 ---
 
 ## Paso 1 — Aplicar el esquema a la base de producción (Supabase cloud)
 
-El proyecto cloud es `nbypcqhojmixlxvkflrp` y está **vacío**. Hay que aplicarle las 18 migraciones. La forma robusta es el CLI (aplica todo en orden, transaccional):
+*(Histórico: describe el estado del 2026-08-14, cuando el proyecto cloud estaba **vacío** y había 18 migraciones. Hoy hay 38 y la base ya tiene el esquema — este paso ya no aplica salvo que se rearme el proyecto cloud desde cero.)* La forma robusta es el CLI (aplica todo en orden, transaccional):
 
 ```bash
 npx supabase login
@@ -54,7 +40,7 @@ Esto aplica las 18 migraciones a la base de producción. Al terminar, verificá 
 ## Paso 2 — Cargar las variables de entorno en Vercel
 
 1. Abrí: https://vercel.com/darril/historialclinico/settings/environment-variables
-2. Abrí el archivo `F:\Proyectos\historialclinico\.env.cloud-respaldo` en un editor y **copiá todo su contenido**.
+2. Abrí el archivo `.env.cloud-respaldo` (raíz del proyecto, en tu máquina) en un editor y **copiá todo su contenido**.
 3. En Vercel, tocá **Add Environment Variable** → hay una opción para **pegar un `.env` entero** (o el campo "key" acepta pegar varias líneas). Pegá el contenido completo.
 4. Asegurate de que el entorno sea **Production** (marcá también Preview y Development si querés previews funcionales).
 5. Guardá. Son 10 variables:
@@ -99,7 +85,7 @@ El tercer job es el barrido de Gmail (Sprint 17, tarea 17.2): corre cada 30 minu
 
 Cuando termines los 4 pasos, decime "listo el deploy" y yo corro los **smoke tests** contra producción (registro, login, y los flujos principales) y te confirmo que todo funciona online. También ahí vemos lo de **cerrar el registro público** (para que un desconocido no pueda crearse cuenta y gastar la cuota de Gemini — te lo propongo como último ajuste).
 
-## Estado al momento de escribir esto
+## Estado al momento de escribir esto (2026-08-14 — histórico)
 
 - ✅ Código completo (Sprints 0–13) pusheado a GitHub.
 - ✅ Vercel buildea bien (arreglé el framework preset a Next.js con `vercel.json`).
@@ -107,3 +93,5 @@ Cuando termines los 4 pasos, decime "listo el deploy" y yo corro los **smoke tes
 - ✅ Páginas legales (`/privacidad`, `/terminos`) y consentimiento en el registro (Ley 25.326).
 - ⏳ Falta: los 4 pasos de arriba (requieren tus claves).
 - El 500 actual en producción es esperado: la app está deployada pero todavía sin las env vars ni la base con esquema.
+
+**Estado real al 2026-08-21:** los 4 pasos ya se completaron hace una semana. El sitio está en producción con Sprints hasta el 19 incluidos, 38 migraciones aplicadas, y el registro sigue abierto (decisión de cerrarlo o no, pendiente — ver `docs/estado-proyecto.md`). Este documento queda como referencia de "cómo se hizo la primera vez", no como estado vivo.

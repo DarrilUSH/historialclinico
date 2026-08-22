@@ -2,7 +2,9 @@
 
 **Fecha de verificación:** 2026-08-12  
 **Máquina:** Windows 11 Pro, versión 10.0.26200  
-**Dirección de trabajo local:** `C:\laragon\www\historialclinico`
+**Dirección de trabajo local:** `F:\Proyectos\historialclinico`
+
+> **Nota (2026-08-21):** todas las rutas `F:\Proyectos\historialclinico` de este documento son de ESTA máquina puntual — el proyecto no usa la convención Laragon de otros proyectos del usuario, corre directo con `npm run dev`. Si estás retomando el trabajo en una máquina distinta, sustituí esa ruta por la que corresponda ahí; la guía completa de qué más cambia al mudar de máquina está en `docs/migracion-maquina.md`.
 
 ## Versiones de software
 

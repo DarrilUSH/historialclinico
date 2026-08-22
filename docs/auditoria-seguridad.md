@@ -309,7 +309,15 @@ app/api/push/procesar-recordatorios/route.ts:127,131
 
 **Cero coincidencias en `components/`.** Los dos de `app/` son Route Handlers de los barridos de `pg_cron` — código de servidor por definición, sin `"use client"`, con `runtime = "nodejs"`.
 
-Los 15 módulos de `lib/` llevan la misma defensa: encabezado que declara el uso de la clave, y una guarda que **lanza** si el módulo se carga en el navegador. Esta tarea encontró dos que se habían quedado sin ella —`lib/lugares/sincronizacion.ts` y `lib/push/servidor.ts`, ambos posteriores a la auditoría 11.4— y les agregó la guarda con el mismo patrón que las otras 13. Se recorrieron los **74 archivos con `"use client"`** del proyecto: ninguno importa un módulo server-only, y ninguno referencia una variable de entorno que no empiece con `NEXT_PUBLIC_`.
+Los 15 módulos de `lib/` llevan la misma defensa: encabezado que declara el uso de la clave, y una guarda que **lanza** si el módulo se carga en el navegador. Esta tarea encontró dos que se habían quedado sin ella —`lib/lugares/sincronizacion.ts` y `lib/push/servidor.ts`, ambos posteriores a la auditoría 11.4— y les agregó la guarda con el mismo patrón que las otras 13.
+
+**Censo de `"use client"` (mismo criterio anti-deriva que 5.1 — la próxima auditoría lo regenera con este comando):**
+
+```bash
+grep -rl '"use client"' app/ components/ lib/ | wc -l
+```
+
+**Verificado el 2026-08-21: 106 archivos** (9 en `app/`, 92 en `components/`, 5 en `lib/`) — subió de los 74 de la auditoría 11.4 porque el proyecto sumó los Sprints 15 a 19 en el medio. Se recorrieron los 106: ninguno importa un módulo server-only, y ninguno referencia una variable de entorno que no empiece con `NEXT_PUBLIC_`.
 
 ### 5.2 El bundle del cliente
 

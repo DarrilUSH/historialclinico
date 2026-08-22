@@ -1,7 +1,29 @@
 # Estado del proyecto — Historial Médico
 
-> **Última actualización:** 2026-08-18 — **EL SITIO ESTÁ EN PRODUCCIÓN: https://www.historialmedico.com.ar** — **SPRINT 17 COMPLETO + CHECKPOINT APROBADO**: conexión Gmail (17.1), barrido+ingesta+filtros (17.2), huella anti-duplicados, auto-ingesta sin dudas opt-in, y tutorial de bienvenida (tarea #14, migración `20260818170000`, arnés 516/516 ×2, vitest 1240/1240). Tras el deploy del tutorial: RESET DE ESTRENO en prod ejecutado a pedido del usuario (cuentas/consents/catálogo conservados, datos vaciados) — ver sección del maratón.
+> **Última actualización:** 2026-08-21 — **EL SITIO ESTÁ EN PRODUCCIÓN: https://www.historialmedico.com.ar** — **SPRINTS 18 Y 19 COMPLETOS EN PRODUCCIÓN**: ficha médica v2 (agrupa por episodio en vez de por documento), robustez de extracción (título/fecha/número de orden/duplicados/timeouts), tendencias con detalle por tarjeta, Mis datos completo (fecha de nacimiento, documento, teléfono), diccionario de laboratorio al 92,3%, resultados cualitativos, ingreso lento resuelto (servidor al lado de la base, una sola consulta a Auth por request), ingreso instantáneo (tarjeta de perfil responde al toque), hardening de los 104 avisos del Security Advisor, extracción recuperable al bloquear el teléfono, Vincular médico persistiendo `doctor_id`, perfil de destino correcto en el cartel, `error.tsx` propio para el desfasaje de reloj (JWT-skew), y `/ficha/historial` por fin enlazada desde alguna pantalla. Detalle completo abajo, en **CORTE 2026-08-21**.
 > Este documento existe para retomar el trabajo exactamente donde quedó. Léelo completo antes de tocar nada.
+
+## CORTE 2026-08-21 — Sprints 18 y 19 completos en producción
+
+- **Estado de las suites al corte (verificado el 2026-08-21):** vitest **1594/1594** · RLS **551/551 ×2** (corrida dos veces seguidas, mismo resultado — confirma que el arnés es idempotente) · Storage RLS **27/27** · contraste **196/196 AA** · `npx tsc --noEmit` limpio · `npm run lint` limpio · `npm run build` limpio · **38 migraciones**, local=remoto (`npx supabase migration list --linked`) · árbol de git limpio salvo `Estudios Dario Hernandez/` (personal, nunca se trackea).
+- **Sprint 18 (rendimiento + hardening), en tres tandas:**
+  - **`fdf5fa1` Hardening del Security Advisor** — los 104 avisos revisados uno por uno.
+  - **`6d40b94` Fix del hardening** — el alta de médicos, rota por el hardening anterior, vuelve a funcionar.
+  - **`fc6f4dc` + `e55a419` Ingreso lento resuelto** — una sola pregunta a Auth por request (antes eran cinco) y el servidor se mudó al lado de la base de datos (misma región que Supabase, baja la latencia de red).
+  - **`127da36` Ingreso instantáneo** — la tarjeta de perfil responde al toque sin esperar una ida y vuelta a la base para la densidad (chica/grande).
+- **Sprint 19 (la IA deja de rellenar y empieza a entender), medido sobre 19 documentos reales antes de arrancar (`92c168a`):**
+  - **`b2cec8f` Ficha médica cuenta lo que pasó, no dónde se hizo** — el contexto de la ficha IA miraba solo los 5 documentos más nuevos por fecha; ahora agrupa el historial completo por episodios clínicos y descarta documentos sin hecho clínico (placas, hojas de firma). Con el historial real: 4/7 entradas con contenido → 14/14.
+  - **`b5d0b7d` Robustez de extracción** — la extracción deja de perder documentos enteros y de inventar números de orden.
+  - **`35664b2` + `4c973b8` Tendencias** — tocás una tarjeta y ves todas las mediciones (fecha + valor); los resultados cualitativos (VDRL, HBsAg, Hepatitis C, HIV, Strep A, espermograma) aparecen como lista en vez de forzar una curva que no tienen.
+  - **`550b74f` Laboratorio tolerante** — los valores se reconocen aunque cada laboratorio los escriba distinto; el diccionario pasó de 47% a **92,3%** de cobertura (hemograma y fórmula leucocitaria completos, tolerancia a errata del propio documento).
+  - **`841f07f` Mis datos completo** — por fin se puede cargar fecha de nacimiento, documento y teléfono.
+  - **92c168a, medición del conjunto de 7 arreglos de Sprint 19** (0/19 documentos perfectos al arrancar → todos resueltos): título (el modelo nombra el estudio en vez de componer categoría+institución: 0/15 → 15/15), fecha (nunca más se inventa: si el documento no la imprime, se pide con foco puesto y la auto-ingesta manda ese caso a revisión), número de orden (el modelo devuelve el rótulo junto al número, así que los 5 reales del laboratorio vuelven a guardarse sin reabrir la puerta a accesiones DICOM ni números de internación), cualitativos (0 → 8 guardados), diccionario (47% → 92,3%), duplicados (un informe de imagen regenerado ya se detecta), timeouts (3 reintentos con espera creciente en vez de 1).
+- **Maratón de hotfixes post-Sprint-19 (2026-08-19), todos auditados y en producción:**
+  - **`ba1376a` `error.tsx` para el JWT-skew** — el `iat` del token puede quedar adelantado del reloj de PostgREST (que da 30s de margen); si se pasa, la RPC de permisos devolvía `PGRST303` crudo en inglés y parecía que se había perdido el historial entero. Ahora se clasifica el fallo (reloj/red/servidor), se reintenta una vez, y si falla igual aparece una pantalla propia que arranca diciendo que el historial está completo. Incluye el cierre de Tendencias (detalle de mediciones + cualitativos).
+  - **`e6a9f52` `/ficha/historial` enlazada** — existía desde el Sprint 10.5 y ninguna pantalla enlazaba a ella; el dueño creía que sus fichas se borraban solas. Auditadas las 46 rutas de la app: era la única huérfana.
+  - **`78fa405` Bloquear el teléfono ya no mata la lectura; Vincular vincula; el cartel nombra al perfil correcto** — la extracción vive en la fila, no en la respuesta HTTP (el POST reserva la lectura y contesta en ~170ms, Gemini corre en `after()`, el cliente pregunta el estado al volver del bloqueo); Vincular médico guarda `doctor_id` de verdad; la pantalla de revisión resuelve nombre/médicos/títulos desde el perfil de la fila del documento.
+  - **`dc2fd8e` / `96a40d1` / `34fc6de` Arnés y auditoría al día** — BLOQUE 8e (value/value_text del RPC de confirmación), ajuste de un permiso de más que se le había dado a `anon` en el fix del alta de médicos, y el censo de `SERVICE_ROLE_KEY` de `docs/auditoria-seguridad.md` §5.1 corregido a 17 archivos reales (dos módulos —`lib/lugares/sincronizacion.ts` y `lib/push/servidor.ts`— se habían quedado sin la guarda de navegador; ya la tienen).
+- **Documentación de esta tarea (2026-08-21):** `docs/migracion-maquina.md` nuevo (guía de mudanza de máquina), censo de `"use client"` en `docs/auditoria-seguridad.md` §5.1 recontado (74→106, el proyecto creció con los Sprints 15-19), rutas hardcodeadas de esta máquina señaladas en `docs/entorno.md`/`docs/deploy-instrucciones.md`/`TOOLING.md`, y este documento puesto al día.
 
 ## CORTE 2026-08-17 — Sprints 13 y 14 completos en producción; Google OAuth listo para el 17
 
@@ -117,12 +139,13 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 4. **Celular (Samsung Galaxy A71 por USB, autorizado por el usuario):** el reverse se pierde con cada reinicio:
    `adb reverse tcp:3000 tcp:3000 && adb reverse tcp:54321 tcp:54321`
    Técnicas de login/captura documentadas en `docs/capturas/dispositivo-real/README.md`.
-5. **Suites de verificación** (todas deben quedar verdes antes de aprobar cualquier tarea):
-   - RLS: `docker exec -i supabase_db_historialclinico psql -U postgres -d postgres < scripts/test-rls.sql` → **125/125 PASS** al corte
-   - Storage RLS: `bash scripts/test-storage-rls.sh` → 20/20
-   - Unit: `npm run test` → **288/288** al corte
-   - `npx tsc --noEmit`, `npm run build`, `npx eslint .`, `node scripts/verificar-contraste.mjs` (98/98 AA)
-6. **Env:** `.env.development.local` (claves demo de Supabase local, gana en dev) + `.env.local` (claves cloud reales, GEMINI_API_KEY, VAPID, CRON_SECRET). Hay deny rules en `.claude/settings.json` — los agentes no leen `.env*` directo.
+5. **Suites de verificación** (todas deben quedar verdes antes de aprobar cualquier tarea; números vigentes al 2026-08-21, van a seguir subiendo — si no coinciden, corré los comandos y confiá en lo que te devuelvan, no en este número):
+   - RLS: `docker exec -i supabase_db_historialclinico psql -U postgres -d postgres < scripts/test-rls.sql` → **551/551 PASS**, corrida dos veces
+   - Storage RLS: `bash scripts/test-storage-rls.sh` → 27/27
+   - Unit: `npm run test` → **1594/1594**
+   - `npx tsc --noEmit`, `npm run build`, `npx eslint .` (o `npm run lint`), `node scripts/verificar-contraste.mjs` (196/196 AA)
+   - Migraciones al día: `npx supabase migration list --linked` → 38 local=remoto
+6. **Env:** `.env.development.local` (claves demo de Supabase local, gana en dev) + `.env.local` (claves cloud reales, GEMINI_API_KEY, VAPID, CRON_SECRET) + `.env.cloud-respaldo` (claves de PRODUCCIÓN, no se usa en desarrollo). Hay deny rules en `.claude/settings.json` — los agentes no leen `.env*` directo. Si migraste de máquina, `docs/migracion-maquina.md` tiene el censo completo de estos archivos.
 7. **Tipos:** tras cualquier migración nueva → `npm run types:gen`.
 
 ## Decisiones/lecciones que NO hay que re-aprender
@@ -144,12 +167,25 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 - **`ON DELETE SET NULL` + `CHECK` acoplado = el borrado que se rompe no es el que uno espera.** `gmail_connections.auto_ingest_profile_id` tiene `ON DELETE SET NULL` y un `CHECK` que exige "encendido ⇒ hay perfil". Sin nada más, borrar el PERFIL de destino (no la conexión) dispara un `UPDATE` que deja `enabled = true` con `profile_id = NULL`, el `CHECK` aborta, y lo que falla es el **borrado del perfil** — un invariante de Gmail terminaría bloqueando el derecho de supresión de la persona. Se resuelve con un trigger `BEFORE INSERT OR UPDATE` que normaliza (apaga el interruptor si el perfil quedó en `NULL`) ANTES de que Postgres evalúe el `CHECK`: en Postgres los triggers `BEFORE` corren antes que las constraints, así que el `UPDATE` del `SET NULL` llega ya corregido. Cualquier `CHECK` multi-columna que dependa de una FK con `ON DELETE SET NULL` necesita este mismo patrón o el borrado en el otro extremo de la relación se rompe.
 - **`supabase-js` infiere el tipo de fila parseando el string de `.select(...)` EN TIEMPO DE COMPILACIÓN.** Partir ese string con `+` (para "prolijidad" al agregar columnas) lo degrada a `GenericStringError` y cada acceso a una columna deja de tipar — pasó al sumar las tres columnas de la auto-carga a `lib/gmail/conexion.ts`. La regla dura: la lista de columnas de un `.select()` va en UN literal de una sola pieza, nunca concatenado en varias líneas.
 
-## Pendientes que requieren al usuario
+## Pendientes que requieren al usuario (al 2026-08-21)
 
-- **E2E con PDF real de laboratorio:** 6 vías de descarga desde Gmail fallaron (connector sin download, DLP de la extensión, app de Gmail deshabilitada en el celu). Opciones: que el usuario deje un PDF en una carpeta local, o habilite la app de Gmail 10 segundos. Los tests sintéticos contra Gemini real pasaron.
+- **Grupo sanguíneo y fecha de nacimiento en "Mis datos":** el dueño todavía no cargó los suyos — `perfil/sos` y `perfil/datos` ya soportan guardarlos (Sprint 19, `841f07f`), falta el toque humano.
+- **La colangio-RMN del dueño está cortada** (documento incompleto/ilegible en la carga) — conviene re-pedirla al laboratorio/clínica y volver a subirla.
+- **Decisión pendiente: cerrar o no el registro público.** Sigue abierto — cualquiera puede crearse una cuenta y gastar cuota de Gemini. Viene arrastrándose desde el deploy inicial (Sprint 12).
 - **El repo es PÚBLICO** (`DarrilUSH/historialclinico`) — considerar hacerlo privado.
-- **Sprint 12 (deploy):** `supabase link` + env vars de Vercel probablemente requieran su token o su Chrome logueado. `configurar_cron_recordatorios()` debe apuntar a la URL de prod con el `CRON_SECRET` de Vercel.
 - Branch local `respaldo-pre-rewrite` (respaldo del rewrite de historia por el email expuesto) — borrable cuando el usuario confirme.
+
+## Deudas conocidas (al 2026-08-21)
+
+Deuda declarada, no olvido — cada una documentada donde corresponde en el código o en `docs/`:
+
+- **Documento multipágina puede elegir la fecha de otra página del mismo episodio.** La extracción toma la fecha de la página que Gemini considera más relevante, no necesariamente la de la página con el dato que terminó guardándose.
+- **Epicrisis e historia clínica comparten título** cuando el modelo no logra diferenciarlas por contenido — puede confundir al ojear la lista de documentos de un episodio.
+- **Typos ocasionales en los títulos que genera el modelo.** El Sprint 19 subió la precisión del título a 15/15 sobre el conjunto medido, pero no elimina errores de tipeo aislados del propio modelo.
+- **El formulario manual de carga precarga la fecha de hoy** en vez de dejarlo vacío — fácil de pasar por alto si el documento es de otro día.
+- **`numero_orden_rotulo` no se persiste** — el modelo ya devuelve el rótulo junto al número (Sprint 19), pero solo el número queda guardado; el rótulo se descarta después de usarse para decidir si es un número de orden real.
+- **La auto-carga de Gmail tiene su propio camino de extracción**, separado del de la carga manual — cualquier mejora a la extracción hay que revisar si aplica a los dos caminos o solo a uno.
+- **`ai_confidence` sin uso.** La columna existe desde temprano en el modelo de datos pero ninguna pantalla la lee ni la muestra.
 
 ## ESTADO FINAL DEL CORTE (2026-08-13 ~17:25)
 

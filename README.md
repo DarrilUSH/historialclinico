@@ -1,3 +1,14 @@
+# Historial Médico
+
+PWA de historial clínico familiar (Next.js 16 + Supabase + Gemini) — dominio `historialmedico.com.ar`. Este README es el boilerplate default de `create-next-app`; la documentación real del proyecto vive en `docs/`:
+
+- **`docs/estado-proyecto.md`** — punto de partida obligado para retomar el trabajo: qué está hecho, qué falta, deudas conocidas.
+- **`docs/migracion-maquina.md`** — guía para mudar el proyecto a otra máquina Windows sin perder nada.
+- **`docs/entorno.md`** — versiones de software y setup del entorno de desarrollo.
+- **`ROADMAP_SPRINTS.md`** — el roadmap completo por sprints.
+
+---
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started

@@ -4,6 +4,8 @@
 
 Este documento consolida el análisis de los recursos que el usuario pidió evaluar como candidatos para el toolkit de desarrollo de **Historial Médico** (PWA de historial clínico personal, enfocada en Senior UX, construida con Next.js + Supabase + Gemini, desarrollada en Windows 11 con Claude Code): cinco videos de TikTok, el plugin oficial `claude-code-setup` de Anthropic, y las skills **Frontend Design** (Anthropic), **UI UX Pro Max**, **Vercel Agent Skills** y **Emil Kowalski Skills**. Para cada uno se documenta qué es, por qué aporta (o no) valor concreto a este proyecto, los comandos de instalación verificados para Windows/PowerShell + Claude Code, la configuración posterior necesaria, y las fuentes usadas. Los datos con verificación parcial o inferida se marcan explícitamente como "a verificar" — no se completó ningún dato inventado.
 
+> **Nota sobre rutas:** los bloques de instalación de abajo usan `cd F:\Proyectos\historialclinico` porque es la ruta de la máquina donde se escribió este documento. Si estás en otra máquina, sustituila por la carpeta real del proyecto (ver `docs/migracion-maquina.md` si te mudaste de máquina hace poco).
+
 ## 2. Tabla resumen
 
 | Herramienta | Qué aporta al proyecto | Estado | Confianza |
