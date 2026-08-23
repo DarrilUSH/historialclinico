@@ -42,6 +42,7 @@
  */
 
 import type { CategoriaDocumento } from "@/types/dominio"
+import { normalizarBusquedaEstudios } from "@/lib/estudios/normalizar-busqueda"
 
 /** Filtros ya validados, listos para armar la consulta y pintar los chips. */
 export interface FiltrosEstudios {
@@ -153,7 +154,8 @@ export function contarFiltrosActivos(filtros: FiltrosEstudios): number {
 }
 
 /**
- * Sanea texto de búsqueda libre antes de usarlo en un patrón `ILIKE`:
+ * Sanea Y normaliza texto de búsqueda libre antes de usarlo en un patrón
+ * `ILIKE` contra `documents.search_text`:
  *
  * 1. Recorta a `LARGO_MAXIMO_BUSQUEDA` -ya lo hace `parsearFiltrosEstudios`
  *    para el valor que viaja en la URL, pero esta función es la barrera real
@@ -164,14 +166,28 @@ export function contarFiltrosActivos(filtros: FiltrosEstudios): number {
  *    reemplazándolos por un espacio. Sin esto, buscar "Hospital, Central"
  *    rompería el parseo de `.or()` del lado de la base en vez de buscar ese
  *    texto.
- * 3. Escapa `\`, `%` y `_` -los comodines de `ILIKE`- así el texto se busca
+ * 3. Normaliza con `normalizarBusquedaEstudios` -minúsculas, sin tildes,
+ *    con la ñ preservada, espacios colapsados-: el mismo criterio que
+ *    `documents.search_text` aplica al PAJAR
+ *    (`supabase/migrations/20260823120000_busqueda_sin_tildes_documentos.sql`),
+ *    para que buscar "hepatico" encuentre "Absceso hepático" sin que la
+ *    persona tenga que tipear la tilde.
+ * 4. Escapa `\`, `%` y `_` -los comodines de `ILIKE`- así el texto se busca
  *    SIEMPRE literal: alguien buscando "50%" (un resultado real de una
- *    métrica) no debe activar el comodín de `LIKE`.
+ *    métrica) no debe activar el comodín de `LIKE`. Va AL FINAL a propósito:
+ *    es el único paso que le agrega backslashes al texto, y ninguno de los
+ *    pasos anteriores debe tocarlos.
+ *
+ * Esta función es SOLO para construir el patrón de la consulta. El valor que
+ * se ve en el campo de texto y el que viaja en la URL (`filtros.q`) NO pasan
+ * por acá -se muestran tal como la persona los escribió, con las tildes que
+ * haya puesto-.
  */
 export function saneaTextoBusqueda(crudo: string): string {
   const recortado = crudo.trim().slice(0, LARGO_MAXIMO_BUSQUEDA)
   const sinCaracteresReservados = recortado.replace(/[,()]/g, " ")
-  return sinCaracteresReservados.replace(/[\\%_]/g, (caracter) => `\\${caracter}`)
+  const normalizado = normalizarBusquedaEstudios(sinCaracteresReservados)
+  return normalizado.replace(/[\\%_]/g, (caracter) => `\\${caracter}`)
 }
 
 /**

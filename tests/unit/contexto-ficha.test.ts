@@ -147,6 +147,12 @@ function documentoDe(parcial: Partial<Documento>): Documento {
     ai_extraction_status: "listo",
     ai_extraction_error: null,
     ai_extraction_started_at: null,
+    // Buscador sin tildes (20260823120000): columna GENERADA por Postgres
+    // (title + ai_summary + institution normalizados), nunca se escribe a
+    // mano ni la mira la ficha -pero es parte de la fila REAL de `documents`,
+    // así que el fixture la necesita para tipar igual que el `Documento` que
+    // devuelve Supabase-.
+    search_text: null,
     ...parcial,
   }
 }

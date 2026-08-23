@@ -50,8 +50,16 @@ export function construirConsultaEstudios(
     consulta = consulta.lte("document_date", filtros.hastaFecha)
   }
   if (filtros.q) {
+    // Un solo `ilike` contra `search_text` -columna generada que concatena
+    // title + ai_summary + institution ya normalizados, sin tildes, ver
+    // `supabase/migrations/20260823120000_busqueda_sin_tildes_documentos.sql`-
+    // en vez del `.or()` de tres `ilike` contra las columnas crudas que había
+    // antes: misma semántica de OR (la columna ya las concatena), menos
+    // trabajo para Postgres, y ahora SÍ encuentra "Absceso hepático" buscando
+    // "hepatico" -antes el buscador exigía tildes porque solo el needle se
+    // normalizaba, nunca el pajar-.
     const patron = `%${saneaTextoBusqueda(filtros.q)}%`
-    consulta = consulta.or(`title.ilike.${patron},ai_summary.ilike.${patron},institution.ilike.${patron}`)
+    consulta = consulta.ilike("search_text", patron)
   }
 
   return consulta

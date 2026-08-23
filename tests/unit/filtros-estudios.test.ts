@@ -120,12 +120,43 @@ describe('lib/estudios/consultas.ts', () => {
     })
 
     it('neutraliza comas y paréntesis para no romper el parseo de .or()', () => {
-      expect(saneaTextoBusqueda('Hospital, Central')).toBe('Hospital  Central')
-      expect(saneaTextoBusqueda('Dr. Pérez (cardiología)')).toBe('Dr. Pérez  cardiología ')
+      // Los espacios que deja el reemplazo de "," "(" ")" se colapsan en la
+      // normalización (paso 3), y el texto queda en minúsculas: mismo
+      // criterio que aplica `documents.search_text` del lado de la base.
+      expect(saneaTextoBusqueda('Hospital, Central')).toBe('hospital central')
+      expect(saneaTextoBusqueda('Dr. Pérez (cardiología)')).toBe('dr. perez cardiologia')
     })
 
-    it('preserva tildes y ñ sin tocarlas', () => {
-      expect(saneaTextoBusqueda('análisis de laboratorio')).toBe('análisis de laboratorio')
+    // Bug reportado: buscar "hepatico" no encontraba "Absceso hepático" -el
+    // buscador exigía tildes-. Es el comportamiento NUEVO, reemplaza al test
+    // viejo "preserva tildes y ñ sin tocarlas": ahora saneaTextoBusqueda
+    // también normaliza (`normalizarBusquedaEstudios`), en lockstep con el
+    // `translate()` de la migración 20260823120000 que arma
+    // `documents.search_text`.
+    it('quita tildes para que "hepatico" encuentre "Absceso hepático"', () => {
+      expect(saneaTextoBusqueda('hepatico')).toBe('hepatico')
+      expect(saneaTextoBusqueda('hepático')).toBe('hepatico')
+      expect(saneaTextoBusqueda('hepatico')).toBe(saneaTextoBusqueda('hepático'))
+    })
+
+    it('"ecografia" y "Ecografía" normalizan al mismo texto', () => {
+      expect(saneaTextoBusqueda('ecografia')).toBe(saneaTextoBusqueda('Ecografía'))
+      expect(saneaTextoBusqueda('Ecografía')).toBe('ecografia')
+    })
+
+    it('preserva la ñ -no es una variante acentuada de la n-: "ano" no es "año"', () => {
+      expect(saneaTextoBusqueda('año')).toBe('año')
+      expect(saneaTextoBusqueda('ano')).not.toBe(saneaTextoBusqueda('año'))
+    })
+
+    it('ignora mayúsculas/minúsculas', () => {
+      expect(saneaTextoBusqueda('HEPÁTICO')).toBe('hepatico')
+      expect(saneaTextoBusqueda('Hepatico')).toBe('hepatico')
+    })
+
+    it('un string vacío o solo espacios normaliza a vacío', () => {
+      expect(saneaTextoBusqueda('')).toBe('')
+      expect(saneaTextoBusqueda('   ')).toBe('')
     })
   })
 

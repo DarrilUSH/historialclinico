@@ -419,6 +419,7 @@ export type Database = {
           numero_orden: string | null
           profile_id: string
           raw_ocr_text: string | null
+          search_text: string | null
           specialty: string | null
           storage_path: string
           title: string
@@ -448,6 +449,7 @@ export type Database = {
           numero_orden?: string | null
           profile_id: string
           raw_ocr_text?: string | null
+          search_text?: string | null
           specialty?: string | null
           storage_path: string
           title: string
@@ -477,6 +479,7 @@ export type Database = {
           numero_orden?: string | null
           profile_id?: string
           raw_ocr_text?: string | null
+          search_text?: string | null
           specialty?: string | null
           storage_path?: string
           title?: string
@@ -1690,6 +1693,7 @@ export type Database = {
           numero_orden: string | null
           profile_id: string
           raw_ocr_text: string | null
+          search_text: string | null
           specialty: string | null
           storage_path: string
           title: string
@@ -1769,6 +1773,7 @@ export type Database = {
           numero_orden: string | null
           profile_id: string
           raw_ocr_text: string | null
+          search_text: string | null
           specialty: string | null
           storage_path: string
           title: string
