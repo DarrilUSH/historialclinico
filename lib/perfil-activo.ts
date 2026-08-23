@@ -23,6 +23,7 @@ import "server-only"
 
 import { cache } from "react"
 
+import { revalidatePath } from "next/cache"
 import { cookies } from "next/headers"
 
 import { ACCION, registrarAcceso } from "@/lib/auditoria"
@@ -89,7 +90,61 @@ export async function fijarPerfilActivo(perfilId: string): Promise<void> {
     maxAge: MAX_AGE_COOKIE_SEGUNDOS,
   })
 
+  purgarCacheDeCliente()
+
   await registrarAcceso({ perfilId, accion: ACCION.ver_perfil })
+}
+
+/**
+ * Tira a la basura TODO lo que el navegador tenga cacheado de la aplicación.
+ *
+ * ## Por qué hace falta, si el perfil activo ya se revalida en cada request
+ *
+ * Porque la revalidación solo corre cuando la pantalla LLEGA al servidor. El
+ * Client Cache de Next.js 16 (el ex "Router Cache";
+ * `node_modules/next/dist/docs/01-app/04-glossary.md`) guarda en memoria del
+ * navegador el payload RSC de las rutas visitadas y prefetcheadas —layouts
+ * incluidos, y el layout de `(con-nav)` es el que pinta "Viendo a Roberto
+ * Gómez"—. Una pantalla servida desde ahí NUNCA vuelve a pasar por
+ * `obtenerPerfilActivo`: se dibuja con los datos del perfil que estaba activo
+ * cuando se guardó. Cambiar la cookie no borra por sí solo lo que ya está en
+ * esa memoria.
+ *
+ * En el camino feliz, Next.js hoy hace lo correcto solo: ese mismo glosario
+ * lista `cookies.set` entre las cosas que invalidan el Client Cache, y
+ * `fijarPerfilActivo` justamente acaba de escribir una cookie. **El problema
+ * es que esa garantía es implícita y no está escrita en ningún lado de este
+ * código.** Depende de un detalle interno del framework, y NO cubre a los
+ * Route Handlers de deep link (`app/(app)/(con-nav)/turnos/enlace/route.ts` y
+ * sus tres hermanos), que también cambian el perfil activo pero desde fuera de
+ * una Server Action.
+ *
+ * `revalidatePath("/", "layout")` es la forma DOCUMENTADA de purgar todo:
+ * *"This will purge the Client Cache, and invalidate all cached data for
+ * revalidation on the next page visit"*
+ * (`node_modules/next/dist/docs/01-app/03-api-reference/04-functions/revalidatePath.md`,
+ * "Revalidating all data"). Se llama acá —en el único punto por el que pasa
+ * todo cambio de perfil— y no en cada uno de los seis lugares que lo invocan:
+ * el que agregue el séptimo camino no tiene que acordarse de nada.
+ *
+ * Cuesta una revalidación de más por cambio de perfil. Es exactamente lo que
+ * se quiere: cambiar de perfil es, por definición, el momento en que todo lo
+ * que había en pantalla dejó de corresponder.
+ *
+ * El try/catch es el mismo caso que documenta `limpiarPerfilActivo`:
+ * `revalidatePath` solo es válida en una Server Action o un Route Handler, y
+ * `limpiarPerfilActivo` puede terminar corriendo durante el render de un
+ * Server Component. Ahí no hay nada que purgar —esa request no cambió ningún
+ * perfil, solo detectó que el permiso se perdió y va a redirigir a
+ * `/perfiles`— así que tragarse el error es la conducta correcta, no un
+ * parche.
+ */
+function purgarCacheDeCliente(): void {
+  try {
+    revalidatePath("/", "layout")
+  } catch {
+    // Ver arriba: no-op esperado fuera de una Server Action / Route Handler.
+  }
 }
 
 /**
@@ -118,6 +173,11 @@ export async function limpiarPerfilActivo(): Promise<void> {
     // Ver comentario de arriba: no-op esperado si esto corre durante el
     // render de un Server Component.
   }
+
+  // Salir de un perfil también tiene que dejar el navegador sin nada de ese
+  // perfil en memoria: el logout es el caso más obvio, pero también cuenta la
+  // revocación detectada a mitad de camino. Ver `purgarCacheDeCliente`.
+  purgarCacheDeCliente()
 }
 
 /**

@@ -435,6 +435,32 @@ casos en los que nadie tocó ningún botón y el resultado es el mismo. Y `/logi
 es, por `esRutaSoloAnonima`, una pantalla a la que no se llega con sesión
 activa: no puede borrar el caché de una sesión viva por accidente.
 
+### 6.2 bis Cambia el perfil activo (arreglo del 2026-08-23)
+
+**El dispositivo guarda offline los datos de UN SOLO perfil a la vez.** En
+cuanto el perfil activo deja de coincidir con el que hay en disco, se purgan las
+mismas tres cachés que al llegar a `/login`, y recién ahí se precarga la ficha
+del perfil nuevo. Lo hace `components/pwa/registro-service-worker.tsx`, que
+recuerda en `localStorage` de qué perfil son los datos guardados.
+
+Antes no pasaba, y costaba caro. Las cuatro pantallas de §3.2 se guardan bajo
+**una clave por URL, sin ningún discriminante de perfil**: hay un solo `/sos`
+en la caché, no uno por persona. El razonamiento anterior —"la precarga del
+perfil nuevo pisa la del anterior"— tenía un agujero: la precarga está
+condicionada por una marca de sesión de pestaña por perfil, así que **volver a
+un perfil ya precargado en esa misma sesión la saltea** y deja en disco la ficha
+del OTRO. Y `/turnos`, `/medicacion` y `/coberturas` no se precargan nunca (§7),
+así que ahí ni siquiera existía el pisado.
+
+Reproducido con un build de producción: con **María** como perfil activo y sin
+señal, `/sos` mostraba la ficha de **Roberto** —grupo sanguíneo, alergias y
+medicación crítica de otra persona— con el encabezado diciendo "Viendo a Roberto
+Gómez". En una guardia eso no es un bug de interfaz.
+
+De paso mejora la minimización de datos (`docs/minimizacion-datos.md`): un
+teléfono que administra tres perfiles ya no puede terminar con retazos de los
+tres escritos en disco.
+
 ### 6.3 Se desinstala la app o se limpian los datos del navegador
 
 **Lo que queda como límite real:** un dispositivo revocado que nunca más se

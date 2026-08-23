@@ -77,10 +77,18 @@ export default async function PaginaEditarMedicacion({
   // Traer el documento asociado si existe, para mostrar su título
   let recetaActual: { id: string; title: string } | null = null
   if (medicacion.prescription_document_id) {
+    // `.eq("profile_id", ...)` no es redundante aunque `asociarReceta`
+    // (`../../actions.ts`) valide el perfil al escribir: acá se pinta un
+    // TÍTULO en pantalla, y confiar en una invariante escrita en otro archivo
+    // para decidir de qué perfil es un dato visible es exactamente lo que
+    // convirtió `/estudios/[id]` en una fuga (arreglo del 2026-08-23). La
+    // regla, sin excepciones: toda consulta que alimente la pantalla se acota
+    // al perfil activo.
     const { data: doc } = await supabase
       .from("documents")
       .select("id, title")
       .eq("id", medicacion.prescription_document_id)
+      .eq("profile_id", activo.perfil.id)
       .maybeSingle()
     recetaActual = doc
   }

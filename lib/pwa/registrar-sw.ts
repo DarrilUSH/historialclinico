@@ -326,14 +326,23 @@ export function aplicarActualizacion(registro: ServiceWorkerRegistration): void 
  * Borra del dispositivo las cachés con datos personales (ficha SOS, payload y
  * fotos de credenciales).
  *
- * **Se llama al llegar a `/login`**, no al tocar "Cerrar sesión". Es a
- * propósito y cubre más casos: a `/login` se llega también cuando la sesión
- * vence sola y cuando `proxy.ts` rebota a alguien sin cookie, situaciones en
- * las que nadie tocó ningún botón pero el resultado es el mismo —este
- * dispositivo ya no tiene una sesión que justifique tener guardada la ficha de
- * salud de nadie—. Y `/login` es, por `esRutaSoloAnonima`, una pantalla a la
- * que no se llega con sesión activa: no puede borrar el caché de una sesión
- * viva por accidente.
+ * Tiene **dos** llamadores, y los dos importan:
+ *
+ * 1. **Al llegar a `/login`** (`components/pwa/purga-cache-offline.tsx`), no al
+ *    tocar "Cerrar sesión". Es a propósito y cubre más casos: a `/login` se
+ *    llega también cuando la sesión vence sola y cuando `proxy.ts` rebota a
+ *    alguien sin cookie, situaciones en las que nadie tocó ningún botón pero el
+ *    resultado es el mismo —este dispositivo ya no tiene una sesión que
+ *    justifique tener guardada la ficha de salud de nadie—. Y `/login` es, por
+ *    `esRutaSoloAnonima`, una pantalla a la que no se llega con sesión activa:
+ *    no puede borrar el caché de una sesión viva por accidente.
+ * 2. **Al cambiar de perfil activo** (`components/pwa/registro-service-worker.tsx`,
+ *    arreglo del 2026-08-23). El caché `paginas` guarda las pantallas bajo una
+ *    clave por URL, sin discriminar perfil, así que sin esta purga el
+ *    dispositivo podía servir sin conexión la ficha SOS de OTRA persona. El
+ *    encabezado de ese componente tiene la reproducción completa. Regla
+ *    resultante: **el dispositivo guarda offline los datos de un solo perfil a
+ *    la vez**.
  *
  * Usa la Cache API directamente en vez de pasar por el worker porque
  * `caches` también existe en el scope de la ventana, y así la purga funciona

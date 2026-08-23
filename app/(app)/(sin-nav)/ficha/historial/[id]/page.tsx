@@ -70,11 +70,18 @@ export default async function PaginaFichaHistorial({ params }: PaginaFichaHistor
   const supabase = await createClient()
 
   // Leer la ficha específica.
+  // El `.eq("profile_id", ...)` acota la consulta al perfil activo, además de
+  // lo que ya filtra RLS (`puede_ver_perfil`, que autoriza TODOS los perfiles
+  // que la sesión puede ver, no solo el activo). La comprobación explícita de
+  // más abajo se conserva a propósito: es barata y deja el invariante escrito
+  // en la pantalla que lo necesita, en vez de repartido entre esta línea y una
+  // política de la base.
   const { data: ficha, error } = await supabase
     .from("consultation_sheets")
     .select("id, profile_id, content, created_at")
     .eq("id", id)
-    .single()
+    .eq("profile_id", perfilId)
+    .maybeSingle()
 
   if (error || !ficha) {
     return (

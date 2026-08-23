@@ -11,16 +11,45 @@
  *
  * ## Guarda y alcance de la consulta
  *
- * `.eq("profile_id", activo.perfil.id)`: mismo patrón que el stub y que
- * `/estudios` -acotación de la consulta, NO la barrera de seguridad-. La
- * política `documents_select_puede_ver` (RLS) es la que de verdad decide qué
- * fila existe para esta sesión; acotar acá además evita que un enlace a un
- * documento de OTRO perfil (uno al que la sesión también tiene acceso, pero
- * que no es el perfil activo ahora mismo) resuelva por accidente.
+ * La política `documents_select_puede_ver` (RLS) es la que decide qué fila
+ * existe para esta sesión. Si el `id` no tiene forma de uuid o la fila no
+ * aparece -no existe, o RLS la filtró porque la sesión no tiene permiso sobre
+ * ese perfil-, se redirige a `/estudios` sin distinguir el motivo (principio 3
+ * de `docs/modelo-permisos.md`: nunca un oráculo que diga si un id existe).
  *
- * Si el `id` no tiene forma de uuid o la fila no aparece -no existe, es de
- * otro perfil, o RLS la filtró-, se redirige a `/estudios` sin distinguir el
- * motivo (principio 3 de `docs/modelo-permisos.md`).
+ * ## El documento manda sobre la navegación (arreglo del 2026-08-23)
+ *
+ * Hasta este arreglo la consulta llevaba además `.eq("profile_id",
+ * activo.perfil.id)`, con el argumento de "evitar que un enlace a un documento
+ * de OTRO perfil -uno al que la sesión también tiene acceso, pero que no es el
+ * activo- resuelva por accidente". El efecto real era el bug que reportó el
+ * dueño, con estas palabras: *"entré al perfil de Emma y me muestra el estudio
+ * de ellos, pero cuando lo toco para abrir NO lo abre y me muestra todo lo del
+ * perfil principal"*. Con ese `.eq`, un documento de Emma abierto con el perfil
+ * de Darío activo NO se distinguía de un id inexistente: los dos caían en
+ * `redirect("/estudios")`, y la persona aterrizaba en la lista COMPLETA del
+ * perfil principal sin ninguna explicación. Un estudio que no abre y datos de
+ * otra persona en pantalla: los dos síntomas del reporte, producidos por la
+ * misma línea.
+ *
+ * Ahora la fila se busca por id a secas y el `profile_id` se compara DESPUÉS.
+ * Son tres casos y cada uno merece una respuesta distinta:
+ *
+ * 1. **Es del perfil activo** → se muestra, igual que siempre.
+ * 2. **Es de otro perfil que la sesión SÍ puede ver** (el caso del reporte) →
+ *    `AvisoOtroPerfil`. No es un problema de seguridad -RLS ya dijo que sí-,
+ *    es de coherencia: la regla del producto es que con Emma activa se ve lo
+ *    de Emma, así que este estudio no se pinta acá. Se dice de quién es y se
+ *    ofrece el único camino honesto: cambiar a ese perfil y abrirlo ahí
+ *    (`abrirEstudioEnSuPerfil`). **No se muestra ni el título ni ningún otro
+ *    dato del documento**: el nombre del perfil ya lo puede ver esta sesión
+ *    -aparece en el selector de `/perfiles`-, el contenido del estudio no
+ *    corresponde hasta que el perfil cambie.
+ * 3. **No aparece** → `redirect("/estudios")`, sin distinguir motivo.
+ *
+ * El caso 2 no abre ningún oráculo: solo se llega ahí con documentos que RLS
+ * ya autorizó a leer para esta sesión. Para todo lo demás la respuesta es
+ * idéntica a la de un id inventado.
  *
  * ## Por qué las métricas se consultan acá y no en el visor
  *
@@ -32,10 +61,13 @@
  */
 
 import type { Metadata } from "next"
+import Link from "next/link"
 import { redirect } from "next/navigation"
 
-import { SparklesIcon, TriangleAlertIcon } from "lucide-react"
+import { ArrowLeftRightIcon, SparklesIcon, TriangleAlertIcon, UsersIcon } from "lucide-react"
 
+import { abrirEstudioEnSuPerfil } from "@/app/(app)/(con-nav)/estudios/actions"
+import { Boton } from "@/components/base/boton"
 import { Tarjeta } from "@/components/base/tarjeta"
 import { BotonVolverEstudios } from "@/components/estudios/boton-volver-estudios"
 import { VisorDocumento } from "@/components/estudios/visor-documento"
@@ -112,14 +144,40 @@ export default async function PaginaDetalleEstudio({
   const { data: documento } = await supabase
     .from("documents")
     .select(
-      "id, title, category, document_date, institution, specialty, doctor_name, mime_type, file_size_bytes, ai_summary, auto_ingest_source",
+      "id, profile_id, title, category, document_date, institution, specialty, doctor_name, mime_type, file_size_bytes, ai_summary, auto_ingest_source",
     )
     .eq("id", id)
-    .eq("profile_id", activo.perfil.id)
     .maybeSingle()
 
   if (!documento) {
     redirect("/estudios")
+  }
+
+  // Caso 2 del encabezado: el documento existe y esta sesión puede leerlo,
+  // pero es de otro perfil. Nada de este documento se pinta acá.
+  if (documento.profile_id !== activo.perfil.id) {
+    const { data: dueno } = await supabase
+      .from("profiles")
+      .select("id, full_name")
+      .eq("id", documento.profile_id)
+      .maybeSingle()
+
+    // Sin fila de `profiles` no hay nada honesto que decir -y es la misma
+    // señal de "esto no es para vos" que el caso 3-, así que se trata igual.
+    // En la práctica no debería pasar: `profiles_select_visible` cubre
+    // exactamente los mismos perfiles que `documents_select_puede_ver`.
+    if (!dueno) {
+      redirect("/estudios")
+    }
+
+    return (
+      <AvisoOtroPerfil
+        documentoId={documento.id}
+        duenoId={dueno.id}
+        nombreDueno={dueno.full_name}
+        nombreActivo={activo.perfil.full_name}
+      />
+    )
   }
 
   const { data: metricasCrudas } = await supabase
@@ -281,6 +339,77 @@ export default async function PaginaDetalleEstudio({
           </div>
         </Tarjeta>
       )}
+    </div>
+  )
+}
+
+/**
+ * Pantalla del caso 2: el estudio existe, la sesión puede verlo, pero es de
+ * otro perfil (ver el encabezado del archivo).
+ *
+ * Lo que NO hace, y es lo importante: no muestra un solo dato del estudio
+ * -ni el título-, y no cambia el perfil por su cuenta. Cambiar de perfil es
+ * una decisión de la persona, siempre explícita: es la promesa central del
+ * producto y sería raro que abrir un enlace la moviera de perfil sin avisar.
+ * Acá se explica qué pasó, con los dos nombres a la vista, y se ofrecen las
+ * dos salidas: ir al estudio cambiando de perfil, o quedarse donde está.
+ *
+ * `variante="info"` y no "advertencia": no pasó nada malo ni peligroso. El
+ * producto está haciendo exactamente lo que promete -no mezclar los
+ * historiales- y esto es información, no una alerta.
+ */
+function AvisoOtroPerfil({
+  documentoId,
+  duenoId,
+  nombreDueno,
+  nombreActivo,
+}: {
+  documentoId: string
+  duenoId: string
+  nombreDueno: string
+  nombreActivo: string
+}) {
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-6 chica:gap-4 chica:py-4">
+      <BotonVolverEstudios />
+
+      <div className="flex flex-col items-center gap-4 px-4 py-8 text-center chica:gap-3 chica:py-6">
+        <span
+          className="flex size-16 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary chica:size-14"
+          aria-hidden="true"
+        >
+          <UsersIcon className="size-8 chica:size-7" />
+        </span>
+
+        <h1 className="text-xl font-semibold text-balance text-foreground">
+          Este estudio es de {nombreDueno}
+        </h1>
+
+        <p className="max-w-sm text-base text-muted-foreground">
+          Ahora estás viendo el historial de {nombreActivo}. Para no mezclar los
+          historiales, el estudio se abre en el perfil de {nombreDueno}.
+        </p>
+
+        <form
+          action={abrirEstudioEnSuPerfil.bind(null, duenoId, documentoId)}
+          className="mt-2 w-full sm:w-fit"
+        >
+          <Boton type="submit" size="lg" className="w-full">
+            <ArrowLeftRightIcon aria-hidden="true" />
+            Ver el estudio en el perfil de {nombreDueno}
+          </Boton>
+        </form>
+
+        <Boton
+          render={<Link href="/estudios" />}
+          nativeButton={false}
+          variant="outline"
+          size="lg"
+          className="w-full sm:w-fit"
+        >
+          Seguir en el historial de {nombreActivo}
+        </Boton>
+      </div>
     </div>
   )
 }

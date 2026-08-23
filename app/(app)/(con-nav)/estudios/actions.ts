@@ -76,7 +76,7 @@ import { esErrorDeGuarda, requerirPermiso, requerirSesion } from "@/lib/auth/gua
 import { ErrorIngesta, formatearFechaDuplicado, ingestarDocumento } from "@/lib/documentos/ingesta"
 import { schemaExtraccionDocumento } from "@/lib/validacion/documento.schema"
 import { prepararMetricas } from "@/lib/laboratorio/normalizacion"
-import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { fijarPerfilActivo, obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { BUCKETS, borrarObjeto } from "@/lib/storage-admin"
 import type { Json } from "@/types/database.types"
 import {
@@ -99,6 +99,9 @@ export interface EstadoSubida {
 export interface EstadoConfirmacion {
   error: string | null
 }
+
+/** Forma de un uuid v4 tal como los emite Postgres. Ver `abrirEstudioEnSuPerfil`. */
+const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const SIN_PERFIL_ACTIVO =
   "No hay un perfil activo. Elegí de nuevo a quién le estás subiendo el estudio."
@@ -430,4 +433,76 @@ export async function descartarDocumento(
 
   revalidatePath("/estudios")
   redirect("/estudios?descartado=1")
+}
+
+/**
+ * Cambia el perfil activo al DUEÑO de un estudio y abre ese estudio.
+ *
+ * La invoca el único botón de `AvisoOtroPerfil`
+ * (`app/(app)/(con-nav)/estudios/[id]/page.tsx`), la pantalla que aparece
+ * cuando alguien abre un estudio de un perfil que puede ver pero que no es el
+ * activo. El porqué de esa pantalla está en el encabezado de ese archivo; acá
+ * va solo lo que hace falta para leer ESTA función.
+ *
+ * ## Por qué es una Server Action y no un `<Link>`
+ *
+ * Porque tiene que ESCRIBIR la cookie del perfil activo, y Next.js solo lo
+ * permite desde una Server Action o un Route Handler -el mismo límite que
+ * obligó a que los deep links de notificación vivan en
+ * `app/(app)/(con-nav)/turnos/enlace/route.ts` y sus hermanos en vez de en la
+ * página-. Acá alcanza con la Server Action: el disparador es un `<form>` de
+ * la propia app, no una URL que tenga que existir para que la toque una
+ * notificación del sistema.
+ *
+ * ## Los dos argumentos vienen bindeados, y ninguno se cree
+ *
+ * `abrirEstudioEnSuPerfil.bind(null, duenoId, documentoId)`: los dos salen del
+ * render del servidor, no de un campo del formulario. Da igual: una Server
+ * Action es un POST a la ruta donde vive y se puede invocar a mano con
+ * cualquier par de uuids, así que los dos se revalidan igual.
+ * `fijarPerfilActivo` exige `view` sobre el perfil contra la base
+ * (`requerirPermiso`, la misma función `SECURITY DEFINER` que usan las
+ * políticas RLS) antes de escribir un solo byte de cookie; y el destino es una
+ * pantalla que vuelve a resolver el documento con RLS. Forzar esta acción con
+ * ids ajenos no consigue nada que la persona no pudiera conseguir eligiendo
+ * ese perfil en `/perfiles`.
+ *
+ * Si el permiso no está -se revocó entre que se pintó la pantalla y se tocó el
+ * botón, que es el caso realista-, se vuelve a `/estudios` sin cambiar nada y
+ * sin explicar por qué: mismo criterio que `elegirPerfil`
+ * (`app/(app)/(sin-nav)/perfiles/actions.ts`) y que
+ * `cambiarPerfilDesdeParametro`, para no convertir esto en un oráculo de ids
+ * ajenos (principio 3 de `docs/modelo-permisos.md`).
+ *
+ * `redirect()` va afuera del `try/catch` a propósito: lanza `NEXT_REDIRECT` y
+ * un `catch` que lo trague deja la navegación colgada (ver el aviso en
+ * `lib/auth/guardas.ts`).
+ */
+export async function abrirEstudioEnSuPerfil(
+  perfilId: string,
+  documentoId: string,
+  _formData: FormData,
+): Promise<void> {
+  void _formData
+
+  // El destino se ARMA con `documentoId`, así que su forma se valida antes de
+  // usarlo: una Server Action se puede invocar a mano, y un valor como
+  // `//otro-sitio.com` convertiría este `redirect()` en un redirect abierto.
+  // Un uuid no puede contener ni `/` ni `.`, así que este chequeo lo cierra.
+  if (!PATRON_UUID.test(documentoId)) {
+    redirect("/estudios")
+  }
+
+  let cambiado = true
+
+  try {
+    await fijarPerfilActivo(perfilId)
+  } catch (error) {
+    if (!esErrorDeGuarda(error)) {
+      throw error
+    }
+    cambiado = false
+  }
+
+  redirect(cambiado ? `/estudios/${documentoId}` : "/estudios")
 }
