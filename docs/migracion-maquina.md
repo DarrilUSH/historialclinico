@@ -26,7 +26,7 @@ Cloná el repo (es público) o copiá la carpeta completa — cualquiera de las 
 git clone https://github.com/DarrilUSH/historialclinico.git
 ```
 
-Esto incluye: todo `app/`, `components/`, `lib/`, `hooks/`, `types/`, `scripts/`, `supabase/migrations/` (las 38 migraciones), `supabase/config.toml`, `supabase/seed.sql`, todo `docs/` (incluido este archivo), `ROADMAP_SPRINTS.md`, `TOOLING.md`, los prompts `01_`/`02_`, `tests/`, `README.md`, `package.json` + `package-lock.json`, `.env.example` (la plantilla sin secretos), `.gitignore`, `.gitattributes`, y `.claude/launch.json` + `.claude/settings.json` + `.claude/skills/` (las deny-rules que protegen los `.env*` de lectura accidental por un agente **también viajan solas**, están en `.claude/settings.json`, que SÍ está trackeado).
+Esto incluye: todo `app/`, `components/`, `lib/`, `hooks/`, `types/`, `scripts/`, `supabase/migrations/` (las 39 migraciones), `supabase/config.toml`, `supabase/seed.sql`, todo `docs/` (incluido este archivo), `ROADMAP_SPRINTS.md`, `TOOLING.md`, los prompts `01_`/`02_`, `tests/`, `README.md`, `package.json` + `package-lock.json`, `.env.example` (la plantilla sin secretos), `.gitignore`, `.gitattributes`, y `.claude/launch.json` + `.claude/settings.json` + `.claude/skills/` (las deny-rules que protegen los `.env*` de lectura accidental por un agente **también viajan solas**, están en `.claude/settings.json`, que SÍ está trackeado).
 
 ---
 
@@ -122,10 +122,10 @@ npm install
 # 2. Base de datos local (Docker Desktop tiene que estar corriendo)
 npx supabase start
 
-# 3. Aplicar las 38 migraciones + seed a la base local
+# 3. Aplicar las 39 migraciones + seed a la base local
 npx supabase db reset
 
-# 4. Suite de tests unitarios — esperado: 1594/1594
+# 4. Suite de tests unitarios — esperado: 1616/1616
 npm run test
 
 # 5. Arnés de RLS — esperado: 551/551 PASS, corrido dos veces (debe dar
@@ -139,7 +139,7 @@ docker exec -i supabase_db_historialclinico psql -U postgres -d postgres < scrip
 npm run dev
 
 # 7. Confirmar que local y remoto están sincronizados (requiere el login+link
-#    del paso (c) ya hecho) — esperado: las 38 migraciones con local=remote
+#    del paso (c) ya hecho) — esperado: las 39 migraciones con local=remote
 npx supabase migration list --linked
 ```
 

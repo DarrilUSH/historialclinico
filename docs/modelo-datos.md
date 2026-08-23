@@ -311,6 +311,37 @@ fila (RLS) y `requerirPermiso(perfil, "upload")`.
 siempre. Con la marca de tiempo, pasada la ventana de `VENTANA_RECLAMO_MS`, otra
 corrida puede retomarlo.
 
+### 16. `documents.search_text`: columna generada para buscar sin tildes (23/08/2026)
+
+Migración `20260823120000`. El buscador de `/estudios` era el único de la app que
+exigía tildes: normalizaba el texto tipeado pero comparaba contra `title`/
+`ai_summary`/`institution` crudos, así que "hepatico" nunca matcheaba "Absceso
+hepático" — hacían falta los dos lados normalizados igual. `search_text` es una
+columna generada `stored` (`lower()` + `translate()` sobre
+`title || ' ' || ai_summary || ' ' || institution`, calculada por Postgres en cada
+`INSERT`/`UPDATE`) y el buscador pasa a un único `ilike '%needle%'` contra ella en vez
+de un `.or()` de tres `ILIKE` contra las columnas crudas, con el needle normalizado
+con el mismo criterio en `lib/estudios/normalizar-busqueda.ts`. La ñ se preserva a
+propósito ("año" no es "ano"). Mismo patrón que `health_centers.search_text`
+(decisión 14): columna generada y no la extensión `unaccent`, porque esa extensión
+vive en esquemas distintos en local y en la nube — divergencia que este proyecto
+prefiere no arrastrar por una búsqueda sobre un puñado de filas por perfil. Al ser
+una columna generada de `documents`, hereda la RLS de la tabla sin policy nueva.
+
+**Sin índice, a propósito.** `LIKE` con comodín en las dos puntas no puede usar un
+btree, y los documentos de un perfil ya están acotados por el índice de
+`profile_id` (decenas de filas). A diferencia de `health_centers_search_text_idx`
+—que sí existe porque ese catálogo son 36.046 filas sin partición por dueño—, acá
+un índice funcional no pagaría su costo de escritura.
+
+**Divergencia SQL/JS conocida y aceptada.** `translate()` solo cubre un mapa FIJO de
+39 caracteres latinos acentuados; el lado JS (`normalizarBusquedaEstudios`) usa
+`NFD` + limpieza de marcas combinantes, que descompone *cualquier* carácter Unicode
+con diacrítico. Para castellano rioplatense el resultado práctico coincide siempre;
+si algún día hiciera falta buscar un apellido con un diacrítico fuera de ese mapa de
+39, la búsqueda lo perdería sin romper nada — divergencia documentada en el propio
+`lib/estudios/normalizar-busqueda.ts`.
+
 ## 4. Índices
 
 Se indexaron los accesos que la aplicación hace de verdad, no todas las columnas.

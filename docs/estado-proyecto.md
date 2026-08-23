@@ -1,7 +1,16 @@
 # Estado del proyecto — Historial Médico
 
-> **Última actualización:** 2026-08-21 — **EL SITIO ESTÁ EN PRODUCCIÓN: https://www.historialmedico.com.ar** — **SPRINTS 18 Y 19 COMPLETOS EN PRODUCCIÓN**: ficha médica v2 (agrupa por episodio en vez de por documento), robustez de extracción (título/fecha/número de orden/duplicados/timeouts), tendencias con detalle por tarjeta, Mis datos completo (fecha de nacimiento, documento, teléfono), diccionario de laboratorio al 92,3%, resultados cualitativos, ingreso lento resuelto (servidor al lado de la base, una sola consulta a Auth por request), ingreso instantáneo (tarjeta de perfil responde al toque), hardening de los 104 avisos del Security Advisor, extracción recuperable al bloquear el teléfono, Vincular médico persistiendo `doctor_id`, perfil de destino correcto en el cartel, `error.tsx` propio para el desfasaje de reloj (JWT-skew), y `/ficha/historial` por fin enlazada desde alguna pantalla. Detalle completo abajo, en **CORTE 2026-08-21**.
+> **Última actualización:** 2026-08-22 — **EL SITIO ESTÁ EN PRODUCCIÓN: https://www.historialmedico.com.ar** — **SPRINTS 18 Y 19 COMPLETOS EN PRODUCCIÓN**, más dos hotfixes de uso real sobre esa base: la fuga de perfil activo (`770959c` — un estudio de otro perfil ya no rebota en silencio, y la ficha SOS offline deja de mostrar la de otra persona) y la búsqueda de `/estudios` insensible a tildes (`d5b84c6` — "hepatico" encuentra "Absceso hepático"). Detalle completo abajo, en **CORTE 2026-08-22**. El corte anterior (Sprints 18 y 19: ficha médica v2 agrupada por episodio, robustez de extracción, tendencias con detalle por tarjeta, Mis datos completo, diccionario de laboratorio al 92,3%, resultados cualitativos, ingreso lento e instantáneo resueltos, hardening de los 104 avisos del Security Advisor, extracción recuperable al bloquear el teléfono, Vincular médico persistiendo `doctor_id`, perfil correcto en el cartel, `error.tsx` del JWT-skew, `/ficha/historial` enlazada) sigue íntegro en **CORTE 2026-08-21**.
 > Este documento existe para retomar el trabajo exactamente donde quedó. Léelo completo antes de tocar nada.
+
+## CORTE 2026-08-22 — Dos bugs de uso real: fuga de perfil activo y búsqueda insensible a tildes
+
+- **Estado de las suites al corte (verificado el 2026-08-22):** vitest **1616/1616** (92 archivos) · RLS **551/551 ×2** (corrida dos veces seguidas, mismo resultado) · `npx tsc --noEmit` limpio · `npm run lint` limpio · **39 migraciones**, local=remoto (`npx supabase migration list --linked`) · árbol de git limpio salvo `Estudios Dario Hernandez/` (personal, nunca se trackea).
+- **`770959c` El perfil que elegís es el que ves, y no se filtra ni sin señal.** El dueño reportó, usando la app en el teléfono: entrar a un perfil que administra no se mantenía — en `/estudios` veía el estudio del perfil correcto en la lista, pero tocarlo para abrirlo lo devolvía a la lista del perfil principal. Reproducido con un build de producción, eran dos fallas distintas que se veían como una sola:
+  1. **Un estudio de otro perfil no abría.** `/estudios/{id}` acotaba la consulta al perfil activo, así que un documento de Emma abierto con el perfil de Darío activo no se distinguía de un id inexistente: los dos caían en el mismo redirect silencioso a `/estudios`. Ahora el documento se busca por id y el perfil se compara después: si es de otro perfil que la sesión puede ver, se dice de quién es —sin mostrar un solo dato del estudio— y se ofrece abrirlo cambiando a ese perfil; si no aparece, la respuesta es la misma que para un id inventado.
+  2. **La fuga grave: sin señal, la ficha SOS mostraba la de otra persona.** El caché offline guarda las pantallas bajo una clave por URL sin discriminar perfil, y la precarga que debía pisar la copia vieja estaba condicionada por una marca de sesión de pestaña: volver a un perfil ya precargado esa sesión la salteaba. Con María activa y el teléfono sin red, `/sos` mostraba grupo sanguíneo, alergias y medicación crítica de Roberto. Ahora el dispositivo guarda offline los datos de **un solo perfil por vez**: cambiar de perfil purga las tres cachés con datos personales y recién ahí precarga la ficha nueva (detalle en `docs/offline.md` §6.2 bis).
+  De paso, tres endurecimientos de la misma regla —lo que se ve es del perfil activo, siempre—: `revalidatePath("/", "layout")` en todo cambio de perfil (Next.js ya lo hacía solo al escribir la cookie dentro de una Server Action, pero esa garantía no cubría los Route Handlers de deep link); `/api/turnos/{id}/ics` acotado por perfil activo (era el único detalle de la app sin esa guarda); la receta asociada en medicación y el detalle de una ficha guardada acotando por perfil en la consulta, como el resto. Verificado con `next build` + `next start`: el recorrido completo (estudios y su detalle, tendencias, turnos, medicación, signos e historial, coberturas, médicos, lugares, especialidades, ficha, SOS, mis datos, Tu Gmail e inicio) no filtra nada del otro perfil.
+- **`d5b84c6` Buscar "hepatico" encuentra "Absceso hepático".** El dueño lo reportó así: puso "hepatico" y no le mostró nada, con "hepático" sí. El buscador de `/estudios` era el único de la app que exigía tildes —los demás (lugares, especialidades, médicos, laboratorio, Gmail) ya normalizaban—; solo se saneaba el texto tipeado, y se comparaba con `ILIKE` contra columnas crudas que seguían con tildes. Se agrega `documents.search_text` (migración `20260823120000`), columna generada `stored` que concatena título+resumen+institución en minúsculas y sin tildes (`lower()`+`translate()`); la búsqueda pasa a un único `ilike` contra esa columna, con el texto tipeado normalizado con el mismo criterio (`lib/estudios/normalizar-busqueda.ts`). La ñ se preserva: "año" no es "ano". Mismo patrón ya usado para `/lugares` (`health_centers.search_text`, Sprint 16.3): columna generada y no la extensión `unaccent`, que vive en esquemas distintos en local y en la nube.
 
 ## CORTE 2026-08-21 — Sprints 18 y 19 completos en producción
 
@@ -139,12 +148,12 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 4. **Celular (Samsung Galaxy A71 por USB, autorizado por el usuario):** el reverse se pierde con cada reinicio:
    `adb reverse tcp:3000 tcp:3000 && adb reverse tcp:54321 tcp:54321`
    Técnicas de login/captura documentadas en `docs/capturas/dispositivo-real/README.md`.
-5. **Suites de verificación** (todas deben quedar verdes antes de aprobar cualquier tarea; números vigentes al 2026-08-21, van a seguir subiendo — si no coinciden, corré los comandos y confiá en lo que te devuelvan, no en este número):
+5. **Suites de verificación** (todas deben quedar verdes antes de aprobar cualquier tarea; números vigentes al 2026-08-22, van a seguir subiendo — si no coinciden, corré los comandos y confiá en lo que te devuelvan, no en este número):
    - RLS: `docker exec -i supabase_db_historialclinico psql -U postgres -d postgres < scripts/test-rls.sql` → **551/551 PASS**, corrida dos veces
    - Storage RLS: `bash scripts/test-storage-rls.sh` → 27/27
-   - Unit: `npm run test` → **1594/1594**
+   - Unit: `npm run test` → **1616/1616**
    - `npx tsc --noEmit`, `npm run build`, `npx eslint .` (o `npm run lint`), `node scripts/verificar-contraste.mjs` (196/196 AA)
-   - Migraciones al día: `npx supabase migration list --linked` → 38 local=remoto
+   - Migraciones al día: `npx supabase migration list --linked` → 39 local=remoto
 6. **Env:** `.env.development.local` (claves demo de Supabase local, gana en dev) + `.env.local` (claves cloud reales, GEMINI_API_KEY, VAPID, CRON_SECRET) + `.env.cloud-respaldo` (claves de PRODUCCIÓN, no se usa en desarrollo). Hay deny rules en `.claude/settings.json` — los agentes no leen `.env*` directo. Si migraste de máquina, `docs/migracion-maquina.md` tiene el censo completo de estos archivos.
 7. **Tipos:** tras cualquier migración nueva → `npm run types:gen`.
 
@@ -175,7 +184,7 @@ PWA de historial médico familiar ("Historial Médico", dominio `historialmedico
 - **El repo es PÚBLICO** (`DarrilUSH/historialclinico`) — considerar hacerlo privado.
 - Branch local `respaldo-pre-rewrite` (respaldo del rewrite de historia por el email expuesto) — borrable cuando el usuario confirme.
 
-## Deudas conocidas (al 2026-08-21)
+## Deudas conocidas (al 2026-08-22)
 
 Deuda declarada, no olvido — cada una documentada donde corresponde en el código o en `docs/`:
 
@@ -186,6 +195,9 @@ Deuda declarada, no olvido — cada una documentada donde corresponde en el cód
 - **`numero_orden_rotulo` no se persiste** — el modelo ya devuelve el rótulo junto al número (Sprint 19), pero solo el número queda guardado; el rótulo se descarta después de usarse para decidir si es un número de orden real.
 - **La auto-carga de Gmail tiene su propio camino de extracción**, separado del de la carga manual — cualquier mejora a la extracción hay que revisar si aplica a los dos caminos o solo a uno.
 - **`ai_confidence` sin uso.** La columna existe desde temprano en el modelo de datos pero ninguna pantalla la lee ni la muestra.
+- **La pantalla "este estudio es de otro perfil" (`770959c`) existe solo en `/estudios`.** Turnos, medicación, coberturas y médicos siguen redirigiendo en silencio cuando el id pedido es de un perfil distinto del activo — el mismo patrón que se corrigió para estudios queda pendiente de generalizar al resto de los detalles de la app.
+- **Caso no reproducido: lista vieja al volver con el botón atrás del navegador (bfcache).** Reportado una sola vez, no reproducido durante la auditoría de `770959c`. Si vuelve a aparecer, preguntarle al usuario si fue navegando con "atrás" del navegador y si tenía o no señal — son las dos variables que hacen falta para poder reproducirlo.
+- **El normalizador `translate()` de `documents.search_text` cubre un mapa FIJO de 39 caracteres latinos acentuados.** Alcanza para castellano rioplatense (que es todo lo que este producto necesita hoy), pero un diacrítico fuera de ese mapa no se normalizaría en la base — el lado JS (`normalizarBusquedaEstudios`) sí usa `NFD` y cubre cualquier diacrítico Unicode, así que ante un apellido con un carácter fuera del mapa la búsqueda perdería ese caso puntual sin romper nada. Divergencia documentada en `lib/estudios/normalizar-busqueda.ts` y en `docs/modelo-datos.md` §3.16.
 
 ## ESTADO FINAL DEL CORTE (2026-08-13 ~17:25)
 
