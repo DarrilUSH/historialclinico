@@ -35,6 +35,7 @@ import {
   esErrorDeGuarda,
   requerirPermiso,
 } from "@/lib/auth/guardas"
+import { COOKIE_PERFIL_ACTIVO_PUBLICO, esUuid } from "@/lib/perfil-activo-espejo"
 import type { Perfil } from "@/types/dominio"
 
 /** Nombre de la cookie httpOnly que guarda el perfil activo. */
@@ -42,9 +43,6 @@ export const COOKIE_PERFIL_ACTIVO = "perfil_activo"
 
 /** Tope real de un `Set-Cookie` en Chrome/Firefox: no tiene sentido pedir más. */
 const MAX_AGE_COOKIE_SEGUNDOS = 400 * 24 * 60 * 60
-
-const PATRON_UUID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** Permisos vigentes del actor sobre el perfil activo, ya revalidados contra la base. */
 export interface PermisosPerfilActivo {
@@ -82,13 +80,19 @@ export async function fijarPerfilActivo(perfilId: string): Promise<void> {
   await requerirPermiso(perfilId, "view", { siNoHaySesion: "lanzar" })
 
   const cookieStore = await cookies()
-  cookieStore.set(COOKIE_PERFIL_ACTIVO, perfilId, {
-    httpOnly: true,
+  const opciones = {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: MAX_AGE_COOKIE_SEGUNDOS,
-  })
+  } as const
+
+  cookieStore.set(COOKIE_PERFIL_ACTIVO, perfilId, { ...opciones, httpOnly: true })
+  // La cookie espejo, en la MISMA llamada y con las mismas opciones: ver
+  // `lib/perfil-activo-espejo.ts` para por qué existe, por qué su valor no es
+  // un secreto y por qué la invariante "se escribe y se borra solo acá" es lo
+  // que impide que la guardia de perfil entre en un bucle de recargas.
+  cookieStore.set(COOKIE_PERFIL_ACTIVO_PUBLICO, perfilId, { ...opciones, httpOnly: false })
 
   purgarCacheDeCliente()
 
@@ -169,6 +173,12 @@ export async function limpiarPerfilActivo(): Promise<void> {
   const cookieStore = await cookies()
   try {
     cookieStore.delete(COOKIE_PERFIL_ACTIVO)
+    // Las dos cookies se borran juntas, en el mismo try, y el orden importa
+    // menos que el hecho de que compartan destino: si el contexto es de solo
+    // lectura, el primer `delete` lanza y NINGUNA de las dos se borra. Las dos
+    // sobreviven, siguen valiendo lo mismo, y la guardia de perfil sigue
+    // comparando peras con peras. Ver `lib/perfil-activo-espejo.ts`.
+    cookieStore.delete(COOKIE_PERFIL_ACTIVO_PUBLICO)
   } catch {
     // Ver comentario de arriba: no-op esperado si esto corre durante el
     // render de un Server Component.
@@ -220,7 +230,7 @@ export const obtenerPerfilActivo = cache(async (): Promise<PerfilActivo | null> 
   const cookieStore = await cookies()
   const perfilId = cookieStore.get(COOKIE_PERFIL_ACTIVO)?.value
 
-  if (!perfilId || !PATRON_UUID.test(perfilId)) {
+  if (!perfilId || !esUuid(perfilId)) {
     return null
   }
 
@@ -291,6 +301,47 @@ export const obtenerPerfilActivo = cache(async (): Promise<PerfilActivo | null> 
     permisos: { esPropio: false, canView: true, canUpload, canManage },
   }
 })
+
+/**
+ * El id de perfil con el que se está dibujando ESTA request, leído de la cookie
+ * y **sin tocar la base**.
+ *
+ * Es lo que consume `app/(app)/layout.tsx` para alimentar a la guardia de
+ * perfil (`components/perfiles/guardia-perfil.tsx`), y la diferencia con
+ * `obtenerPerfilActivo()` es deliberada:
+ *
+ * - `obtenerPerfilActivo()` contesta *"¿puedo mostrar este perfil?"* y por eso
+ *   revalida el permiso contra la base en cada llamada. Cuesta una consulta.
+ * - Esta función contesta *"¿con qué perfil se dibujó esta pantalla?"*, que es
+ *   una pregunta de FRESCURA, no de autorización. La respuesta es literalmente
+ *   el valor de la cookie, porque es de ahí de donde toda pantalla de
+ *   `app/(app)` saca su perfil -directa o indirectamente, todas pasan por
+ *   `obtenerPerfilActivo`, que empieza leyendo esta misma cookie del mismo
+ *   store-. Las dos lecturas no pueden discrepar dentro de un mismo request,
+ *   ni siquiera después de que una Server Action haya cambiado el perfil a
+ *   mitad de camino: el store de cookies de Next.js es uno solo y ya tiene el
+ *   valor nuevo.
+ *
+ * Que no consulte la base es lo que permite montar la guardia en el layout que
+ * cubre TODAS las pantallas con sesión sin cobrarle una consulta extra a las
+ * dos que hoy no necesitan perfil activo (`/perfiles` y `/compartir`).
+ *
+ * No hay riesgo de fuga en devolver esto sin revalidar: el valor viaja a un
+ * componente cliente que solo lo compara con una cookie del mismo navegador. Si
+ * la cookie estuviera forjada, `obtenerPerfilActivo` la rechaza igual en el
+ * mismo request y la pantalla redirige a `/perfiles` sin haber servido ni un
+ * dato.
+ */
+export async function idDePerfilActivoEnCookie(): Promise<string | null> {
+  const cookieStore = await cookies()
+  const perfilId = cookieStore.get(COOKIE_PERFIL_ACTIVO)?.value
+
+  if (!perfilId || !esUuid(perfilId)) {
+    return null
+  }
+
+  return perfilId
+}
 
 /**
  * Cambia el perfil activo a partir de un parámetro de deep link (`?perfil=`),

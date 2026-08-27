@@ -94,11 +94,35 @@ describe("fijarPerfilActivo — purga del caché del cliente", () => {
   it("purga TODO el caché del cliente al fijar un perfil", async () => {
     await fijarPerfilActivo(PERFIL)
 
-    expect(cookieSet).toHaveBeenCalledOnce()
+    // DOS cookies: la httpOnly de siempre y su espejo legible por el navegador
+    // (`lib/perfil-activo-espejo.ts`, guardia de perfil). Que salgan juntas de
+    // acá es la invariante de la que depende que la guardia no cicle.
+    expect(cookieSet).toHaveBeenCalledTimes(2)
     // `"/"` + `"layout"` y no `"page"`: es la forma documentada de purgar el
     // Client Cache entero. `revalidatePath("/")` sola solo alcanzaría a la
     // raíz, y el problema son las OTRAS pantallas ya cacheadas.
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout")
+  })
+
+  it("escribe el espejo con el MISMO valor, sin httpOnly y con las mismas opciones", async () => {
+    await fijarPerfilActivo(PERFIL)
+
+    const [nombreReal, valorReal, opcionesReales] = cookieSet.mock.calls[0]
+    const [nombreEspejo, valorEspejo, opcionesEspejo] = cookieSet.mock.calls[1]
+
+    expect(nombreReal).toBe("perfil_activo")
+    expect(nombreEspejo).toBe("perfil_activo_publico")
+    expect(valorEspejo).toBe(valorReal)
+    expect(valorEspejo).toBe(PERFIL)
+
+    // Lo único que difiere entre las dos es `httpOnly`: el espejo existe
+    // justamente para que `document.cookie` pueda leerlo.
+    expect(opcionesReales.httpOnly).toBe(true)
+    expect(opcionesEspejo.httpOnly).toBe(false)
+    expect(opcionesEspejo.path).toBe(opcionesReales.path)
+    expect(opcionesEspejo.sameSite).toBe(opcionesReales.sameSite)
+    expect(opcionesEspejo.secure).toBe(opcionesReales.secure)
+    expect(opcionesEspejo.maxAge).toBe(opcionesReales.maxAge)
   })
 
   it("purga DESPUÉS de escribir la cookie, no antes", async () => {
@@ -127,7 +151,7 @@ describe("fijarPerfilActivo — purga del caché del cliente", () => {
     })
 
     await expect(fijarPerfilActivo(PERFIL)).resolves.toBeUndefined()
-    expect(cookieSet).toHaveBeenCalledOnce()
+    expect(cookieSet).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -136,7 +160,24 @@ describe("limpiarPerfilActivo — purga del caché del cliente", () => {
     await limpiarPerfilActivo()
 
     expect(cookieDelete).toHaveBeenCalledWith("perfil_activo")
+    // El espejo se borra en la misma llamada: si sobreviviera, la guardia de
+    // perfil compararía contra un valor de una sesión que ya no existe.
+    expect(cookieDelete).toHaveBeenCalledWith("perfil_activo_publico")
     expect(revalidatePath).toHaveBeenCalledWith("/", "layout")
+  })
+
+  it("si el borrado lanza, NINGUNA de las dos cookies se borra (quedan en sincronía)", async () => {
+    // Las dos comparten `try`: en un contexto de solo lectura el primer
+    // `delete` lanza y el segundo ni se intenta. Las dos sobreviven valiendo lo
+    // mismo, que es exactamente lo que la guardia de perfil necesita.
+    cookieDelete.mockImplementation(() => {
+      throw new Error("Cookies can only be modified in a Server Action or Route Handler")
+    })
+
+    await expect(limpiarPerfilActivo()).resolves.toBeUndefined()
+
+    expect(cookieDelete).toHaveBeenCalledTimes(1)
+    expect(cookieDelete).toHaveBeenCalledWith("perfil_activo")
   })
 
   it("purga igual aunque la cookie no se pueda borrar (render de Server Component)", async () => {
