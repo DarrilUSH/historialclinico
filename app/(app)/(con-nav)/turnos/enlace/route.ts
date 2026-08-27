@@ -46,27 +46,8 @@
  * `/api`- más esa función.
  */
 
-import { redirect } from "next/navigation"
-
-import { cambiarPerfilDesdeParametro, obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { responderEnlaceDePerfil } from "@/lib/perfil-activo"
 
 export async function GET(request: Request) {
-  const perfilParam = new URL(request.url).searchParams.get("perfil")
-
-  if (perfilParam) {
-    // `obtenerPerfilActivo` revalida el perfil activo ACTUAL contra la base
-    // (nunca confía en la cookie sola); su único uso acá es el id, para que
-    // `cambiarPerfilDesdeParametro` pueda saltear el cambio -y la auditoría
-    // que dispara- cuando el parámetro ya coincide con el perfil activo.
-    const activo = await obtenerPerfilActivo()
-    await cambiarPerfilDesdeParametro(perfilParam, activo?.perfil.id ?? null)
-  }
-
-  // Incondicional: haya cambiado el perfil, haya fallado el permiso, o no
-  // hubiera parámetro -este handler no debería recibir esa última situación
-  // en el uso real, pero responde igual en vez de exigirlo-, siempre se
-  // aterriza en la URL limpia. Es lo que borra el `?perfil=` de la barra de
-  // direcciones y lo que garantiza que nunca haya dos respuestas distintas
-  // que un observador pueda usar para adivinar si el uuid existía.
-  redirect("/turnos")
+  return responderEnlaceDePerfil(request, "/turnos")
 }

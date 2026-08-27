@@ -35,6 +35,9 @@ import {
   esErrorDeGuarda,
   requerirPermiso,
 } from "@/lib/auth/guardas"
+import { redirect } from "next/navigation"
+
+import { esSolicitudDePrefetch, respuestaDePrefetchSinEfectos } from "@/lib/enlaces-perfil"
 import { COOKIE_PERFIL_ACTIVO_PUBLICO, esUuid } from "@/lib/perfil-activo-espejo"
 import type { Perfil } from "@/types/dominio"
 
@@ -434,6 +437,65 @@ export async function cambiarPerfilDesdeParametro(
     // inesperada: no es "sin permiso", se propaga.
     throw error
   }
+}
+
+/**
+ * El cuerpo COMPLETO de un Route Handler de enlace (`/turnos/enlace` y sus
+ * cuatro hermanos). Los cinco son ahora una sola línea que llama acá.
+ *
+ * ## Por qué se unificaron
+ *
+ * Eran cinco copias del mismo bloque de ocho líneas. Cuando se descubrió que un
+ * **prefetch del router ejecutaba el cambio de perfil** —el bug que documenta
+ * `lib/enlaces-perfil.ts`, capturado con un espía CDP contra el teléfono real—,
+ * la falla estaba en las cinco a la vez, y arreglarla en cinco lugares era
+ * garantizar que el sexto naciera roto. Ahora la regla "un GET prefetcheable no
+ * escribe cookies" vive en un solo lugar y no se puede olvidar.
+ *
+ * ## El orden importa: la guarda va PRIMERO
+ *
+ * Antes de leer el parámetro, antes de `obtenerPerfilActivo()`, antes de
+ * cualquier cosa. Un prefetch no puede tocar la cookie, pero tampoco tiene por
+ * qué gastar un viaje a la base ni una fila de auditoría: no lo pidió nadie.
+ *
+ * ## Qué NO cambió
+ *
+ * El camino real —el click, el toque en la notificación— es exactamente el que
+ * era: se lee `?perfil=`, se delega en `cambiarPerfilDesdeParametro` (que
+ * revalida el permiso contra la base y trata todos los fallos por igual, ver su
+ * encabezado) y se redirige SIEMPRE a la URL limpia, haya cambiado el perfil o
+ * no. Esa incondicionalidad es lo que impide que la respuesta sirva de oráculo
+ * para adivinar ids de perfiles ajenos.
+ *
+ * @param request La request del handler. Se usa para el query string y para los
+ *   encabezados de prefetch.
+ * @param destino La URL limpia a la que aterrizar. Incluye el `#fragmento` si
+ *   la pantalla lo necesita (`/familia#invitar`).
+ */
+export async function responderEnlaceDePerfil(
+  request: Request,
+  destino: string,
+): Promise<Response> {
+  // PRIMERO. Ver arriba, y `lib/enlaces-perfil.ts` para el porqué completo.
+  if (esSolicitudDePrefetch(request)) {
+    return respuestaDePrefetchSinEfectos()
+  }
+
+  const perfilParam = new URL(request.url).searchParams.get("perfil")
+
+  if (perfilParam) {
+    // `obtenerPerfilActivo` revalida el perfil activo ACTUAL contra la base
+    // (nunca confía en la cookie sola); su único uso acá es el id, para que
+    // `cambiarPerfilDesdeParametro` pueda saltear el cambio -y la auditoría
+    // que dispara- cuando el parámetro ya coincide con el perfil activo.
+    const activo = await obtenerPerfilActivo()
+    await cambiarPerfilDesdeParametro(perfilParam, activo?.perfil.id ?? null)
+  }
+
+  // Incondicional: haya cambiado el perfil, haya fallado el permiso, o no
+  // hubiera parámetro, siempre se aterriza en la URL limpia. `redirect()`
+  // funciona lanzando, así que esta función no retorna por acá.
+  redirect(destino)
 }
 
 // Re-exportado para que quien maneja el resultado de `fijarPerfilActivo` en

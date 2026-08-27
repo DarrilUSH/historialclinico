@@ -39,13 +39,17 @@ const refrescar = vi.fn()
 // `useRouter` necesita el contexto del App Router, que no existe fuera de una
 // aplicación de Next. Se reemplaza el módulo entero: lo único que la guardia usa
 // de él es `refresh()`.
+let rutaActual = "/estudios"
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: refrescar }),
+  usePathname: () => rutaActual,
 }))
 
 beforeEach(() => {
   recargar.mockClear()
   refrescar.mockClear()
+  rutaActual = "/estudios"
   vi.useFakeTimers()
 
   // jsdom no deja espiar `location.reload` (es no configurable en el `Location`
@@ -326,6 +330,53 @@ describe("components/perfiles/guardia-perfil.tsx", () => {
       volverALaPestana()
 
       expect(recargar).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("cada navegación: la pantalla que el router había prefetcheado", () => {
+    it("recarga al navegar a una pantalla dibujada con el perfil anterior", () => {
+      // El caso real, encontrado verificando el arreglo del prefetch: el CTA
+      // "Compartir mi historial" cambia la cookie al perfil de la cuenta y
+      // redirige a /familia, y el router pinta /familia desde la copia que
+      // había prefetcheado con el perfil gestionado. Encabezado viejo, cookie
+      // nueva, y ningún evento de foco a la vista.
+      const { rerender } = render(<GuardiaPerfil perfilId={GESTIONADO} />)
+      fijarCookieEspejo(GESTIONADO)
+      expect(recargar).not.toHaveBeenCalled()
+
+      // La cookie cambió y la ruta también, pero el layout -y por lo tanto
+      // `perfilId`- sigue siendo el viejo, porque vino del caché del router.
+      fijarCookieEspejo(TITULAR)
+      rutaActual = "/familia"
+      rerender(<GuardiaPerfil perfilId={GESTIONADO} />)
+
+      expect(recargar).toHaveBeenCalledTimes(1)
+    })
+
+    it("no recarga al navegar si la pantalla nueva sí trae el perfil correcto", () => {
+      const { rerender } = render(<GuardiaPerfil perfilId={GESTIONADO} />)
+      fijarCookieEspejo(GESTIONADO)
+
+      // El camino feliz: el cambio de perfil vino de una Server Action, que
+      // purga el caché del router, así que la pantalla nueva llega fresca.
+      fijarCookieEspejo(TITULAR)
+      rutaActual = "/inicio"
+      rerender(<GuardiaPerfil perfilId={TITULAR} />)
+
+      expect(recargar).not.toHaveBeenCalled()
+    })
+
+    it("comprobar en cada navegación no dispara nada en el caso normal", () => {
+      const { rerender } = render(<GuardiaPerfil perfilId={GESTIONADO} />)
+      fijarCookieEspejo(GESTIONADO)
+
+      rutaActual = "/turnos"
+      rerender(<GuardiaPerfil perfilId={GESTIONADO} />)
+      rutaActual = "/familia"
+      rerender(<GuardiaPerfil perfilId={GESTIONADO} />)
+
+      expect(recargar).not.toHaveBeenCalled()
+      expect(refrescar).not.toHaveBeenCalled()
     })
   })
 

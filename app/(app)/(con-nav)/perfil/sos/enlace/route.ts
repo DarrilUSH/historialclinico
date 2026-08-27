@@ -23,20 +23,8 @@
  * su gemelo.
  */
 
-import { redirect } from "next/navigation"
-
-import { cambiarPerfilDesdeParametro, obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { responderEnlaceDePerfil } from "@/lib/perfil-activo"
 
 export async function GET(request: Request) {
-  const perfilParam = new URL(request.url).searchParams.get("perfil")
-
-  if (perfilParam) {
-    const activo = await obtenerPerfilActivo()
-    await cambiarPerfilDesdeParametro(perfilParam, activo?.perfil.id ?? null)
-  }
-
-  // Incondicional, igual que `/turnos/enlace`: haya cambiado el perfil, haya
-  // fallado el permiso, o no hubiera parámetro, siempre se aterriza en la
-  // URL limpia.
-  redirect("/perfil/sos")
+  return responderEnlaceDePerfil(request, "/perfil/sos")
 }

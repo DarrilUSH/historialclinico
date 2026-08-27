@@ -52,6 +52,18 @@
  * En la práctica dos de los tres suelen dispararse juntos; el `recargando` de
  * abajo hace que eso valga por una sola recarga.
  *
+ * A esos tres se suma **cada cambio de ruta** (`usePathname`), que no es un
+ * evento del navegador pero es el otro momento en que una pantalla puede
+ * aparecer con un perfil que ya no corresponde. El caso concreto, encontrado
+ * verificando el arreglo del prefetch: se toca el CTA "Compartir mi historial"
+ * desde un perfil gestionado, el enlace cambia la cookie al perfil de la cuenta
+ * y redirige a `/familia`… y el router dibuja `/familia` desde la copia que
+ * había PREFETCHEADO con el perfil anterior. Encabezado viejo, cookie nueva. La
+ * purga que hace `fijarPerfilActivo` no alcanza acá: `revalidatePath` le habla
+ * al Client Cache a través de la respuesta de una Server Action, y un Route
+ * Handler que redirige no tiene ese canal. Comprobar en cada navegación lo caza
+ * al instante en vez de esperar al próximo foco.
+ *
  * ## El cuarto evento: `popstate`, y por qué NO compara nada
  *
  * Hay una variante del bug que la comparación de arriba **no puede detectar**,
@@ -203,7 +215,7 @@
  */
 
 import { useCallback, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 
 import { leerPerfilActivoDelNavegador } from "@/lib/perfil-activo-espejo"
 
@@ -266,6 +278,7 @@ export interface GuardiaPerfilProps {
 
 export function GuardiaPerfil({ perfilId }: GuardiaPerfilProps) {
   const router = useRouter()
+  const ruta = usePathname()
 
   // Una sola recarga por pantalla: `visibilitychange` y `focus` llegan casi
   // siempre juntos, y `location.reload()` no descarga la página al instante
@@ -311,6 +324,15 @@ export function GuardiaPerfil({ perfilId }: GuardiaPerfilProps) {
     window.location.reload()
     return true
   }, [perfilId])
+
+  // Cada navegación de cliente. Ver "cada cambio de ruta" en el encabezado: es
+  // el momento en que el router puede pintar una pantalla que había
+  // prefetcheado con el perfil anterior. Depende de `ruta` a propósito -no de
+  // `perfilId`, que en ese caso justamente NO cambia porque el layout también
+  // vino del caché-.
+  useEffect(() => {
+    comprobar()
+  }, [comprobar, ruta])
 
   useEffect(() => {
     // `pageshow` sin filtrar por `event.persisted`: la restauración de bfcache

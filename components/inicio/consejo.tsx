@@ -56,6 +56,7 @@ import {
   type PermisoNotificacionPush,
 } from "@/lib/consejos/condiciones-cliente"
 import { CONTENIDO_CONSEJOS, hrefCta, type CtaConsejo as TipoCta } from "@/lib/consejos/contenido"
+import { esRutaDeEnlaceDePerfil } from "@/lib/enlaces-perfil"
 import { elegirConsejo, type EstadoConsejo } from "@/lib/consejos/logica"
 import { CONSEJO_IDS, type ConsejoId } from "@/lib/consejos/tipos"
 import { activarNotificacionesPush, MENSAJE_NOTIFICACIONES_DENEGADAS } from "@/lib/push/activar"
@@ -280,9 +281,20 @@ function CtaDelConsejo({
     return <BotonActivarNotificaciones texto={cta.texto} onCompletar={onCompletar} />
   }
 
+  const href = hrefCta(cta, perfilPropioId)!
+
   return (
     <Boton
-      render={<Link href={hrefCta(cta, perfilPropioId)!} />}
+      render={
+        <Link
+          href={href}
+          // Un enlace que cambia el perfil activo NO se prefetchea:
+          // prefetchearlo era ejecutarlo, y este CTA es EXACTAMENTE el que
+          // disparó el bug -se dibuja en `/inicio` viendo un perfil gestionado
+          // y apunta al perfil de la cuenta-. Ver `lib/enlaces-perfil.ts`.
+          prefetch={esRutaDeEnlaceDePerfil(href) ? false : undefined}
+        />
+      }
       nativeButton={false}
       size="lg"
       className="w-full"

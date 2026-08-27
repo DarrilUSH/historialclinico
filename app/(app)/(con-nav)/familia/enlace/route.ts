@@ -22,19 +22,20 @@
  * (`lib/consejos/contenido.ts`).
  *
  * `#invitar` es el `id` de esa sección en `app/(app)/(con-nav)/familia/page.tsx`.
+ *
+ * ## ESTE es el enlace que disparó el bug del prefetch
+ *
+ * El CTA de arriba se dibuja en `/familia` —o sea, en la pantalla misma que
+ * alguien está mirando desde un perfil gestionado—, así que el router de Next
+ * lo prefetcheaba en cuanto entraba en viewport y **el prefetch ejecutaba este
+ * handler**: dos segundos después de elegir a un perfil gestionado, la cookie
+ * volvía sola al perfil de la cuenta. La guarda vive ahora en
+ * `responderEnlaceDePerfil`; el relato completo, con el registro CDP del
+ * teléfono, está en `lib/enlaces-perfil.ts`.
  */
 
-import { redirect } from "next/navigation"
-
-import { cambiarPerfilDesdeParametro, obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { responderEnlaceDePerfil } from "@/lib/perfil-activo"
 
 export async function GET(request: Request) {
-  const perfilParam = new URL(request.url).searchParams.get("perfil")
-
-  if (perfilParam) {
-    const activo = await obtenerPerfilActivo()
-    await cambiarPerfilDesdeParametro(perfilParam, activo?.perfil.id ?? null)
-  }
-
-  redirect("/familia#invitar")
+  return responderEnlaceDePerfil(request, "/familia#invitar")
 }

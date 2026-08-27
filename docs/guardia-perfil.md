@@ -30,9 +30,18 @@ reabre al arrancar. En todos los casos, layout y página vienen del mismo moment
 del pasado.
 
 **Capa 1 — la comparación.** En `pageshow` (incluido `event.persisted`),
-`visibilitychange` (al volver a `visible`) y `focus`, se compara el perfil con el
-que el servidor dibujó la pantalla contra el perfil activo actual del navegador.
-Si difieren, `location.reload()`.
+`visibilitychange` (al volver a `visible`), `focus` y **cada cambio de ruta**
+(`usePathname`), se compara el perfil con el que el servidor dibujó la pantalla
+contra el perfil activo actual del navegador. Si difieren, `location.reload()`.
+
+El cambio de ruta se sumó después, verificando el arreglo del prefetch (§8): se
+toca el CTA "Compartir mi historial" desde un perfil gestionado, el enlace cambia
+la cookie al perfil de la cuenta y redirige a `/familia`… y el router dibuja
+`/familia` desde la copia que había **prefetcheado** con el perfil anterior.
+Encabezado viejo, cookie nueva, y ningún evento de foco a la vista. La purga de
+`fijarPerfilActivo` no alcanza ahí: `revalidatePath` le habla al Client Cache a
+través de la respuesta de una Server Action, y un Route Handler que redirige no
+tiene ese canal.
 
 ### Clase B — el layout es fresco y el SEGMENTO DE PÁGINA es viejo
 
@@ -239,12 +248,103 @@ Los datos siguen protegidos donde siempre: `requerirPermiso` en cada request
 
 ---
 
-## 7. Dónde mirar
+## 8. La causa raíz definitiva: el prefetch ejecutaba el enlace
+
+Todo lo anterior es correcto y hacía falta, pero **no era la causa**. La causa se
+capturó con un espía CDP contra el teléfono real, en producción, con la guardia
+ya desplegada, y se reprodujo dos veces idéntica en noventa segundos:
+
+```
+ 9,3 s   POST /perfiles                                  ← elegir a León
+11,0 s   Set-Cookie: perfil_activo=<León>                ← la elección, correcta
+11,4 s   GET /familia/enlace?perfil=<Darío>&_rsc=…       ← PREFETCH del router
+13,1 s   Set-Cookie: perfil_activo=<Darío>               ← ¡lo revirtió!
+```
+
+La pantalla `/familia` —y `/ayuda`—, vistas desde un perfil gestionado, dibujan
+un enlace a `/familia/enlace?perfil=<el propio de la cuenta>`: el CTA "Compartí
+con tu familia", que tiene que operar sobre el perfil de la CUENTA y no sobre el
+que se está mirando. El router de Next prefetchea los `<Link>` que entran en
+viewport —eso es lo que tiene que hacer—, y **ese prefetch ejecutaba el Route
+Handler entero**: `fijarPerfilActivo`, `Set-Cookie`, auditoría. Dos segundos
+después de elegir un perfil gestionado, el navegador volvía solo al otro.
+
+Explica el reporte completo: la intermitencia (depende de qué entra en el lote de
+prefetch), las mezclas de encabezado y contenido (la cookie cambia entre un
+render y el siguiente), y que la guardia "corrigiera" hacia el perfil equivocado
+—la cookie REALMENTE había vuelto atrás; la guardia hizo exactamente lo que se le
+pidió—.
+
+### La regla, en dos capas
+
+**Ningún GET prefetcheable escribe cookies.** Un prefetch es una lectura
+especulativa que nadie pidió: no puede tener efectos.
+
+1. **Servidor** (`esSolicitudDePrefetch`, `lib/enlaces-perfil.ts`): los cinco
+   Route Handlers de enlace responden **204 No Content** con `Cache-Control:
+   no-store`, sin tocar una cookie, sin auditar y sin consultar la base. Detecta
+   los tres encabezados: `next-router-prefetch` (el del router de Next, la
+   constante `NEXT_ROUTER_PREFETCH_HEADER`), `sec-purpose` (el estándar moderno,
+   por contenido: puede venir `prefetch;prerender`) y `purpose` (el legado). Ante
+   la duda, **no** es prefetch: un falso positivo rompería el deep link de una
+   notificación, que es peor que el bug.
+2. **Cliente** (`esRutaDeEnlaceDePerfil` → `prefetch={false}` en los dos
+   componentes que dibujan esos CTA): defensa en profundidad, y además lo
+   semánticamente correcto —precargar un endpoint cuyo único trabajo es redirigir
+   no sirve para nada—.
+
+Los cinco handlers se unificaron en `responderEnlaceDePerfil`
+(`lib/perfil-activo.ts`): eran cinco copias del mismo bloque, la falla estaba en
+las cinco, y arreglarla en cinco lugares garantizaba que el sexto naciera roto.
+
+### Por qué 204 y no otra cosa
+
+- **La redirección de siempre salteando el cambio de perfil** es la peor: el
+  router se quedaría con una entrada de prefetch para esa URL y el click real
+  podría resolverse desde ahí sin volver al servidor. El deep link no cambiaría
+  el perfil nunca: un bug ruidoso convertido en uno silencioso.
+- **405** miente (el método está permitido; lo que no corresponde es el
+  propósito) y **404** también (la ruta existe). Los dos son ruido en cualquier
+  panel de errores.
+- **204** es exactamente lo que pasó, es una respuesta exitosa —no dispara
+  caminos de error del router— y no tiene cuerpo que el router pueda guardar y
+  reusar en el click. `no-store` impide que nadie intermedio se lo quede.
+
+### La evidencia, antes y después
+
+Contra `next build` + `next start`, cookie de sesión real, perfil activo Roberto
+(`…0003`) y el pedido `GET /familia/enlace?perfil=<María …0001>` con los
+encabezados exactos del registro CDP (`next-router-prefetch: 1`, `RSC: 1`,
+siguiendo la redirección de normalización a `&_rsc=`):
+
+| | respuesta | `Set-Cookie: perfil_activo` |
+|---|---|---|
+| **Antes** (guarda neutralizada, una línea) | 307 → `/familia#invitar` | **`…0001` — el bug** |
+| **Después** | **204 No Content**, `no-store` | ninguna |
+| **Después, el click real** (sin encabezado de prefetch) | 307 → `/familia#invitar` | `…0001` ✓ |
+
+O sea: el prefetch llegaba al handler y lo ejecutaba, y ahora no; y el click real
+inmediatamente después del prefetch sigue cambiando el perfil como siempre.
+
+En navegador real, con `/ayuda` abierta desde el perfil gestionado: el router
+prefetcheó el lote completo (`/inicio`, `/estudios`, `/turnos`, `/familia`,
+`/perfiles`, `/perfil/datos`, `/privacidad`, `/terminos`, `/ayuda`) y
+**`/familia/enlace` no aparece en la lista** —el `prefetch={false}` lo excluyó—,
+con la cookie intacta en `…0003`. Al tocar el enlace, el perfil cambia a `…0001` y
+la pantalla queda coherente al instante gracias a la comprobación por navegación
+de §1.
+
+---
+
+## 9. Dónde mirar
 
 | Archivo | Qué hace |
 |---|---|
-| `components/perfiles/guardia-perfil.tsx` | El componente. Las dos capas, el corta-corriente. |
+| `components/perfiles/guardia-perfil.tsx` | El componente. Las dos capas, la comprobación por navegación, el corta-corriente. |
 | `lib/perfil-activo-espejo.ts` | Nombre de la cookie espejo, lectura pura, la invariante. |
-| `lib/perfil-activo.ts` | Escribe/borra las dos cookies juntas; `idDePerfilActivoEnCookie()`. |
+| `lib/enlaces-perfil.ts` | Censo de enlaces, detección de prefetch, la respuesta 204. |
+| `lib/perfil-activo.ts` | Escribe/borra las dos cookies juntas; `idDePerfilActivoEnCookie()`; `responderEnlaceDePerfil()`. |
+| `app/(app)/(con-nav)/*/enlace/route.ts` | Los cinco enlaces, ahora de una línea cada uno. |
 | `app/(app)/layout.tsx` | El único punto que cubre `(con-nav)` y `(sin-nav)` de una vez. |
-| `tests/unit/guardia-perfil.test.tsx` | 29 casos: comparación, atrás/adelante, corta-corriente, ciclo de vida. |
+| `tests/unit/guardia-perfil.test.tsx` | 32 casos: comparación, navegación, atrás/adelante, corta-corriente, ciclo de vida. |
+| `tests/unit/enlaces-perfil-prefetch.test.ts` | 47 casos, incluido el censo contra el disco que impide un sexto enlace sin guarda. |

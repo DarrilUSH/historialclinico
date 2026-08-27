@@ -38,6 +38,7 @@ import {
   type PermisoNotificacionPush,
 } from "@/lib/consejos/condiciones-cliente"
 import { CONTENIDO_CONSEJOS, hrefCta } from "@/lib/consejos/contenido"
+import { esRutaDeEnlaceDePerfil } from "@/lib/enlaces-perfil"
 import type { CondicionesServidor } from "@/lib/consejos/servidor"
 import { CONSEJO_IDS, type ConsejoId } from "@/lib/consejos/tipos"
 import { activarNotificacionesPush, MENSAJE_NOTIFICACIONES_DENEGADAS } from "@/lib/push/activar"
@@ -177,6 +178,12 @@ function PasoFila({
               ) : (
                 <Link
                   href={href!}
+                  // Un enlace que cambia el perfil activo NO se prefetchea:
+                  // prefetchearlo era ejecutarlo. Ver `lib/enlaces-perfil.ts`
+                  // -la guarda de verdad está en el servidor; esto es defensa
+                  // en profundidad, y además precargar un endpoint que solo
+                  // redirige no sirve para nada-.
+                  prefetch={esRutaDeEnlaceDePerfil(href) ? false : undefined}
                   className="text-sm font-medium text-primary underline-offset-4 hover:underline"
                 >
                   {cta.texto}

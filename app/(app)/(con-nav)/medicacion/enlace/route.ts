@@ -30,21 +30,8 @@
  * 6.6 resolvió para los turnos.
  */
 
-import { redirect } from "next/navigation"
-
-import { cambiarPerfilDesdeParametro, obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { responderEnlaceDePerfil } from "@/lib/perfil-activo"
 
 export async function GET(request: Request) {
-  const perfilParam = new URL(request.url).searchParams.get("perfil")
-
-  if (perfilParam) {
-    // `obtenerPerfilActivo` revalida el perfil activo ACTUAL contra la base
-    // (nunca confía en la cookie sola); su único uso acá es el id, para que
-    // `cambiarPerfilDesdeParametro` pueda saltear el cambio -y la auditoría que
-    // dispara- cuando el parámetro ya coincide con el perfil activo.
-    const activo = await obtenerPerfilActivo()
-    await cambiarPerfilDesdeParametro(perfilParam, activo?.perfil.id ?? null)
-  }
-
-  redirect("/medicacion")
+  return responderEnlaceDePerfil(request, "/medicacion")
 }
