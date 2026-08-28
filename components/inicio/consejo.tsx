@@ -41,6 +41,28 @@
  * cuando el contenido efectivamente cambia: React desmonta la tarjeta vieja
  * y monta una nueva con la animación de entrada; si `elegido` no cambia,
  * sigue siendo el mismo nodo del DOM y no hay ninguna animación que jugar.
+ *
+ * ## `instalar_app` tiene TRES estados, no dos
+ *
+ * Reporte del dueño de la app: la tarjeta "Instalá la app en tu teléfono"
+ * tenía "Ahora no" y "No mostrar más" pero NINGÚN botón que instalara nada
+ * -"sino es al pedo ese cartel"-. La razón de fondo es que "¿está pendiente
+ * instalar?" no alcanza para decidir qué mostrar: hace falta saber además
+ * SI hay algo que ofrecer, y cómo. `lib/pwa/boton-instalar.ts
+ * #estadoTarjetaInstalar` lo resuelve en tres estados -`"instalar"` (hay
+ * `beforeinstallprompt` capturado, va un botón real que lo dispara),
+ * `"instrucciones_ios"` (Safari nunca dispara ese evento, va la instrucción
+ * manual) y `"oculto"` (ya instalada, desktop, o ningún navegador todavía
+ * dio señales)- y este componente usa `pendiente: estado !== "oculto"` para
+ * la prioridad: si Chrome todavía no emitió el evento, `instalar_app` cede
+ * el lugar al siguiente consejo pendiente en vez de ocupar la única tarjeta
+ * de la visita con algo que no tiene ninguna acción que ofrecer todavía.
+ *
+ * La captura de `beforeinstallprompt`/`appinstalled` vive en
+ * `hooks/usar-instalacion-pwa.ts`, compartida con el botón suelto de
+ * `components/pwa/boton-instalar.tsx` -antes de este cambio cada uno tenía
+ * su propia copia del mismo `useEffect`, la otra mitad del bug: la lógica
+ * que sabía instalar nunca llegaba hasta esta tarjeta-.
  */
 
 import * as React from "react"
@@ -50,25 +72,23 @@ import { toast } from "sonner"
 import { descartarConsejo, posponerConsejo } from "@/app/(app)/(con-nav)/inicio/actions"
 import { Boton } from "@/components/base/boton"
 import { CLASE_TARJETA_BASE } from "@/components/base/tarjeta"
+import { useInstalacionPwa } from "@/hooks/usar-instalacion-pwa"
+import { notificacionesPendiente, type PermisoNotificacionPush } from "@/lib/consejos/condiciones-cliente"
 import {
-  instalarAppPendiente,
-  notificacionesPendiente,
-  type PermisoNotificacionPush,
-} from "@/lib/consejos/condiciones-cliente"
-import { CONTENIDO_CONSEJOS, hrefCta, type CtaConsejo as TipoCta } from "@/lib/consejos/contenido"
+  CONTENIDO_CONSEJOS,
+  cuerpoInstalarApp,
+  hrefCta,
+  type CtaConsejo as TipoCta,
+} from "@/lib/consejos/contenido"
 import { esRutaDeEnlaceDePerfil } from "@/lib/enlaces-perfil"
 import { elegirConsejo, type EstadoConsejo } from "@/lib/consejos/logica"
 import { CONSEJO_IDS, type ConsejoId } from "@/lib/consejos/tipos"
+import { detectarIOS, estadoTarjetaInstalar, type EstadoTarjetaInstalar } from "@/lib/pwa/boton-instalar"
 import { activarNotificacionesPush, MENSAJE_NOTIFICACIONES_DENEGADAS } from "@/lib/push/activar"
 import { cn } from "@/lib/utils"
 
 /** Mismo breakpoint `md` que usa Tailwind (`767px` = justo debajo de `768px`). */
 const CONSULTA_VIEWPORT_MOVIL = "(max-width: 767px)"
-
-function enModoStandalone(): boolean {
-  const standaloneIOS = (window.navigator as Navigator & { standalone?: boolean }).standalone
-  return window.matchMedia("(display-mode: standalone)").matches || standaloneIOS === true
-}
 
 function permisoNotificacionActual(): PermisoNotificacionPush {
   if (typeof window === "undefined" || !("Notification" in window)) {
@@ -93,12 +113,15 @@ export interface ConsejoInicioProps {
 
 export function ConsejoInicio({ elegidoServidor, descarte, perfilPropioId }: ConsejoInicioProps) {
   const [elegido, setElegido] = React.useState<ConsejoId | null>(elegidoServidor)
-  // Cuenta las veces que hay que reevaluar por un motivo DISTINTO de
-  // `appinstalled`: hoy solo la dispara `TarjetaConsejo#onCompletar` (activar
-  // notificaciones desde la propia tarjeta). Sumarla a las dependencias del
-  // efecto de abajo es lo que permite volver a evaluar sin sacar el cálculo
-  // del cuerpo del efecto -ver el comentario de ahí para el porqué-.
+  const [estadoInstalarApp, setEstadoInstalarApp] = React.useState<EstadoTarjetaInstalar>("oculto")
+  // Cuenta las veces que hay que reevaluar por un motivo DISTINTO de la
+  // captura de instalación: hoy solo la dispara `TarjetaConsejo#onCompletar`
+  // (activar notificaciones desde la propia tarjeta). Sumarla a las
+  // dependencias del efecto de abajo es lo que permite volver a evaluar sin
+  // sacar el cálculo del cuerpo del efecto -ver el comentario de ahí para
+  // el porqué-.
   const [version, forzarReevaluacion] = React.useReducer((v: number) => v + 1, 0)
+  const instalacion = useInstalacionPwa()
 
   React.useEffect(() => {
     // La evaluación vive DECLARADA ACÁ ADENTRO -no en un `useCallback` de
@@ -111,17 +134,22 @@ export function ConsejoInicio({ elegidoServidor, descarte, perfilPropioId }: Con
     // vino del servidor, sin violar la regla.
     function evaluar() {
       const permiso = permisoNotificacionActual()
+      const estadoInstalar = estadoTarjetaInstalar({
+        promptCapturado: instalacion.promptCapturado,
+        enModoStandalone: instalacion.enModoStandalone,
+        esIOS: detectarIOS({ userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints }),
+        esViewportMovil: window.matchMedia(CONSULTA_VIEWPORT_MOVIL).matches,
+      })
+      setEstadoInstalarApp(estadoInstalar)
 
       const estados: EstadoConsejo[] = CONSEJO_IDS.map((id) => {
         if (id === "instalar_app") {
-          return {
-            id,
-            pendiente: instalarAppPendiente({
-              enModoStandalone: enModoStandalone(),
-              esViewportMovil: window.matchMedia(CONSULTA_VIEWPORT_MOVIL).matches,
-            }),
-            ...descarte.instalar_app,
-          }
+          // Un botón muerto es peor que ningún cartel: si el estado da
+          // "oculto" -ya instalada, desktop, o Chrome que todavía no emitió
+          // `beforeinstallprompt`-, este consejo no compite por la tarjeta y
+          // el siguiente pendiente en `CONSEJO_IDS` gana en su lugar. Ver el
+          // encabezado del archivo, sección "TRES estados".
+          return { id, pendiente: estadoInstalar !== "oculto", ...descarte.instalar_app }
         }
         if (id === "notificaciones") {
           return { id, pendiente: notificacionesPendiente(permiso), ...descarte.notificaciones }
@@ -138,14 +166,21 @@ export function ConsejoInicio({ elegidoServidor, descarte, perfilPropioId }: Con
     }
 
     evaluar()
-
-    // "instalar_app" puede resolverse solo mientras la tarjeta está en
-    // pantalla (la persona instala desde el menú del navegador, sin volver a
-    // tocar nada en esta app): `appinstalled` es la señal nativa de eso, el
-    // mismo evento que ya escucha `components/pwa/boton-instalar.tsx`.
-    window.addEventListener("appinstalled", evaluar)
-    return () => window.removeEventListener("appinstalled", evaluar)
-  }, [elegidoServidor, descarte, version])
+    // Sin listener propio de `appinstalled` acá: `instalacion.enModoStandalone`
+    // (del hook compartido, que sí lo escucha) es una dependencia de este
+    // efecto, así que instalar desde el menú del navegador -sin tocar
+    // ningún botón de esta app- también dispara una reevaluación. Lo mismo
+    // para `instalacion.promptCapturado`: si Chrome emite
+    // `beforeinstallprompt` recién DESPUÉS de montar (no hay garantía de
+    // cuándo llega), la tarjeta pasa de "oculto" a "instalar" sin que la
+    // persona tenga que recargar la página.
+  }, [
+    elegidoServidor,
+    descarte,
+    version,
+    instalacion.promptCapturado,
+    instalacion.enModoStandalone,
+  ])
 
   if (!elegido) {
     return null
@@ -157,6 +192,9 @@ export function ConsejoInicio({ elegidoServidor, descarte, perfilPropioId }: Con
         id={elegido}
         perfilPropioId={perfilPropioId}
         onCompletar={() => forzarReevaluacion()}
+        estadoInstalarApp={estadoInstalarApp}
+        instalandoApp={instalacion.instalando}
+        onInstalarApp={instalacion.instalar}
       />
     </div>
   )
@@ -168,6 +206,9 @@ function TarjetaConsejo({
   id,
   perfilPropioId,
   onCompletar,
+  estadoInstalarApp,
+  instalandoApp,
+  onInstalarApp,
 }: {
   id: ConsejoId
   perfilPropioId: string | null
@@ -180,10 +221,24 @@ function TarjetaConsejo({
    * por si el siguiente consejo en la lista también aplicara.
    */
   onCompletar: () => void
+  /** Solo importa cuando `id === "instalar_app"`: qué puede ofrecer el navegador. Ver el encabezado del archivo. */
+  estadoInstalarApp: EstadoTarjetaInstalar
+  instalandoApp: boolean
+  onInstalarApp: () => Promise<void>
 }) {
   const contenido = CONTENIDO_CONSEJOS[id]
   const Icono = contenido.Icono
   const [oculto, setOculto] = React.useState(false)
+  // `instalar_app` es el único consejo cuyo cuerpo y CTA dependen del
+  // estado del navegador -ver "TRES estados" en el encabezado del archivo-:
+  // el resto usa `contenido.cuerpo`/`contenido.cta` tal cual, sin overrides.
+  const esInstalarApp = id === "instalar_app"
+  const cuerpo = esInstalarApp ? cuerpoInstalarApp(estadoInstalarApp) : contenido.cuerpo
+  // Sin botón en "instrucciones_ios": la instrucción manual ya está en el
+  // cuerpo (no hay ningún `prompt()` que un botón pudiera disparar en
+  // Safari), y en "oculto" esta tarjeta ni debería estar en pantalla
+  // (`pendiente` dio `false` en el padre) — el `null` acá es solo defensivo.
+  const cta = esInstalarApp ? (estadoInstalarApp === "instalar" ? contenido.cta : null) : contenido.cta
   const [posponiendo, iniciarPostergacion] = React.useTransition()
   const [descartando, iniciarDescarte] = React.useTransition()
 
@@ -227,11 +282,17 @@ function TarjetaConsejo({
         </span>
         <div className="flex flex-col gap-1">
           <h2 className="text-base font-semibold text-foreground">{contenido.titulo}</h2>
-          <p className="text-sm text-muted-foreground">{contenido.cuerpo}</p>
+          <p className="text-sm text-muted-foreground">{cuerpo}</p>
         </div>
       </div>
 
-      <CtaDelConsejo cta={contenido.cta} perfilPropioId={perfilPropioId} onCompletar={onCompletar} />
+      <CtaDelConsejo
+        cta={cta}
+        perfilPropioId={perfilPropioId}
+        onCompletar={onCompletar}
+        instalandoApp={instalandoApp}
+        onInstalarApp={onInstalarApp}
+      />
 
       {/* "Ahora no" / "No mostrar más": `size="sm"` es el mismo tamaño que
           usan las acciones secundarias de esta misma pantalla ("Desactivar"
@@ -268,10 +329,14 @@ function CtaDelConsejo({
   cta,
   perfilPropioId,
   onCompletar,
+  instalandoApp,
+  onInstalarApp,
 }: {
   cta: TipoCta
   perfilPropioId: string | null
   onCompletar: () => void
+  instalandoApp: boolean
+  onInstalarApp: () => Promise<void>
 }) {
   if (cta === null) {
     return null
@@ -279,6 +344,19 @@ function CtaDelConsejo({
 
   if (cta.tipo === "activar_notificaciones") {
     return <BotonActivarNotificaciones texto={cta.texto} onCompletar={onCompletar} />
+  }
+
+  if (cta.tipo === "instalar_app") {
+    // Mismo patrón que `BotonActivarNotificaciones`, más simple: el estado
+    // de carga y la función a disparar ya vienen resueltos por
+    // `hooks/usar-instalacion-pwa.ts` (compartido con el botón suelto de
+    // `components/pwa/boton-instalar.tsx`), así que acá no hace falta
+    // ningún `useState` propio.
+    return (
+      <Boton size="lg" className="w-full" onClick={onInstalarApp} cargando={instalandoApp}>
+        {cta.texto}
+      </Boton>
+    )
   }
 
   const href = hrefCta(cta, perfilPropioId)!

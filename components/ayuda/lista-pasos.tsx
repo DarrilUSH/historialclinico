@@ -23,6 +23,14 @@
  * `useEffect`, sin que esta pantalla necesite el cuidado "sin parpadeo" de
  * la tarjeta de `/inicio` -acá no compite por prioridad con nada, cada fila
  * es independiente-.
+ *
+ * `instalar_app` además necesita, igual que la tarjeta de `/inicio`, sus
+ * TRES estados (`lib/pwa/boton-instalar.ts#estadoTarjetaInstalar`) para
+ * saber si esta fila puede ofrecer un botón "Instalar" real, la instrucción
+ * de iOS, o ninguna de las dos -acá SIN que eso cambie `completado`, que
+ * sigue siendo "ya está instalada o no": una fila puede estar "Pendiente"
+ * y aun así no tener ningún CTA que mostrar, si el navegador todavía no dio
+ * ninguna señal-. Usa el mismo hook compartido, `hooks/usar-instalacion-pwa.ts`.
  */
 
 import * as React from "react"
@@ -32,24 +40,21 @@ import { toast } from "sonner"
 
 import { Boton } from "@/components/base/boton"
 import { CLASE_TARJETA_BASE } from "@/components/base/tarjeta"
+import { useInstalacionPwa } from "@/hooks/usar-instalacion-pwa"
 import {
   instalarAppPendiente,
   notificacionesPendiente,
   type PermisoNotificacionPush,
 } from "@/lib/consejos/condiciones-cliente"
-import { CONTENIDO_CONSEJOS, hrefCta } from "@/lib/consejos/contenido"
+import { CONTENIDO_CONSEJOS, cuerpoInstalarApp, hrefCta } from "@/lib/consejos/contenido"
 import { esRutaDeEnlaceDePerfil } from "@/lib/enlaces-perfil"
+import { detectarIOS, estadoTarjetaInstalar, type EstadoTarjetaInstalar } from "@/lib/pwa/boton-instalar"
 import type { CondicionesServidor } from "@/lib/consejos/servidor"
 import { CONSEJO_IDS, type ConsejoId } from "@/lib/consejos/tipos"
 import { activarNotificacionesPush, MENSAJE_NOTIFICACIONES_DENEGADAS } from "@/lib/push/activar"
 import { cn } from "@/lib/utils"
 
 const CONSULTA_VIEWPORT_MOVIL = "(max-width: 767px)"
-
-function enModoStandalone(): boolean {
-  const standaloneIOS = (window.navigator as Navigator & { standalone?: boolean }).standalone
-  return window.matchMedia("(display-mode: standalone)").matches || standaloneIOS === true
-}
 
 function permisoNotificacionActual(): PermisoNotificacionPush {
   if (typeof window === "undefined" || !("Notification" in window)) {
@@ -82,6 +87,14 @@ export function ListaPasosAyuda({
   const [completados, setCompletados] = React.useState<Record<ConsejoId, boolean>>(() =>
     estadoInicial(condicionesServidor),
   )
+  // Igual que en `components/inicio/consejo.tsx`: qué puede ofrecer el
+  // navegador para `instalar_app`, en sus tres estados (`lib/pwa/
+  // boton-instalar.ts#estadoTarjetaInstalar`). Arranca en `"oculto"` -sin
+  // `window` en el server ni en la primera pasada de hidratación, mismo
+  // criterio que `completados.instalar_app` arriba-, y el `useEffect` de
+  // abajo lo corrige apenas monta.
+  const [estadoInstalarApp, setEstadoInstalarApp] = React.useState<EstadoTarjetaInstalar>("oculto")
+  const instalacion = useInstalacionPwa()
 
   React.useEffect(() => {
     // Declarada ACÁ ADENTRO, no en un `useCallback` de afuera: es el mismo
@@ -90,20 +103,30 @@ export function ListaPasosAyuda({
     // estado la declare el propio efecto, mismo patrón que
     // `ActivarNotificaciones#comprobar`-.
     function evaluarCliente() {
+      const esViewportMovil = window.matchMedia(CONSULTA_VIEWPORT_MOVIL).matches
+      const estado = estadoTarjetaInstalar({
+        promptCapturado: instalacion.promptCapturado,
+        enModoStandalone: instalacion.enModoStandalone,
+        esIOS: detectarIOS({ userAgent: navigator.userAgent, maxTouchPoints: navigator.maxTouchPoints }),
+        esViewportMovil,
+      })
+      setEstadoInstalarApp(estado)
       setCompletados((anterior) => ({
         ...anterior,
         instalar_app: !instalarAppPendiente({
-          enModoStandalone: enModoStandalone(),
-          esViewportMovil: window.matchMedia(CONSULTA_VIEWPORT_MOVIL).matches,
+          enModoStandalone: instalacion.enModoStandalone,
+          esViewportMovil,
         }),
         notificaciones: !notificacionesPendiente(permisoNotificacionActual()),
       }))
     }
 
     evaluarCliente()
-    window.addEventListener("appinstalled", evaluarCliente)
-    return () => window.removeEventListener("appinstalled", evaluarCliente)
-  }, [])
+    // Sin listener propio de `appinstalled`: `instalacion.enModoStandalone`
+    // (del hook compartido `hooks/usar-instalacion-pwa.ts`, que sí lo
+    // escucha) ya es una dependencia de este efecto, mismo razonamiento que
+    // `components/inicio/consejo.tsx`.
+  }, [instalacion.promptCapturado, instalacion.enModoStandalone])
 
   return (
     <ol className="flex flex-col gap-3 chica:gap-2">
@@ -115,6 +138,9 @@ export function ListaPasosAyuda({
           completado={completados[id]}
           perfilPropioId={perfilPropioId}
           onCompletar={() => setCompletados((anterior) => ({ ...anterior, [id]: true }))}
+          estadoInstalarApp={estadoInstalarApp}
+          instalandoApp={instalacion.instalando}
+          onInstalarApp={instalacion.instalar}
         />
       ))}
     </ol>
@@ -127,16 +153,28 @@ function PasoFila({
   completado,
   perfilPropioId,
   onCompletar,
+  estadoInstalarApp,
+  instalandoApp,
+  onInstalarApp,
 }: {
   numero: number
   id: ConsejoId
   completado: boolean
   perfilPropioId: string | null
   onCompletar: () => void
+  /** Solo importa para `id === "instalar_app"`. Ver `components/inicio/consejo.tsx`. */
+  estadoInstalarApp: EstadoTarjetaInstalar
+  instalandoApp: boolean
+  onInstalarApp: () => Promise<void>
 }) {
   const contenido = CONTENIDO_CONSEJOS[id]
   const Icono = contenido.Icono
-  const cta = contenido.cta
+  const esInstalarApp = id === "instalar_app"
+  // Mismo override que la tarjeta contextual: el cuerpo y el CTA de
+  // `instalar_app` dependen de lo que el navegador puede ofrecer, no son un
+  // texto/CTA fijo -ver `lib/consejos/contenido.ts#cuerpoInstalarApp`-.
+  const cuerpo = esInstalarApp ? cuerpoInstalarApp(estadoInstalarApp) : contenido.cuerpo
+  const cta = esInstalarApp ? (estadoInstalarApp === "instalar" ? contenido.cta : null) : contenido.cta
   const href = hrefCta(cta, perfilPropioId)
 
   return (
@@ -156,7 +194,7 @@ function PasoFila({
           <span className="text-sm font-semibold text-muted-foreground">Paso {numero}</span>
           <h2 className="text-base font-semibold text-foreground">{contenido.titulo}</h2>
         </div>
-        <p className="text-sm text-muted-foreground">{contenido.cuerpo}</p>
+        <p className="text-sm text-muted-foreground">{cuerpo}</p>
 
         {/* El color nunca es la única señal (docs/design-system.md §8, regla
             2): el estado se dice con palabras -"Hecho"/"Pendiente"- además
@@ -175,6 +213,15 @@ function PasoFila({
             {cta !== null &&
               (cta.tipo === "activar_notificaciones" ? (
                 <BotonActivarDesdeAyuda texto={cta.texto} onCompletar={onCompletar} />
+              ) : cta.tipo === "instalar_app" ? (
+                // Mismo motivo que en `components/inicio/consejo.tsx`: acá
+                // solo se llega con `cta !== null`, y `cta` ya vino filtrado
+                // arriba a `null` salvo en el estado "instalar" -así que si
+                // hay CTA de tipo `instalar_app`, siempre hay un
+                // `beforeinstallprompt` capturado que ofrecer-.
+                <Boton variant="outline" size="sm" onClick={onInstalarApp} cargando={instalandoApp}>
+                  {cta.texto}
+                </Boton>
               ) : (
                 <Link
                   href={href!}

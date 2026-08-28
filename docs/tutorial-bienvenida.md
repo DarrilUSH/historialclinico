@@ -23,7 +23,7 @@ selección (`lib/consejos/logica.ts#elegirConsejo`) recorre ese mismo array.
 
 | # | id | Se muestra cuando... | CTA | Quién evalúa la condición |
 |---|---|---|---|---|
-| 1 | `instalar_app` | la PWA no corre instalada Y el viewport es de celular | instrucciones, sin botón que navegue | **cliente**, tras montar |
+| 1 | `instalar_app` | la PWA no corre instalada Y el viewport es de celular Y hay una señal utilizable (`beforeinstallprompt` capturado, o iOS) | "Instalar" (dispara `prompt()`) en Chrome/Edge; instrucción manual en iOS; SIN CTA -y sin competir por la tarjeta- si el navegador todavía no dio ninguna señal | **cliente**, tras montar |
 | 2 | `ficha_sos` | el perfil PROPIO no tiene grupo sanguíneo NI contacto de emergencia | "Completar ficha SOS" → `/perfil/sos/enlace` | **servidor** |
 | 3 | `notificaciones` | `Notification.permission !== "granted"` | activa el push, mismo flujo que el banner de siempre | **cliente**, tras montar |
 | 4 | `gmail` | la cuenta no tiene fila en `gmail_connections` | "Conectar Gmail" → `/perfil/gmail` | **servidor** |
@@ -160,9 +160,34 @@ independiente del perfil activo (se renderiza siempre, para cualquiera), así
 que su CTA es un `<Link href="/familia#crear-perfil-gestionado">` directo.
 
 `lib/consejos/contenido.ts#hrefCta` resuelve la URL final según el tipo de
-CTA (`enlace`, `enlace_perfil_propio`, o `null` para
-`activar_notificaciones`, que no navega). Es la misma función pura que usan
-tanto `components/inicio/consejo.tsx` como `components/ayuda/lista-pasos.tsx`.
+CTA (`enlace`, `enlace_perfil_propio`, o `null` para `activar_notificaciones`
+e `instalar_app`, que no navegan: disparan una acción en el lugar). Es la
+misma función pura que usan tanto `components/inicio/consejo.tsx` como
+`components/ayuda/lista-pasos.tsx`.
+
+### `instalar_app`: tres estados, no un CTA fijo
+
+A diferencia de los otros cinco, el CTA (y el cuerpo) de `instalar_app` NO
+son estáticos: dependen de `lib/pwa/boton-instalar.ts#estadoTarjetaInstalar`,
+resuelto contra tres señales del navegador -`beforeinstallprompt` capturado,
+`display-mode: standalone`, y si el dispositivo es iOS/iPadOS (Safari nunca
+dispara ese evento)-:
+
+| Estado | Cuándo | Qué se ve |
+|---|---|---|
+| `"instalar"` | Chrome/Edge ya emitió `beforeinstallprompt` | Botón "Instalar" que dispara `prompt()` |
+| `"instrucciones_ios"` | iOS/iPadOS (Safari nunca dispara el evento) | Instrucción manual ("Compartir → Agregar a pantalla de inicio"), sin botón |
+| `"oculto"` | Ya instalada, desktop, o ningún navegador dio señal todavía | Sin tarjeta: `pendiente` da `false` y el siguiente consejo gana la prioridad |
+
+`"oculto"` por falta de señal (típicamente Android/Chrome antes de que
+dispare el evento, sin garantía de cuándo) es la corrección del bug
+reportado por el dueño de la app -la tarjeta tenía "Ahora no"/"No mostrar
+más" pero NINGÚN botón que instalara nada-: un botón sin ninguna acción
+detrás es peor que ceder el lugar al siguiente consejo pendiente.
+
+La captura de `beforeinstallprompt`/`appinstalled` -y la función `instalar()`
+que dispara `prompt()`- vive en `hooks/usar-instalacion-pwa.ts`, compartida
+entre esta tarjeta y el botón suelto de `components/pwa/boton-instalar.tsx`.
 
 ## 6. `/ayuda` — la referencia completa
 
@@ -202,9 +227,11 @@ trato visual.
 | `lib/consejos/tipos.ts` | `CONSEJO_IDS` (el orden de prioridad), guardas, nombre de la cookie de sesión |
 | `lib/consejos/logica.ts` | `elegirConsejo`, `pospuestoSigueActivo`, `estaDescartado` — puro, sin DOM ni Supabase |
 | `lib/consejos/condiciones-cliente.ts` | `instalarAppPendiente`, `notificacionesPendiente` — puro |
-| `lib/consejos/contenido.ts` | Copy de los seis consejos + `hrefCta` |
+| `lib/consejos/contenido.ts` | Copy de los seis consejos + `hrefCta` + `cuerpoInstalarApp` (el cuerpo de `instalar_app` por estado) |
 | `lib/consejos/sesion.ts` | `asegurarSesionConsejos` — la escribe `proxy.ts` |
 | `lib/consejos/servidor.ts` | `resolverConsejos` (para `/inicio`), `resolverEstadoPasos` (para `/ayuda`), `limpiarSesionConsejos` |
+| `lib/pwa/boton-instalar.ts` | `debeMostrarBotonInstalar`, `detectarIOS`, `estadoTarjetaInstalar` (los tres estados de `instalar_app`) — puro |
+| `hooks/usar-instalacion-pwa.ts` | Captura compartida de `beforeinstallprompt`/`appinstalled` + `instalar()`, usada por la tarjeta y por `components/pwa/boton-instalar.tsx` |
 | `lib/push/activar.ts` | Orquestación de "activar notificaciones", extraída para compartirla entre el banner de siempre y el consejo `notificaciones` |
 | `app/(app)/(con-nav)/inicio/actions.ts` | `posponerConsejo`, `descartarConsejo` |
 | `components/inicio/consejo.tsx` | La tarjeta contextual de `/inicio` |
@@ -217,10 +244,6 @@ trato visual.
   pestañas tienen `/inicio` abierto y una descarta un consejo, la otra no se
   entera hasta que navegue. Mismo compromiso que el resto de las
   preferencias de este proyecto (`tamano`, `perfil_activo`).
-- **`instalar_app` no ofrece instrucciones específicas de iOS** (Safari no
-  tiene el mismo flujo "menú → Instalar aplicación"; es "Compartir → Agregar
-  a inicio"). Mismo límite declarado que
-  `components/pwa/boton-instalar.tsx`.
 - **El corte de "viewport móvil"** para `instalar_app` es el breakpoint `md`
   de Tailwind (767px), sin heurística de dispositivo. Una tablet ancha con
   Chrome no ve este consejo aunque técnicamente pudiera instalarse.

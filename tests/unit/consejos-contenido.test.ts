@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest"
 
-import { CONTENIDO_CONSEJOS, hrefCta } from "@/lib/consejos/contenido.ts"
+import { CONTENIDO_CONSEJOS, cuerpoInstalarApp, hrefCta } from "@/lib/consejos/contenido.ts"
 import { CONSEJO_IDS } from "@/lib/consejos/tipos.ts"
 
 describe("lib/consejos/contenido.ts", () => {
@@ -20,8 +20,8 @@ describe("lib/consejos/contenido.ts", () => {
     }
   })
 
-  it("instalar_app no lleva CTA: es puramente instructivo", () => {
-    expect(CONTENIDO_CONSEJOS.instalar_app.cta).toBeNull()
+  it("instalar_app lleva el CTA de instalar (dispara prompt(), no navega)", () => {
+    expect(CONTENIDO_CONSEJOS.instalar_app.cta).toEqual({ tipo: "instalar_app", texto: "Instalar" })
   })
 
   it("notificaciones lleva el CTA de activación, no un enlace", () => {
@@ -29,12 +29,16 @@ describe("lib/consejos/contenido.ts", () => {
   })
 
   describe("hrefCta", () => {
-    it("null (instalar_app) no tiene href", () => {
+    it("null no tiene href", () => {
       expect(hrefCta(null, "perfil-1")).toBeNull()
     })
 
     it("activar_notificaciones no tiene href (no navega)", () => {
       expect(hrefCta({ tipo: "activar_notificaciones", texto: "Activar" }, "perfil-1")).toBeNull()
+    })
+
+    it("instalar_app no tiene href (dispara prompt(), no navega)", () => {
+      expect(hrefCta({ tipo: "instalar_app", texto: "Instalar" }, "perfil-1")).toBeNull()
     })
 
     it("enlace devuelve el href tal cual, sin importar perfilPropioId", () => {
@@ -72,6 +76,28 @@ describe("lib/consejos/contenido.ts", () => {
       tipo: "enlace_perfil_propio",
       texto: "Compartir mi historial",
       ruta: "/familia/enlace",
+    })
+  })
+
+  describe("cuerpoInstalarApp — el texto nunca contradice lo que se ve en pantalla", () => {
+    it("'instalar': menciona el botón real que va a ver debajo, no la instrucción de iOS", () => {
+      const texto = cuerpoInstalarApp("instalar")
+      expect(texto).toContain("“Instalar”")
+      expect(texto).not.toContain("Compartir")
+    })
+
+    it("'instrucciones_ios': da la instrucción manual completa, no promete ningún botón", () => {
+      const texto = cuerpoInstalarApp("instrucciones_ios")
+      expect(texto).toContain("Compartir")
+      expect(texto).toContain("pantalla de inicio")
+      expect(texto).not.toContain("“Instalar”")
+    })
+
+    it("'oculto': solo la mitad genérica, sin prometer un botón ni una instrucción que todavía no están", () => {
+      const texto = cuerpoInstalarApp("oculto")
+      expect(texto).not.toContain("Tocá")
+      expect(texto).not.toContain("Compartir")
+      expect(texto.length).toBeGreaterThan(0)
     })
   })
 })
