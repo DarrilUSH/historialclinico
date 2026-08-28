@@ -205,8 +205,48 @@ describe("AnalizadorMensajeTurno — mensaje con varias sesiones", () => {
     expect(payload.turnos[0].notasPreparacion).toBe("Sesión 1/10")
     expect(payload.turnos[2].notasPreparacion).toBe("Sesión 4/10")
 
-    // Todo limpio: se vuelve a la lista con la cantidad creada.
-    await waitFor(() => expect(empujar).toHaveBeenCalledWith("/turnos?creados=9"))
+    // Sprint 20 (adenda): el lote SIEMPRE termina en un resumen explícito, y el
+    // formulario desaparece. Antes se navegaba solo cuando todo salía perfecto,
+    // y con un turno saltado la persona quedaba mirando la lista con el botón
+    // de crear todavía puesto — le costó un duplicado real a una usuaria.
+    await waitFor(() => expect(screen.getByText(/Listo, los turnos quedaron cargados/)).toBeTruthy())
+    expect(screen.getByText(/Creamos 9 turnos\./)).toBeTruthy()
+
+    // Ya no queda NINGÚN control que pueda volver a escribir en la agenda.
+    expect(screen.queryByRole("button", { name: /Crear los 9 turnos/ })).toBeNull()
+    expect(screen.queryByRole("textbox")).toBeNull()
+
+    // Y hay una sola salida obvia, con el toast de la lista. (`Boton` con
+    // `render={<Link/>}` produce un `<a role="button">`, el mismo patrón que ya
+    // usa `components/documentos/formulario-revision.tsx`.)
+    const verMisTurnos = screen.getByRole("button", { name: /Ver mis turnos/ })
+    expect(verMisTurnos.getAttribute("href")).toBe("/turnos?creados=9")
+  })
+
+  it("«Cargar otro mensaje» vuelve al campo vacío, sin arrastrar el lote anterior", async () => {
+    crearTurnosEnLoteMock.mockResolvedValue({
+      error: null,
+      resultados: Array.from({ length: 10 }, (_, indice) => ({
+        indice,
+        estado: "creado",
+        error: null,
+      })),
+      creados: 10,
+      duplicados: 0,
+      fallidos: 0,
+    })
+    mockearAnalisis(analisisDeDiezSesiones())
+    render(<AnalizadorMensajeTurno onAplicarPropuesta={vi.fn()} />)
+    await analizar()
+
+    fireEvent.click(await screen.findByRole("button", { name: /Crear los 10 turnos/ }))
+    await waitFor(() => expect(screen.getByText(/Creamos 10 turnos\./)).toBeTruthy())
+
+    fireEvent.click(screen.getByRole("button", { name: /Cargar otro mensaje/ }))
+
+    // Vuelve el punto de partida: sin resumen y sin las diez propuestas.
+    await waitFor(() => expect(screen.queryByText(/Creamos 10 turnos\./)).toBeNull())
+    expect(screen.queryByRole("checkbox")).toBeNull()
   })
 
   it("un resultado parcial se cuenta honestamente y dice CUÁL falló", async () => {
@@ -228,12 +268,18 @@ describe("AnalizadorMensajeTurno — mensaje con varias sesiones", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: /Crear los 10 turnos/ })).toBeTruthy())
     fireEvent.click(screen.getByRole("button", { name: /Crear los 10 turnos/ }))
 
-    await waitFor(() => expect(screen.getByText(/Creamos 9 turnos/)).toBeTruthy())
-    expect(screen.getByText(/1 no se pudo crear/)).toBeTruthy()
-    // El motivo aparece pegado a la fila que falló, no solo en el resumen.
-    expect(screen.getByText(/No se pudo crear: La fecha y la hora del turno tienen que ser futuras./)).toBeTruthy()
-    // Con una falla NO se navega: la persona tiene que poder leer el reporte.
+    await waitFor(() => expect(screen.getByText(/Listo — entraron algunos, no todos/)).toBeTruthy())
+    expect(screen.getByText(/Creamos 9 turnos\./)).toBeTruthy()
+    expect(screen.getByText(/1 no lo pudimos cargar/)).toBeTruthy()
+    // Lo que la usuaria celebró se conserva entero: el motivo va pegado a la
+    // fila que falló, no solo contado en el resumen.
+    expect(
+      screen.getByText(/No lo cargamos: La fecha y la hora del turno tienen que ser futuras./),
+    ).toBeTruthy()
+    // Con una falla tampoco se navega sola: la persona tiene que poder leer el
+    // reporte. Pero el formulario ya no está, así que no puede volver a enviar.
     expect(empujar).not.toHaveBeenCalled()
+    expect(screen.queryByRole("button", { name: /Crear los 10 turnos/ })).toBeNull()
   })
 
   it("pegar dos veces el mismo mensaje no duplica: los diez salen como ya cargados", async () => {

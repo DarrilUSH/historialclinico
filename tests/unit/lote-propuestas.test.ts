@@ -11,7 +11,12 @@
 import { describe, expect, it } from "vitest"
 
 import type { PropuestaTurno } from "@/lib/turnos/construir-propuestas"
-import { describirLoteDePropuestas } from "@/lib/turnos/lote-propuestas"
+import {
+  describirLoteDePropuestas,
+  frasesDelResultadoDelLote,
+  tituloDelResultadoDelLote,
+  type ConteoDelLote,
+} from "@/lib/turnos/lote-propuestas"
 
 function propuesta(cambios: Partial<PropuestaTurno> = {}): PropuestaTurno {
   return {
@@ -118,5 +123,165 @@ describe("describirLoteDePropuestas", () => {
     const propuestas = [propuesta(), propuesta(), propuesta()]
 
     expect(describirLoteDePropuestas(propuestas).filas.map((fila) => fila.indice)).toEqual([0, 1, 2])
+  })
+})
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  avisosComunes (Sprint 20) — un aviso compartido se dice UNA vez, no diez
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+describe("describirLoteDePropuestas — avisosComunes", () => {
+  it("EL CASO REAL — el aviso de las diez sesiones de kinesiología aparece 1 vez arriba y 0 veces en las filas", () => {
+    // Verificado en producción: heredarDatosComunes copia el profesional a
+    // las diez sesiones de la serie, y generarAvisos corre igual sobre cada
+    // una, así que el mismo aviso salía diez veces, una debajo de cada fila.
+    const avisoCompartido =
+      "No pudimos confirmar si BUET DAIANA EDITH está en orden Nombre Apellido…"
+    const propuestas = Array.from({ length: 10 }, (_, indice) =>
+      propuesta({
+        etiquetaSesion: `Sesión ${indice + 1}/10`,
+        fecha: `2026-08-${String(21 + indice).padStart(2, "0")}`,
+        avisos: [avisoCompartido],
+      }),
+    )
+
+    const { avisosComunes, filas } = describirLoteDePropuestas(propuestas)
+
+    expect(avisosComunes).toEqual([avisoCompartido])
+    expect(filas.every((fila) => fila.avisos.length === 0)).toBe(true)
+  })
+
+  it("un aviso presente en TODAS las propuestas sube a avisosComunes y desaparece de las filas", () => {
+    const comun = "El mensaje no traía el nombre del centro — completalo vos."
+    const propuestas = [propuesta({ avisos: [comun] }), propuesta({ avisos: [comun] })]
+
+    const { avisosComunes, filas } = describirLoteDePropuestas(propuestas)
+
+    expect(avisosComunes).toEqual([comun])
+    expect(filas[0].avisos).toEqual([])
+    expect(filas[1].avisos).toEqual([])
+  })
+
+  it("un aviso de UNA sola fila se queda en su fila y no sube a avisosComunes", () => {
+    const soloDeLaPrimera = "El mensaje no decía la hora — completala vos."
+    const propuestas = [propuesta({ avisos: [soloDeLaPrimera] }), propuesta({ avisos: [] })]
+
+    const { avisosComunes, filas } = describirLoteDePropuestas(propuestas)
+
+    expect(avisosComunes).toEqual([])
+    expect(filas[0].avisos).toEqual([soloDeLaPrimera])
+    expect(filas[1].avisos).toEqual([])
+  })
+
+  it("mezcla: el aviso compartido por todas sube, el que trae una sola fila se queda abajo", () => {
+    const compartido = "No pudimos confirmar si BUET DAIANA EDITH está en orden Nombre Apellido…"
+    const soloDeLaSegunda = "El mensaje no decía la hora — completala vos."
+    const propuestas = [
+      propuesta({ avisos: [compartido] }),
+      propuesta({ avisos: [compartido, soloDeLaSegunda] }),
+    ]
+
+    const { avisosComunes, filas } = describirLoteDePropuestas(propuestas)
+
+    expect(avisosComunes).toEqual([compartido])
+    expect(filas[0].avisos).toEqual([])
+    expect(filas[1].avisos).toEqual([soloDeLaSegunda])
+  })
+
+  it("con UNA sola propuesta, avisosComunes es siempre [] — no tiene sentido separar el único aviso que hay", () => {
+    const propuestas = [propuesta({ avisos: ["Un aviso cualquiera."] })]
+
+    const { avisosComunes, filas } = describirLoteDePropuestas(propuestas)
+
+    expect(avisosComunes).toEqual([])
+    expect(filas[0].avisos).toEqual(["Un aviso cualquiera."])
+  })
+
+  it("lote vacío: avisosComunes es []", () => {
+    expect(describirLoteDePropuestas([]).avisosComunes).toEqual([])
+  })
+})
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Cómo termina el lote (Sprint 20, adenda) — el resumen que evita el turno
+ *  duplicado por reintento en una pantalla que no decía si ya había terminado
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+function conteo(cambios: Partial<ConteoDelLote> = {}): ConteoDelLote {
+  return { creados: 0, duplicados: 0, fallidos: 0, ...cambios }
+}
+
+describe("tituloDelResultadoDelLote", () => {
+  it("todo creado, singular", () => {
+    expect(tituloDelResultadoDelLote(conteo({ creados: 1 }))).toBe("Listo, el turno quedó cargado")
+  })
+
+  it("todo creado, plural", () => {
+    expect(tituloDelResultadoDelLote(conteo({ creados: 10 }))).toBe("Listo, los turnos quedaron cargados")
+  })
+
+  it("parcial — algunos creados, otros fallidos", () => {
+    expect(tituloDelResultadoDelLote(conteo({ creados: 4, fallidos: 6 }))).toBe(
+      "Listo — entraron algunos, no todos",
+    )
+  })
+
+  it("parcial — algunos creados, otros duplicados", () => {
+    expect(tituloDelResultadoDelLote(conteo({ creados: 4, duplicados: 6 }))).toBe(
+      "Listo — entraron algunos, no todos",
+    )
+  })
+
+  it("todo duplicado (nada creado, nada fallido): 'ya los tenías cargados', no un genérico 'no creamos nada'", () => {
+    expect(tituloDelResultadoDelLote(conteo({ duplicados: 10 }))).toBe("Ya los tenías cargados")
+  })
+
+  it("nada creado y también hubo fallidos: no es el caso de 'ya los tenías', es fracaso llano", () => {
+    expect(tituloDelResultadoDelLote(conteo({ duplicados: 3, fallidos: 2 }))).toBe("No creamos ningún turno")
+  })
+
+  it("nada creado, nada duplicado, nada fallido: tampoco hay nada que decir de bueno", () => {
+    expect(tituloDelResultadoDelLote(conteo())).toBe("No creamos ningún turno")
+  })
+})
+
+describe("frasesDelResultadoDelLote", () => {
+  it("todo creado — una sola frase, singular con 1", () => {
+    expect(frasesDelResultadoDelLote(conteo({ creados: 1 }))).toEqual(["Creamos 1 turno."])
+  })
+
+  it("todo creado — plural con N", () => {
+    expect(frasesDelResultadoDelLote(conteo({ creados: 10 }))).toEqual(["Creamos 10 turnos."])
+  })
+
+  it("parcial: se dicen TODOS los desenlaces que ocurrieron, no solo el principal", () => {
+    const frases = frasesDelResultadoDelLote(conteo({ creados: 4, duplicados: 2, fallidos: 4 }))
+    expect(frases).toEqual([
+      "Creamos 4 turnos.",
+      "2 ya estaban cargados, así que no los repetimos.",
+      "4 no los pudimos cargar — abajo está el motivo de cada uno.",
+    ])
+  })
+
+  it("duplicados en singular (1) vs plural (N)", () => {
+    expect(frasesDelResultadoDelLote(conteo({ duplicados: 1 }))).toEqual([
+      "1 ya estaba cargado, así que no lo repetimos.",
+    ])
+    expect(frasesDelResultadoDelLote(conteo({ duplicados: 5 }))).toEqual([
+      "5 ya estaban cargados, así que no los repetimos.",
+    ])
+  })
+
+  it("fallidos en singular (1) vs plural (N)", () => {
+    expect(frasesDelResultadoDelLote(conteo({ fallidos: 1 }))).toEqual([
+      "1 no lo pudimos cargar — abajo está el motivo.",
+    ])
+    expect(frasesDelResultadoDelLote(conteo({ fallidos: 5 }))).toEqual([
+      "5 no los pudimos cargar — abajo está el motivo de cada uno.",
+    ])
+  })
+
+  it("nada de nada: una frase que dice explícitamente que no quedó nada nuevo", () => {
+    expect(frasesDelResultadoDelLote(conteo())).toEqual(["No quedó ningún turno nuevo cargado."])
   })
 })

@@ -58,7 +58,6 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 
 import { CalendarPlusIcon, SparklesIcon } from "lucide-react"
 
@@ -78,11 +77,29 @@ import {
 } from "@/lib/turnos/construir-propuestas"
 import { formatearFechaConDiaTurno } from "@/lib/turnos/formato"
 import { combinarFechaHoraUshuaia } from "@/lib/turnos/fecha"
-import { describirLoteDePropuestas, type FilaDelLote } from "@/lib/turnos/lote-propuestas"
+import {
+  describirLoteDePropuestas,
+  frasesDelResultadoDelLote,
+  tituloDelResultadoDelLote,
+  type FilaDelLote,
+} from "@/lib/turnos/lote-propuestas"
 
 export interface AnalizadorMensajeTurnoProps {
   /** Se llama con la propuesta cuando el mensaje trae UN solo turno. En el camino de varios turnos no se llama: ese camino crea los turnos por su cuenta (ver el encabezado). */
   onAplicarPropuesta: (propuesta: PropuestaTurno) => void
+  /**
+   * Texto con el que arrancar el campo, en vez de vacío (Sprint 20). Lo usa el
+   * ruteo desde un documento: la persona fotografió la captura de la agenda de
+   * su clínica y `/turnos/nuevo?doc=…` le pasa acá la transcripción que ya hizo
+   * el lector de documentos.
+   *
+   * Con texto inicial la sección arranca ABIERTA y se analiza sola apenas
+   * monta: la persona ya tomó la decisión de venir acá desde el cartel de
+   * ruteo, hacerle tocar "Analizar" de nuevo sería preguntarle dos veces lo
+   * mismo. El resto del componente no cambia en nada — los mismos dos caminos,
+   * los mismos avisos, el mismo lote.
+   */
+  textoInicial?: string
 }
 
 const MENSAJE_SIN_TEXTO = "Pegá el mensaje antes de analizarlo."
@@ -121,26 +138,17 @@ function cuandoTexto(fila: FilaDelLote): string {
   return fila.hora.length > 0 ? `${fechaTexto} · ${fila.hora}` : `${fechaTexto} — sin hora`
 }
 
-/** Frase del reporte final: "Creamos 9 turnos.", "3 ya estaban cargados.", etc. */
-function frasesDelReporte(reporte: ResultadoLoteTurnos): string[] {
-  const frases: string[] = []
-  if (reporte.creados > 0) {
-    frases.push(reporte.creados === 1 ? "Creamos 1 turno." : `Creamos ${reporte.creados} turnos.`)
-  }
-  if (reporte.duplicados > 0) {
-    frases.push(
-      reporte.duplicados === 1
-        ? "1 ya estaba cargado, así que no lo repetimos."
-        : `${reporte.duplicados} ya estaban cargados, así que no los repetimos.`,
-    )
-  }
-  return frases
+/** `/turnos` con el toast que corresponda: sin creados no hay nada que anunciar. */
+function destinoVerMisTurnos(reporte: ResultadoLoteTurnos): string {
+  return reporte.creados > 0 ? `/turnos?creados=${reporte.creados}` : "/turnos"
 }
 
-export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensajeTurnoProps) {
-  const router = useRouter()
-  const [abierto, setAbierto] = React.useState(false)
-  const [mensaje, setMensaje] = React.useState("")
+export function AnalizadorMensajeTurno({
+  onAplicarPropuesta,
+  textoInicial = "",
+}: AnalizadorMensajeTurnoProps) {
+  const [abierto, setAbierto] = React.useState(textoInicial.length > 0)
+  const [mensaje, setMensaje] = React.useState(textoInicial)
   const [analizando, setAnalizando] = React.useState(false)
   const [errorAnalisis, setErrorAnalisis] = React.useState<string | null>(null)
   const [resultado, setResultado] = React.useState<ResultadoAnalisisMensaje | null>(null)
@@ -166,10 +174,13 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
     () => (resultado ? [resultado.propuestaPrincipal, ...resultado.otrasPropuestas] : []),
     [resultado],
   )
-  const { comunes, filas } = React.useMemo(
+  const { comunes, avisosComunes, filas } = React.useMemo(
     () => describirLoteDePropuestas(esLote ? propuestas : []),
     [esLote, propuestas],
   )
+  const hayAlgoComun =
+    Boolean(comunes.especialidad || comunes.medico || comunes.lugarNombre || comunes.lugarDireccion) ||
+    avisosComunes.length > 0
 
   async function analizar() {
     if (mensaje.trim().length === 0) {
@@ -216,6 +227,31 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
     }
   }
 
+  /**
+   * Auto-análisis cuando el texto vino de afuera (Sprint 20, ruteo desde un
+   * documento).
+   *
+   * Mismo patrón que `components/turnos/precarga-gmail.tsx`: un `useRef` de "ya
+   * disparé" -no un `useState`, que provocaría un render de más- y el trabajo
+   * en un `void` para que el efecto no quede esperando una promesa. `analizar`
+   * viaja por ref porque se redeclara en cada render, y meterla en las
+   * dependencias volvería a disparar el análisis con cada tecleo.
+   *
+   * Sin `textoInicial` esto no hace absolutamente nada: el camino de siempre
+   * -pegar un WhatsApp a mano y tocar "Analizar"- queda intacto.
+   */
+  const analizarRef = React.useRef(analizar)
+  React.useEffect(() => {
+    analizarRef.current = analizar
+  })
+  const autoDisparado = React.useRef(false)
+
+  React.useEffect(() => {
+    if (textoInicial.trim().length === 0 || autoDisparado.current) return
+    autoDisparado.current = true
+    void analizarRef.current()
+  }, [textoInicial])
+
   function alternarMarcado(indice: number) {
     setMarcados((previos) => previos.map((marcado, i) => (i === indice ? !marcado : marcado)))
   }
@@ -253,6 +289,13 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
         return
       }
 
+      // Pase lo que pase, el lote TERMINA acá: `reporte` deja de ser un cartel
+      // más debajo del formulario y pasa a ser la pantalla entera (ver
+      // `ResumenDelLote`). Antes solo se navegaba a `/turnos` cuando todo salía
+      // perfecto, y con un solo turno saltado -el caso normal- la persona
+      // quedaba mirando la lista con el botón de crear todavía disponible. Eso
+      // le costó un turno duplicado a una usuaria real: ver el bloque "CÓMO
+      // TERMINA EL LOTE" en `lib/turnos/lote-propuestas.ts`.
       setReporte(respuesta)
       setEstadoPorIndice(
         new Map(
@@ -261,13 +304,6 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
           ),
         ),
       )
-
-      // Salida limpia: todo lo marcado quedó creado, sin repetidos ni fallas.
-      // Se vuelve a la lista, que es donde la persona quiere verlos, con el
-      // toast de `components/turnos/aviso-turno.tsx`.
-      if (respuesta.fallidos === 0 && respuesta.duplicados === 0 && respuesta.creados > 0) {
-        router.push(`/turnos?creados=${respuesta.creados}`)
-      }
     } catch {
       setErrorLote(MENSAJE_ERROR_LOTE_RED)
     } finally {
@@ -276,6 +312,32 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
   }
 
   const avisosDelUnico = !esLote ? (resultado?.propuestaPrincipal.avisos ?? []) : []
+
+  /** Vuelve al punto de partida, con el campo vacío: "cargar otro mensaje". */
+  function empezarDeNuevo() {
+    setMensaje("")
+    setResultado(null)
+    setMarcados([])
+    setReporte(null)
+    setEstadoPorIndice(new Map())
+    setErrorAnalisis(null)
+    setErrorLote(null)
+  }
+
+  // El lote terminó: la pantalla deja de ser un formulario y pasa a ser el
+  // acuse de recibo. Ver el bloque "CÓMO TERMINA EL LOTE" de
+  // `lib/turnos/lote-propuestas.ts` para el reporte de la usuaria que lo pidió
+  // y el duplicado real que costó no tenerlo.
+  if (reporte) {
+    return (
+      <ResumenDelLote
+        reporte={reporte}
+        filas={filas}
+        estadoPorIndice={estadoPorIndice}
+        onEmpezarDeNuevo={empezarDeNuevo}
+      />
+    )
+  }
 
   return (
     <div className="flex flex-col gap-3 rounded-lg border border-dashed border-border p-4 chica:gap-2 chica:p-3">
@@ -288,7 +350,11 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
         className="w-fit"
       >
         <SparklesIcon className="size-4 shrink-0" aria-hidden="true" />
-        {abierto ? "Ocultar" : "¿Te llegó el turno por WhatsApp? Pegalo acá"}
+        {abierto
+          ? "Ocultar"
+          : textoInicial.trim().length > 0
+            ? "Ver lo que leímos de la foto"
+            : "¿Te llegó el turno por WhatsApp? Pegalo acá"}
       </Boton>
 
       {abierto && (
@@ -353,7 +419,7 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
                   Elegí cuáles crear
                 </legend>
 
-                {(comunes.especialidad || comunes.medico || comunes.lugarNombre || comunes.lugarDireccion) && (
+                {hayAlgoComun && (
                   <dl className="flex flex-col gap-1 rounded-md bg-muted px-3 py-2 text-sm chica:text-xs">
                     <p className="font-medium text-foreground">Todos comparten:</p>
                     {comunes.especialidad && (
@@ -380,6 +446,19 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
                         <dd className="text-foreground">{comunes.lugarDireccion}</dd>
                       </div>
                     )}
+
+                    {/* Los avisos que valen para TODAS las sesiones, una sola
+                        vez (Sprint 20). Antes se repetían debajo de cada una de
+                        las diez filas -verificado en producción-, enterrando
+                        las diez fechas, que es lo único que hay que revisar de
+                        un vistazo. La separación la hace
+                        `describirLoteDePropuestas`, que es pura y está
+                        probada; acá solo se pinta donde corresponde. */}
+                    {avisosComunes.map((aviso) => (
+                      <p key={aviso} className="text-advertencia-fuerte">
+                        {aviso}
+                      </p>
+                    ))}
                   </dl>
                 )}
 
@@ -438,29 +517,6 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
 
               {errorLote && <Alerta variante="error">{errorLote}</Alerta>}
 
-              {reporte && (
-                <Alerta
-                  variante={reporte.fallidos > 0 ? "advertencia" : "exito"}
-                  titulo={reporte.fallidos > 0 ? "Entraron algunos, no todos" : "Listo"}
-                >
-                  <p>
-                    {[
-                      ...frasesDelReporte(reporte),
-                      reporte.fallidos > 0
-                        ? `${reporte.fallidos === 1 ? "1 no se pudo crear" : `${reporte.fallidos} no se pudieron crear`} — está marcado en la lista de arriba con el motivo.`
-                        : "",
-                    ]
-                      .filter((frase) => frase.length > 0)
-                      .join(" ")}
-                  </p>
-                  <p className="mt-2">
-                    <Link href="/turnos" className="underline underline-offset-4">
-                      Ver mis turnos
-                    </Link>
-                  </p>
-                </Alerta>
-              )}
-
               <Boton
                 type="button"
                 onClick={() => void crearMarcados()}
@@ -486,6 +542,101 @@ export function AnalizadorMensajeTurno({ onAplicarPropuesta }: AnalizadorMensaje
         mensaje="Creando los turnos…"
         submensaje="No cierres la pantalla, tarda unos segundos."
       />
+    </div>
+  )
+}
+
+/**
+ * El final del lote: qué pasó con cada sesión y adónde ir ahora.
+ *
+ * REEMPLAZA al formulario en vez de agregarse debajo, y ése es todo el punto.
+ * El reporte antes convivía con la lista de casillas y con el botón "Crear los
+ * N turnos", así que la pantalla seguía pareciendo un formulario a medio
+ * llenar; una usuaria real volvió a intentar y se quedó con un turno duplicado.
+ * Acá no queda ningún control que pueda volver a escribir en la agenda: solo
+ * "Ver mis turnos" y "Cargar otro mensaje", que arranca de cero.
+ *
+ * El detalle fila por fila se conserva entero -y con los mismos textos- porque
+ * es lo que la misma usuaria celebró: *"los turnos que ya pasaron me los
+ * corrigió y me dijo: no te los pongo porque ya pasaron"*. Lo único que cambia
+ * es que ahora las casillas son estáticas: la decisión ya se tomó.
+ */
+function ResumenDelLote({
+  reporte,
+  filas,
+  estadoPorIndice,
+  onEmpezarDeNuevo,
+}: {
+  reporte: ResultadoLoteTurnos
+  filas: readonly FilaDelLote[]
+  estadoPorIndice: Map<number, ResultadoTurnoDelLote>
+  onEmpezarDeNuevo: () => void
+}) {
+  const conteo = {
+    creados: reporte.creados,
+    duplicados: reporte.duplicados,
+    fallidos: reporte.fallidos,
+  }
+
+  // Solo las filas que efectivamente se mandaron tienen algo que contar: las
+  // desmarcadas no se intentaron y listarlas acá haría parecer que fallaron.
+  const filasConDesenlace = filas.filter((fila) => estadoPorIndice.has(fila.indice))
+
+  return (
+    <div className="flex flex-col gap-3 rounded-lg border border-border p-4 chica:gap-2 chica:p-3">
+      <Alerta
+        variante={reporte.creados > 0 && reporte.fallidos === 0 ? "exito" : "advertencia"}
+        titulo={tituloDelResultadoDelLote(conteo)}
+      >
+        {frasesDelResultadoDelLote(conteo).join(" ")}
+      </Alerta>
+
+      {filasConDesenlace.length > 0 && (
+        <ul className="flex flex-col gap-2">
+          {filasConDesenlace.map((fila) => {
+            const estado = estadoPorIndice.get(fila.indice)
+            return (
+              <li key={fila.indice} className="flex flex-col gap-0.5 border-b border-border pb-2 last:border-0 last:pb-0">
+                <span className="text-base font-medium text-foreground chica:text-sm">
+                  {fila.titulo}
+                </span>
+                <span className="text-base text-foreground chica:text-sm">{cuandoTexto(fila)}</span>
+                {estado?.estado === "creado" && (
+                  <span className="text-sm font-medium text-exito-fuerte chica:text-xs">
+                    Creado
+                  </span>
+                )}
+                {estado?.estado === "duplicado" && (
+                  <span className="text-sm font-medium text-muted-foreground chica:text-xs">
+                    Ya estaba cargado — no lo repetimos
+                  </span>
+                )}
+                {estado?.estado === "error" && (
+                  <span className="text-sm font-medium text-destructive chica:text-xs">
+                    No lo cargamos: {estado.error}
+                  </span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
+      <div className="flex flex-col gap-3 sm:flex-row-reverse">
+        <Boton
+          render={<Link href={destinoVerMisTurnos(reporte)} />}
+          nativeButton={false}
+          size="lg"
+          className="sm:flex-1"
+        >
+          <CalendarPlusIcon aria-hidden="true" />
+          Ver mis turnos
+        </Boton>
+        <Boton type="button" variant="outline" size="lg" className="sm:flex-1" onClick={onEmpezarDeNuevo}>
+          <SparklesIcon aria-hidden="true" />
+          Cargar otro mensaje
+        </Boton>
+      </div>
     </div>
   )
 }

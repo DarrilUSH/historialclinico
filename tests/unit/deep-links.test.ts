@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { linkComoLlegar, linksPedirViaje, linkGoogleCalendar } from "@/lib/logistica/deep-links"
+import { linkComoLlegar, linkPedirViaje, linkGoogleCalendar } from "@/lib/logistica/deep-links"
 
 describe("linkComoLlegar", () => {
   it("genera URL de Google Maps con lat/lng", () => {
@@ -10,13 +10,25 @@ describe("linkComoLlegar", () => {
     expect(url).toBe("https://www.google.com/maps/dir/?api=1&destination=-54.8083%2C-68.3")
   })
 
-  it("genera URL de Google Maps con dirección sin coords, acotada al país (nunca a una localidad fija)", () => {
+  it("genera URL de Google Maps con dirección sin coords, TAL COMO se cargó", () => {
     const url = linkComoLlegar({
       direccion: "Gob. Paz 150",
     })
-    expect(url).toContain("https://www.google.com/maps/dir/?api=1&destination=")
-    expect(url).toContain("Gob.%20Paz%20150")
-    expect(url).toContain("Argentina")
+    expect(url).toBe("https://www.google.com/maps/dir/?api=1&destination=Gob.%20Paz%20150")
+  })
+
+  /**
+   * Sprint 20 (adenda) — NEUTRALIDAD GEOGRÁFICA.
+   *
+   * El Sprint 16 sacó la LOCALIDAD asumida pero dejó el PAÍS: agregaba
+   * ", Argentina" a toda dirección sin coordenadas. Es el mismo error un nivel
+   * más arriba, y rompe la app fuera de Argentina — una dirección de Madrid
+   * terminaba buscándose en otro continente. Ahora no se le pega ningún lugar.
+   */
+  it("REGRESIÓN Sprint 20: no le pega NINGÚN país a la dirección", () => {
+    const url = linkComoLlegar({ direccion: "Calle Gran Vía 28, Madrid" })
+    expect(url).toContain("Madrid")
+    expect(url).not.toContain("Argentina")
   })
 
   it("REGRESIÓN Sprint 16 (tarea 16.1): una dirección de OTRA provincia ya no queda pegada a Ushuaia", () => {
@@ -66,69 +78,50 @@ describe("linkComoLlegar", () => {
   })
 })
 
-describe("linksPedirViaje", () => {
-  it("retorna todos null sin coordenadas", () => {
-    const links = linksPedirViaje({})
-    expect(links.uber).toBeNull()
-    expect(links.didi).toBeNull()
-    expect(links.cabify).toBeNull()
+describe("linkPedirViaje", () => {
+  it("retorna null sin coordenadas", () => {
+    expect(linkPedirViaje({})).toBeNull()
   })
 
-  it("genera deep link de Uber con coords y lugar", () => {
-    const links = linksPedirViaje({
+  it("arma el atajo con coords y nombre del lugar", () => {
+    const url = linkPedirViaje({
       latitude: -54.8083,
       longitude: -68.3,
       nombreLugar: "Clínica Ushuaia",
     })
-    expect(links.uber).toContain("https://m.uber.com/ul/")
-    expect(links.uber).toContain("dropoff[latitude]=-54.8083")
-    expect(links.uber).toContain("dropoff[longitude]=-68.3")
-    expect(links.uber).toContain("Cl%C3%ADnica%20Ushuaia") // Codificación de "ínica"
-  })
-
-  it("genera deep link de DiDi con coords", () => {
-    const links = linksPedirViaje({
-      latitude: -54.8083,
-      longitude: -68.3,
-      nombreLugar: "Consultorio Torres",
-    })
-    expect(links.didi).toContain("didisdk://web/dispatch")
-    expect(links.didi).toContain("targetLat=-54.8083")
-    expect(links.didi).toContain("targetLng=-68.3")
-    expect(links.didi).toContain("Consultorio%20Torres")
-  })
-
-  it("genera deep link de Cabify con coords", () => {
-    const links = linksPedirViaje({
-      latitude: -54.8083,
-      longitude: -68.3,
-      nombreLugar: "Centro de Salud",
-    })
-    expect(links.cabify).toContain("cabify://book")
-    expect(links.cabify).toContain("destinationLat=-54.8083")
-    expect(links.cabify).toContain("destinationLng=-68.3")
-    expect(links.cabify).toContain("Centro%20de%20Salud")
+    expect(url).toContain("https://m.uber.com/ul/")
+    expect(url).toContain("dropoff[latitude]=-54.8083")
+    expect(url).toContain("dropoff[longitude]=-68.3")
+    expect(url).toContain("Cl%C3%ADnica%20Ushuaia")
   })
 
   it("usa coordenadas como fallback si no hay nombreLugar", () => {
-    const links = linksPedirViaje({
-      latitude: -54.8083,
-      longitude: -68.3,
-    })
-    expect(links.uber).toContain("-54.8083,-68.3")
-    expect(links.didi).toContain("-54.8083,-68.3")
-    expect(links.cabify).toContain("-54.8083,-68.3")
+    expect(linkPedirViaje({ latitude: -54.8083, longitude: -68.3 })).toContain("-54.8083,-68.3")
   })
 
   it("codifica caracteres especiales en nombreLugar (ñ, tildes)", () => {
-    const links = linksPedirViaje({
+    const url = linkPedirViaje({
       latitude: -54.8083,
       longitude: -68.3,
       nombreLugar: "Consultorio García Peña",
     })
-    // García → Garc%C3%ADa, Peña → Pe%C3%B1a
-    expect(links.uber).toContain("%C3%AD") // í
-    expect(links.uber).toContain("%C3%B1") // ñ
+    expect(url).toContain("%C3%AD") // í
+    expect(url).toContain("%C3%B1") // ñ
+  })
+
+  /**
+   * Sprint 20 (adenda) — NEUTRALIDAD GEOGRÁFICA.
+   *
+   * El atajo tiene que ser una URL HTTPS común, no un esquema `app://`. Un
+   * esquema propio abre la app cuando está instalada y NO HACE NADA cuando no
+   * lo está: un botón muerto, que es distinto según el país y el dispositivo de
+   * cada persona. Este test es la guarda contra volver a sumar uno.
+   */
+  it("es una URL https, nunca un esquema propio de una app", () => {
+    const url = linkPedirViaje({ latitude: -54.8083, longitude: -68.3 })
+    expect(url?.startsWith("https://")).toBe(true)
+    expect(url).not.toContain("://web/dispatch")
+    expect(url).not.toContain("cabify://")
   })
 })
 

@@ -18,13 +18,37 @@
  * También cubre el doble toque del botón de confirmar, que es el mismo caso
  * visto de más cerca.
  *
- * ## El criterio: mismo dato EXACTO
+ * ## El criterio: mismo instante, mismo profesional
  *
- * Es el mismo que ya usa la carga de estudios
- * (`lib/documentos/duplicados-semanticos.ts`) trasladado a un turno: **mismo
- * perfil + mismo instante + mismo profesional + misma especialidad = el mismo
- * turno**. Cualquier diferencia real -otra fecha, otra hora, otro
- * profesional- lo vuelve legítimo y se crea.
+ * **Mismo perfil + mismo instante + mismo profesional = el mismo turno.**
+ * Cualquier diferencia real -otra fecha, otra hora, otro profesional- lo vuelve
+ * legítimo y se crea.
+ *
+ * ### La especialidad SALIÓ de la identidad (Sprint 20), y el motivo es un duplicado real
+ *
+ * Hasta este sprint la especialidad también entraba en la clave. Se cayó en
+ * producción, en el perfil de una usuaria real: dos turnos con el MISMO instante
+ * (03/09, 11:30 hora de Ushuaia) y la MISMA profesional, uno con especialidad
+ * `"SESION DE KINESIOLOGIA COMPLEJA PARA COLUMNA…"` -el texto crudo del
+ * mensaje- y el otro con `"Kinesiología y Fisiatría"` -ya normalizado contra el
+ * catálogo-. Dos corridas del analizador sobre el MISMO mensaje normalizaron
+ * distinto, la clave dio distinta, y la sesión 10/10 entró dos veces.
+ *
+ * Y no es un caso de borde: la especialidad es justamente el campo que el
+ * modelo tiene licencia para interpretar (`especialidadInferida` existe como
+ * aviso desde el Sprint 16), mientras que el instante y el nombre del
+ * profesional son datos copiados. Poner un campo INTERPRETADO en la clave de
+ * identidad es pedirle a dos lecturas del mismo papel que coincidan en lo único
+ * que no tienen por qué coincidir.
+ *
+ * El reemplazo es más fuerte, no más flojo: **nadie tiene dos turnos el mismo
+ * minuto con la misma profesional.** Si el instante y la persona coinciden, es
+ * el mismo turno, se llame como se llame la práctica.
+ *
+ * La especialidad queda como DESEMPATE y solo cuando no hay profesional: sin
+ * nombre, "mismo minuto" es demasiado poco -una clínica grande puede tener dos
+ * prácticas distintas a la misma hora- y ahí la especialidad es la única señal
+ * que queda para distinguirlas.
  *
  * Dos precisiones que importan:
  *
@@ -38,9 +62,9 @@
  *   capitalice distinto no puede ser motivo para duplicar.
  *
  * La comparación NO mira el lugar ni las notas a propósito: dos filas con la
- * misma fecha, hora, profesional y especialidad son el mismo turno aunque una
- * traiga la dirección y la otra no -y ese "aunque" es justamente lo que pasa
- * cuando el mismo turno entra por dos caminos distintos-.
+ * misma fecha, hora y profesional son el mismo turno aunque una traiga la
+ * dirección y la otra no -y ese "aunque" es justamente lo que pasa cuando el
+ * mismo turno entra por dos caminos distintos-.
  *
  * ## Y las repeticiones DENTRO del mismo lote
  *
@@ -65,16 +89,21 @@ export interface TurnoComparable {
  * una clave que no matchea con ninguna otra, ni siquiera consigo misma en
  * otra fila: ante un dato roto, la respuesta segura es "no es duplicado" —
  * crear un turno de más es recuperable, tragarse uno legítimo no.
+ *
+ * Con profesional, la clave es `instante|nombre` y la especialidad NO entra
+ * (ver el encabezado: un campo interpretado no puede decidir identidad). Sin
+ * profesional, la especialidad ocupa su lugar como último desempate.
  */
 function claveDeTurno(turno: TurnoComparable, indiceDesempate: number): string {
   const instante = new Date(turno.fechaHoraIso).getTime()
   if (!Number.isFinite(instante)) return `invalido:${indiceDesempate}`
 
-  return [
-    instante,
-    normalizarBusqueda(turno.especialidad ?? ""),
-    normalizarBusqueda(turno.medico ?? ""),
-  ].join("|")
+  const medico = normalizarBusqueda(turno.medico ?? "")
+  if (medico.length > 0) {
+    return `${instante}|medico:${medico}`
+  }
+
+  return `${instante}|especialidad:${normalizarBusqueda(turno.especialidad ?? "")}`
 }
 
 export interface RepeticionesEnLote {

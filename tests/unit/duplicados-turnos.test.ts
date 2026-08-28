@@ -57,10 +57,50 @@ describe("detectarRepeticiones — contra los turnos que ya existen", () => {
     expect([...yaExistian]).toEqual([])
   })
 
-  it("otra ESPECIALIDAD a la misma hora es un turno legítimo", () => {
-    const { yaExistian } = detectarRepeticiones([turno({ especialidad: "Cardiología" })], [turno()])
+  /* ------------------------------------------------------------------ *
+   *  Sprint 20 (adenda): la ESPECIALIDAD salió de la identidad
+   * ------------------------------------------------------------------ */
+
+  it("EL CASO REAL — la misma profesional a la misma hora con la especialidad escrita distinto ES el mismo turno", () => {
+    // Encontrado en producción, en el perfil de una usuaria real: la sesión
+    // 10/10 quedó DUPLICADA. Mismo instante, misma kinesióloga; una fila con el
+    // texto crudo del mensaje y la otra con la especialidad ya normalizada
+    // contra el catálogo. Dos corridas de Gemini sobre el MISMO mensaje.
+    const { yaExistian } = detectarRepeticiones(
+      [turno({ especialidad: "SESION DE KINESIOLOGIA COMPLEJA PARA COLUMNA VERTEBRAL" })],
+      [turno({ especialidad: "Kinesiología y Fisiatría" })],
+    )
+
+    expect([...yaExistian]).toEqual([0])
+  })
+
+  it("otra especialidad a la misma hora con otra profesional SÍ es un turno legítimo", () => {
+    const { yaExistian } = detectarRepeticiones(
+      [turno({ especialidad: "Cardiología", medico: "Dr. Rozanec" })],
+      [turno()],
+    )
 
     expect([...yaExistian]).toEqual([])
+  })
+
+  it("SIN profesional, la especialidad vuelve a ser el desempate", () => {
+    // Sin nombre, "mismo minuto" es demasiado poco: una clínica grande puede
+    // tener dos prácticas distintas a la misma hora.
+    const sinMedico = { medico: null }
+
+    expect([
+      ...detectarRepeticiones(
+        [turno({ ...sinMedico, especialidad: "Cardiología" })],
+        [turno({ ...sinMedico, especialidad: "Kinesiología" })],
+      ).yaExistian,
+    ]).toEqual([])
+
+    expect([
+      ...detectarRepeticiones(
+        [turno({ ...sinMedico, especialidad: "Kinesiología" })],
+        [turno({ ...sinMedico, especialidad: "KINESIOLOGIA" })],
+      ).yaExistian,
+    ]).toEqual([0])
   })
 
   it("el mismo instante escrito en otro huso es el MISMO turno", () => {

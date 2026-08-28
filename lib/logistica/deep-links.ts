@@ -3,18 +3,54 @@
  *
  * Genera URLs normalizadas para:
  * - Google Maps: navegación con lat/lng o dirección
- * - Uber: deep link si la app está, fallback web
- * - DiDi: deep link si la app está, fallback web
- * - Cabify: deep link si la app está, fallback web
+ * - Pedir un viaje: un único atajo, ver el bloque de abajo
  * - Google Calendar: evento con TEMPLATE
  *
  * Todas las funciones retornan `null` si no hay datos suficientes.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  NEUTRALIDAD GEOGRÁFICA (Sprint 20, adenda) — regla del producto
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Decisión del dueño, textual: *"no te concentres en Ushuaia, la idea es que
+ * esta app funcione en todo el mundo, donde se quiera utilizar."*
+ *
+ * **Ninguna lógica de este archivo -ni de la app- se condiciona por ciudad,
+ * provincia o país.** No hay tablas de cobertura, no hay listas de "acá sí, allá
+ * no", no hay una localidad por defecto. Los textos siguen en castellano
+ * rioplatense porque es una decisión de producto; el COMPORTAMIENTO es neutro.
+ * Las fuentes regionales que ya existen -el catálogo REFES, el formato de fecha
+ * `dd/mm/aaaa` que el prompt de turnos le explica al modelo- son DATOS y
+ * EJEMPLOS, no supuestos del código: `linkComoLlegar` no asume ninguna
+ * localidad (ver su propio comentario y el bug que lo motivó), y el analizador
+ * de mensajes sigue leyendo cualquier fecha que le llegue.
+ *
+ * ## Qué le hizo esa regla a "Pedir viaje"
+ *
+ * Había tres atajos fijos -Uber, DiDi y Cabify- y una usuaria notó que en su
+ * ciudad no operan todos. El arreglo NO es filtrar por ciudad: eso sería volver
+ * a asumir geografía, con una tabla que envejecería en silencio y se
+ * equivocaría para los dos lados. El arreglo es que **cualquier lista fija de
+ * apps de transporte está mal en algún lugar del mundo**, así que la lista se
+ * reduce a lo que sirve en todas partes.
+ *
+ * Se conserva UN atajo, y el criterio para elegirlo no es comercial sino
+ * mecánico: `https://m.uber.com/ul/...` es una URL HTTPS común, así que tocarla
+ * SIEMPRE abre algo -la app si está instalada, y si no una página web real con
+ * el destino cargado-. Los otros dos eran esquemas propios (`didisdk://`,
+ * `cabify://`) que, sin la app instalada, no hacen absolutamente nada: un botón
+ * muerto, que es justo lo que este sprint vino a sacar de la aplicación.
+ *
+ * Y el protagonista es el mapa, no esto: `linkComoLlegar` funciona en todo el
+ * planeta, sin depender de ninguna aplicación de terceros, y la vista de
+ * direcciones del mapa ya ofrece por su cuenta las opciones de transporte que
+ * existan en ESE lugar — mantenidas por alguien que sí puede saberlo.
  */
 
 /**
  * Construye el link para "Cómo llegar" (Google Maps).
  * - Con lat/lng: `https://www.google.com/maps/dir/?api=1&destination=lat,lng`
- * - Sin coords pero con dirección: agrega ", Argentina" y codifica
+ * - Sin coords pero con dirección: la codifica y la manda tal cual
  * - Sin nada: `null`
  *
  * ## El bug de Ushuaia que corrige esta versión (Sprint 16, tarea 16.1)
@@ -31,12 +67,26 @@
  * La corrección NO agrega un parámetro de ciudad/provincia acá: el `direccion`
  * que recibe esta función ya viene armado por el LLAMADOR con
  * `lib/ubicacion/formato.ts#direccionCompleta` -calle + ciudad + provincia,
- * las partes que estén cargadas-, así que esta función se queda simple
- * (agrega ", Argentina" nada más, para acotar la búsqueda al país sin asumir
- * ninguna localidad) y toda la lógica de "qué partes hay" vive en un solo
- * lugar (`direccionCompleta`), no duplicada acá. Un turno viejo sin ciudad
- * cargada sigue funcionando exactamente igual que antes -mismo `direccion`
- * de siempre, solo que ya no se le pega una localidad ajena-.
+ * las partes que estén cargadas-, así que esta función se queda simple y toda
+ * la lógica de "qué partes hay" vive en un solo lugar (`direccionCompleta`), no
+ * duplicada acá. Un turno viejo sin ciudad cargada sigue funcionando
+ * exactamente igual que antes -mismo `direccion` de siempre, solo que ya no se
+ * le pega una localidad ajena-.
+ *
+ * ## Sprint 20 (adenda): tampoco se le pega un PAÍS
+ *
+ * El arreglo del Sprint 16 dejó de asumir la localidad pero siguió agregando
+ * `", Argentina"` "para acotar la búsqueda al país". Eso es la MISMA clase de
+ * error, un nivel más arriba, y la regla de neutralidad geográfica del producto
+ * lo deja sin excusa: una dirección de Madrid o de Montevideo terminaba
+ * buscándose en Argentina, es decir, no encontrándose. La app tiene que
+ * funcionar donde se la quiera usar.
+ *
+ * Ahora se manda la dirección TAL COMO la cargó la persona. El mapa resuelve la
+ * ambigüedad mucho mejor que nosotros -usa la ubicación de quien busca-, y si
+ * la dirección no alcanza, la persona agrega la ciudad en el campo del turno,
+ * que es donde ese dato tiene que estar. Ver el bloque "NEUTRALIDAD
+ * GEOGRÁFICA" del encabezado del archivo.
  */
 export function linkComoLlegar(args: {
   latitude?: number | null
@@ -51,10 +101,10 @@ export function linkComoLlegar(args: {
     return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}`
   }
 
-  // Sin coords pero con dirección: buscar por texto, acotado al país -nunca a una localidad asumida-
+  // Sin coords pero con dirección: buscar por texto, tal como se cargó. Sin
+  // localidad asumida y sin país asumido -ver el encabezado de la función-.
   if (direccion && direccion.trim()) {
-    const lugarCompleto = `${direccion.trim()}, Argentina`
-    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(lugarCompleto)}`
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(direccion.trim())}`
   }
 
   // Sin información: no mostrar botón
@@ -62,43 +112,35 @@ export function linkComoLlegar(args: {
 }
 
 /**
- * Construye los deep links para pedir viaje (Uber, DiDi, Cabify).
- * Solo funciona con coordenadas del destino; sin ellas, retorna objeto vacío.
+ * El atajo para pedir un viaje al destino del turno, o `null` cuando no se
+ * puede armar.
+ *
+ * UNO solo, y en HTTPS. Ver el bloque "NEUTRALIDAD GEOGRÁFICA" del encabezado
+ * para por qué dejó de ser una lista de tres: cualquier lista fija de apps de
+ * transporte está mal en algún lugar del mundo, y dos de las tres producían un
+ * botón muerto donde la app no estuviera instalada.
+ *
+ * Necesita coordenadas: ninguna app de viaje acepta un destino en texto libre,
+ * y mandar a la persona a tipear la dirección de nuevo no es un atajo. Sin
+ * coordenadas devuelve `null` y la pantalla no ofrece nada — "Cómo llegar", que
+ * sí acepta una dirección, sigue estando.
  */
-export function linksPedirViaje(args: {
+export function linkPedirViaje(args: {
   latitude?: number | null
   longitude?: number | null
   nombreLugar?: string | null
-}): {
-  uber: string | null
-  didi: string | null
-  cabify: string | null
-} {
+}): string | null {
   const { latitude, longitude, nombreLugar } = args
 
-  // Sin coordenadas: no se puede pedir viaje
   if (latitude == null || longitude == null) {
-    return { uber: null, didi: null, cabify: null }
+    return null
   }
 
-  // Uber deep link: app si está instalada, fallback web
-  // Formato: https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[latitude]=..&dropoff[longitude]=..&dropoff[nickname]=...
-  const uberNickname = nombreLugar ? encodeURIComponent(nombreLugar) : `${latitude},${longitude}`
-  const uber = `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[latitude]=${latitude}&dropoff[longitude]=${longitude}&dropoff[nickname]=${uberNickname}`
-
-  // DiDi deep link: app o web
-  // Formato: didisdk://web/dispatch?targetLat=..&targetLng=..&targetNickname=..
-  // Fallback: https://web.didiglobal.com/
-  const didiNickname = nombreLugar ? encodeURIComponent(nombreLugar) : `${latitude},${longitude}`
-  const didi = `didisdk://web/dispatch?targetLat=${latitude}&targetLng=${longitude}&targetNickname=${didiNickname}`
-
-  // Cabify deep link: app o web
-  // Formato: cabify://book?destinationLat=..&destinationLng=..&destinationLabel=..
-  // Fallback: https://cabify.com/es/
-  const cabifyLabel = nombreLugar ? encodeURIComponent(nombreLugar) : `${latitude},${longitude}`
-  const cabify = `cabify://book?destinationLat=${latitude}&destinationLng=${longitude}&destinationLabel=${cabifyLabel}`
-
-  return { uber, didi, cabify }
+  // `https://m.uber.com/ul/...` abre la app si está instalada y, si no, una
+  // página web real con el destino cargado. Es una URL común: nunca queda un
+  // toque sin respuesta, en ningún dispositivo ni en ningún país.
+  const destino = nombreLugar ? encodeURIComponent(nombreLugar) : `${latitude},${longitude}`
+  return `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[latitude]=${latitude}&dropoff[longitude]=${longitude}&dropoff[nickname]=${destino}`
 }
 
 /**

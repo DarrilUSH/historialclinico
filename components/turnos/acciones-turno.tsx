@@ -4,12 +4,37 @@
  * Barra de acciones de logística del turno.
  *
  * Botones interactivos:
- * - "Cómo llegar" (mapa): abre Google Maps
- * - "Pedir viaje" (expandible): muestra opciones de Uber, DiDi, Cabify
+ * - "Cómo llegar" (mapa): abre Google Maps — el protagonista
+ * - "Pedir un viaje": UN atajo con el destino cargado
  * - "Agregar al calendario" (expandible): Google Calendar + descarga .ics
  *
- * Solo con coordenadas se muestra "Pedir viaje". "Cómo llegar" funciona
+ * Solo con coordenadas se muestra el atajo de viaje. "Cómo llegar" funciona
  * con coords O dirección.
+ *
+ * ## De tres apps a una, y por qué (Sprint 20, adenda)
+ *
+ * Una usuaria notó que el detalle de su turno le ofrecía "Didi, Uber y Cabify" y
+ * que en su ciudad no operan todas. El primer arreglo posible -filtrar por
+ * ciudad- es el equivocado, y el dueño lo dejó dicho: *"no te concentres en
+ * Ushuaia, la idea es que esta app funcione en todo el mundo, donde se quiera
+ * utilizar."*
+ *
+ * Reencuadrado así, el problema no es "tal app no está en tal ciudad" sino que
+ * **cualquier lista fija de apps de transporte va a estar mal en algún lugar del
+ * mundo**. Entonces: ninguna lógica condicionada a ciudad, provincia o país, y
+ * la lista se recorta a lo que sirve en todas partes.
+ *
+ * Quedó uno, y el criterio para elegirlo fue mecánico y no comercial: es el
+ * único cuyo enlace es una URL HTTPS común, así que tocarlo SIEMPRE abre algo.
+ * Los otros dos eran esquemas `app://` que no hacen nada donde la app no está
+ * instalada — botones muertos, que es justamente lo que este sprint vino a
+ * sacar de la aplicación. El detalle está en el bloque "NEUTRALIDAD
+ * GEOGRÁFICA" de `lib/logistica/deep-links.ts`.
+ *
+ * Y el que manda es el mapa: funciona en todo el planeta, no depende de ninguna
+ * aplicación de terceros, y su vista de direcciones ya ofrece las opciones de
+ * transporte que existan en ESE lugar, mantenidas por alguien que sí puede
+ * saberlo.
  */
 
 import { useState } from "react"
@@ -17,7 +42,7 @@ import Link from "next/link"
 import { MapPinIcon, CarIcon, CalendarIcon, ChevronDownIcon } from "lucide-react"
 
 import { Boton } from "@/components/base/boton"
-import { linkComoLlegar, linksPedirViaje, linkGoogleCalendar } from "@/lib/logistica/deep-links"
+import { linkComoLlegar, linkPedirViaje, linkGoogleCalendar } from "@/lib/logistica/deep-links"
 
 export interface AccionesTurnoProps {
   turnoId: string
@@ -44,12 +69,12 @@ export function AccionesTurno({
   longitude,
   notas,
 }: AccionesTurnoProps) {
-  const [expandidoViaje, setExpandidoViaje] = useState(false)
+  // Ya no hay estado de "viaje": con un solo atajo, el desplegable desapareció.
   const [expandidoCalendario, setExpandidoCalendario] = useState(false)
 
   // Generar links
   const linkMaps = linkComoLlegar({ latitude, longitude, direccion })
-  const linksPedidos = linksPedirViaje({ latitude, longitude, nombreLugar: ubicacion })
+  const linkViaje = linkPedirViaje({ latitude, longitude, nombreLugar: ubicacion })
   const linkCal = linkGoogleCalendar({
     especialidad,
     nombreMedico,
@@ -61,10 +86,10 @@ export function AccionesTurno({
 
   // Verificar si hay algo que mostrar
   const tieneMapas = linkMaps != null
-  const tieneViajes = linksPedidos.uber != null || linksPedidos.didi != null || linksPedidos.cabify != null
+  const tieneViaje = linkViaje != null
   const tieneCalendario = linkCal != null
 
-  if (!tieneMapas && !tieneViajes && !tieneCalendario) {
+  if (!tieneMapas && !tieneViaje && !tieneCalendario) {
     return null
   }
 
@@ -112,76 +137,35 @@ export function AccionesTurno({
         </Boton>
       )}
 
-      {/* Pedir viaje: expandible con opciones */}
-      {tieneViajes && (
-        <div className="flex flex-col gap-2 chica:min-w-[30%] chica:flex-1">
-          <Boton
-            onClick={() => setExpandidoViaje(!expandidoViaje)}
-            variant="secondary"
-            size="sm"
-            className="w-full justify-between chica:justify-center chica:gap-1 chica:px-2 chica:text-xs"
-          >
-            <span className="flex items-center">
-              <CarIcon className="size-4 mr-2 chica:mr-1.5 chica:size-4" aria-hidden="true" />
-              <span className="chica:hidden">Pedir viaje</span>
-              <span className="hidden chica:inline">Viaje</span>
-            </span>
-            <ChevronDownIcon
-              className={`size-4 transition-transform chica:size-3.5 ${expandidoViaje ? "rotate-180" : ""}`}
-              aria-hidden="true"
-            />
-          </Boton>
+      {/*
+        Pedir un viaje: UN atajo, sin panel desplegable (Sprint 20, adenda).
 
-          {expandidoViaje && (
-            <div className="pl-4 space-y-2 border-l border-muted-foreground">
-              {/* Uber */}
-              {linksPedidos.uber && (
-                <Boton
-                  render={<a href={linksPedidos.uber} target="_blank" rel="noopener noreferrer" />}
-                  nativeButton={false}
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start text-sm"
-                >
-                  <span className="font-semibold text-foreground">Uber</span>
-                </Boton>
-              )}
+        Antes eran tres -Uber, DiDi, Cabify- detrás de un desplegable rotulado
+        "Pedir viaje". Dos problemas, y el segundo es el de fondo:
 
-              {/* DiDi */}
-              {linksPedidos.didi && (
-                <Boton
-                  render={<a href={linksPedidos.didi} target="_blank" rel="noopener noreferrer" />}
-                  nativeButton={false}
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start text-sm"
-                >
-                  <span className="font-semibold text-foreground">DiDi</span>
-                </Boton>
-              )}
+        1. "Pedir viaje" PROMETE un viaje. Lo único que esta pantalla puede dar
+           es un atajo con el destino cargado.
+        2. Cualquier lista fija de apps de transporte está mal en algún lugar
+           del mundo. La app tiene que funcionar donde se la quiera usar, así
+           que la respuesta no es filtrar por ciudad -eso sería volver a asumir
+           geografía- sino quedarse con lo que sirve en todas partes. Ver el
+           bloque "NEUTRALIDAD GEOGRÁFICA" de `lib/logistica/deep-links.ts`.
 
-              {/* Cabify */}
-              {linksPedidos.cabify && (
-                <Boton
-                  render={<a href={linksPedidos.cabify} target="_blank" rel="noopener noreferrer" />}
-                  nativeButton={false}
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start text-sm"
-                >
-                  <span className="font-semibold text-foreground">Cabify</span>
-                </Boton>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Sin coordenadas: explicación */}
-      {!tieneViajes && !latitude && !longitude && (
-        <p className="text-xs text-muted-foreground px-2 py-1 chica:basis-full">
-          Cargá las coordenadas del lugar para pedir un viaje
-        </p>
+        Con un solo destino, el desplegable dejó de tener sentido: era un toque
+        de más para llegar a un único botón.
+      */}
+      {tieneViaje && (
+        <Boton
+          render={<a href={linkViaje!} target="_blank" rel="noopener noreferrer" />}
+          nativeButton={false}
+          variant="secondary"
+          size="sm"
+          className="w-full justify-center chica:min-w-[30%] chica:flex-1 chica:gap-1 chica:px-2 chica:text-xs"
+        >
+          <CarIcon className="size-4 mr-2 chica:mr-1.5 chica:size-4" aria-hidden="true" />
+          <span className="chica:hidden">Pedir un viaje</span>
+          <span className="hidden chica:inline">Viaje</span>
+        </Boton>
       )}
 
       {/* Agregar al calendario: expandible */}
