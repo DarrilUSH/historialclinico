@@ -55,6 +55,7 @@ import "server-only"
 
 import { ingestarDocumentoAutomatico, ErrorIngestaAutomatica } from "@/lib/documentos/ingesta-automatica"
 import { calcularHuellaSha256 } from "@/lib/documentos/huella"
+import { intencionDeExtraccion } from "@/lib/documentos/intencion"
 import { sugerirTitulo } from "@/lib/documentos/sugerir-titulo"
 import type { DatosComparablesDocumento, MotivoDuplicadoSemantico } from "@/lib/documentos/duplicados-semanticos"
 import { extraerJson } from "@/lib/gemini/client"
@@ -337,6 +338,12 @@ async function intentarDocumento(
     // pasaba la compuerta sin que nadie la mirara.
     fecha: extraccion.fecha ?? "",
     categoria: extraccion.categoria,
+    // Sprint 20: una receta, un turno o una orden que llegan por correo NUNCA
+    // se auto-cargan como estudio. Quedan en la bandeja con su motivo, y la
+    // pantalla de revisión les ofrece el ruteo. `intencionDeExtraccion` cubre
+    // la extracción que no trae el campo -devuelve `estudio_realizado`-, así
+    // que el comportamiento de la auto-carga de estudios no cambia en nada.
+    intencion: intencionDeExtraccion(extraccion),
     tituloDetectado: titulo.detectado,
     huellaDuplicada: false,
     marcadoPosibleDuplicado: false,

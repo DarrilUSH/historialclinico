@@ -96,6 +96,33 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
         'documento permite saber QUÉ estudio es. Máximo ~80 caracteres. Cadena vacía solo si el ' +
         'documento es ilegible o no permite saber de qué se trata.',
     },
+    intencion: {
+      type: Type.STRING,
+      format: 'enum',
+      enum: [
+        'estudio_realizado',
+        'receta_o_medicacion',
+        'turno_o_cita',
+        'orden_de_practica',
+        'otro',
+      ],
+      description:
+        'PARA QUÉ SIRVE este papel, que NO es lo mismo que su categoría. Elegí exactamente uno: ' +
+        '"estudio_realizado" = algo que YA se hizo y trae su resultado o su informe (análisis, ' +
+        'ecografía, epicrisis, parte quirúrgico, placa). ' +
+        '"receta_o_medicacion" = una receta médica, o una LISTA de remedios (aunque sea un ' +
+        'papelito manuscrito con nombres de medicamentos y dosis, o la foto de las cajas). ' +
+        '"turno_o_cita" = un turno ya asignado o confirmado: la captura de pantalla de la agenda ' +
+        'de una clínica o de su app, un comprobante de turno, un cartelito con día y hora de ' +
+        'atención. Trae fecha y hora FUTURAS y un lugar donde presentarse. ' +
+        '"orden_de_practica" = un PEDIDO médico de un estudio TODAVÍA NO REALIZADO (una orden, ' +
+        'una derivación, una solicitud de práctica): dice qué hay que hacerse, no qué dio. ' +
+        '"otro" = cualquier otra cosa (un presupuesto, un carnet, algo ilegible). ' +
+        'Regla de desempate: ante CUALQUIER duda entre dos, devolvé "estudio_realizado" — es el ' +
+        'camino que una persona ya revisa a mano. La diferencia clave entre "orden_de_practica" y ' +
+        '"estudio_realizado" son los RESULTADOS: si hay hallazgos, valores o un informe, es un ' +
+        'estudio realizado aunque el papel también muestre quién lo pidió.',
+    },
     fecha: {
       type: Type.STRING,
       format: 'date',
@@ -187,14 +214,70 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
         propertyOrdering: ['nombre', 'valor', 'valorTexto', 'unidad', 'rango'],
       },
     },
+    medicamentos: {
+      type: Type.ARRAY,
+      description:
+        'Medicamentos que el documento INDICA tomar, uno por cada renglón de la receta o de la ' +
+        'lista. Lista VACÍA salvo que "intencion" sea "receta_o_medicacion" — un informe de ' +
+        'laboratorio o una ecografía no indican medicación, aunque nombren drogas en el texto. ' +
+        'NUNCA completes una dosis, una presentación o una frecuencia que el papel no imprima: ' +
+        'una dosis inventada en una aplicación médica puede hacer que alguien tome de más.',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          nombre: {
+            type: Type.STRING,
+            description:
+              'Nombre del medicamento tal como está escrito, normalmente el comercial de la caja ' +
+              '("COVERAM", "LIPOMAX", "Glucophage"). Si el papel solo nombra la droga ' +
+              '("Rosuvastatina 10"), poné eso mismo acá. Copiá el nombre SIN la concentración si ' +
+              'la concentración va aparte; si vienen pegados y no se pueden separar con certeza, ' +
+              'copiá el renglón tal cual.',
+          },
+          droga: {
+            type: Type.STRING,
+            description:
+              'Principio activo, si el papel lo imprime aparte del nombre comercial ' +
+              '("perindopril/amlodipina" debajo de COVERAM, "ácido fenofíbrico" debajo de ' +
+              'LIPOMAX). Cadena vacía si no figura — no lo deduzcas de tu conocimiento del ' +
+              'medicamento.',
+          },
+          presentacion: {
+            type: Type.STRING,
+            description:
+              'Forma farmacéutica y/o concentración tal como está impresa: "5/5 mg", ' +
+              '"comprimidos 105 mg", "10 mg", "solución 100 mg/ml". Cadena vacía si no figura.',
+          },
+          dosis_texto: {
+            type: Type.STRING,
+            description:
+              'CUÁNTO se toma por vez, copiado LITERAL del papel: "1 comprimido", "medio ' +
+              'comprimido", "10 ml", "2 gotas". Cadena vacía si el papel NO lo dice — es una ' +
+              'respuesta correcta y esperada, y una persona la va a completar en pantalla. NUNCA ' +
+              'la deduzcas de la presentación ni de lo que sepas del medicamento.',
+          },
+          frecuencia_texto: {
+            type: Type.STRING,
+            description:
+              'CADA CUÁNTO se toma, copiado LITERAL del papel: "1 por día", "cada 12 horas", ' +
+              '"por la mañana", "1 comprimido por día en el desayuno". Cadena vacía si el papel ' +
+              'NO lo dice. Mismo criterio que dosis_texto: no la inventes.',
+          },
+        },
+        required: ['nombre', 'droga', 'presentacion', 'dosis_texto', 'frecuencia_texto'],
+        propertyOrdering: ['nombre', 'droga', 'presentacion', 'dosis_texto', 'frecuencia_texto'],
+      },
+    },
     texto_completo: {
       type: Type.STRING,
       description:
-        'OPCIONAL — extracto acotado (máximo ~500 caracteres) del texto más relevante del ' +
-        'documento que no haya quedado ya cubierto por los demás campos (nombres, fechas, valores, ' +
-        'diagnósticos textuales). Sirve para poder reprocesar el documento más adelante sin volver a ' +
-        'leer el archivo. NO es una transcripción completa: omitir este campo si el documento es ' +
-        'largo o si el resumen ya alcanza para representarlo.',
+        'OPCIONAL — el texto del documento que no haya quedado ya cubierto por los demás campos. ' +
+        'Cuánto poner depende de "intencion": si es "turno_o_cita" u "orden_de_practica", ' +
+        'TRANSCRIBÍ LITERAL todo lo que se lee (hasta ~1500 caracteres) — fechas, horas, ' +
+        'direcciones, profesionales, cada turno de la lista: ese texto es lo único con lo que ' +
+        'después se pueden armar los turnos, y un dato que no transcribas se pierde. Para ' +
+        'cualquier otra intención seguí como siempre: un extracto BREVE, no más de 500 ' +
+        'caracteres, y omitilo si el resumen ya alcanza.',
     },
     numero_orden: {
       type: Type.STRING,
@@ -222,6 +305,7 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
   },
   required: [
     'titulo',
+    'intencion',
     'fecha',
     'especialidad',
     'institucion',
@@ -229,9 +313,11 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
     'resumen',
     'categoria',
     'metricas',
+    'medicamentos',
   ],
   propertyOrdering: [
     'titulo',
+    'intencion',
     'fecha',
     'especialidad',
     'institucion',
@@ -239,6 +325,7 @@ export const SCHEMA_DOCUMENTO_MEDICO: Schema = {
     'resumen',
     'categoria',
     'metricas',
+    'medicamentos',
     'texto_completo',
     'numero_orden',
     'numero_orden_rotulo',
@@ -306,6 +393,63 @@ export type CategoriaDocumentoExtraida =
   | 'consultation'
   | 'other';
 
+/**
+ * PARA QUÉ SIRVE el papel que se acaba de subir (Sprint 20, "una foto, el
+ * lugar correcto"). Es una dimensión DISTINTA de `categoria`: un mismo
+ * documento `prescription` puede ser una receta para cargar en Medicación
+ * (`receta_o_medicacion`) o el pedido de una práctica a realizar
+ * (`orden_de_practica`), y una captura de la agenda de una clínica es
+ * `turno_o_cita` sin ser ninguna de las cinco categorías clínicas.
+ *
+ * ## Por qué NO es una columna nueva de la base
+ *
+ * La intención vive donde ya vive el resto de la lectura: dentro del jsonb
+ * `documents.ai_extraction`, que existe justamente para sostener el estado
+ * recuperable ENTRE la lectura y la confirmación humana — y ese es exactamente
+ * el intervalo en el que la intención sirve para algo. Al confirmar, el
+ * documento ya está donde corresponde y `ai_extraction` se limpia entera; una
+ * columna `intention` en `documents` quedaría poblada para siempre con una
+ * respuesta que dejó de tener pregunta, y costaría una migración, una guarda de
+ * RLS más y dos arneses de RLS de verificación. Se evaluó y se decidió que no.
+ *
+ * ## El sesgo está declarado y es hacia el camino de siempre
+ *
+ * Ante cualquier ambigüedad el contrato pide `estudio_realizado`, que es el
+ * flujo que ya existía y que SIEMPRE pasa por revisión humana. Un falso
+ * `turno_o_cita` sobre un análisis le mete a la persona un cartel que no
+ * corresponde; un falso `estudio_realizado` sobre un turno la deja exactamente
+ * donde estaba antes de este sprint. No cuestan lo mismo.
+ */
+export type IntencionDocumentoExtraida =
+  | 'estudio_realizado'
+  | 'receta_o_medicacion'
+  | 'turno_o_cita'
+  | 'orden_de_practica'
+  | 'otro';
+
+/**
+ * Un medicamento leído de una receta o de una lista de remedios (Sprint 20).
+ *
+ * **Los cuatro campos que no son el nombre pueden venir vacíos, y eso es
+ * correcto.** El caso real que define el contrato es un papelito manuscrito con
+ * tres renglones -"COVERAM 5/5 perindopril/amlodipina", "LIPOMAX 105 ácido
+ * fenofíbrico", "ROSUVASTATINA 10"- que NO dice ni cuánto ni cada cuánto. La
+ * dosis y la frecuencia viajan como TEXTO LITERAL (`dosis_texto`,
+ * `frecuencia_texto`) y no como número + unidad + esquema justamente para que
+ * no haya ningún lugar donde el modelo pueda "completar" lo que el papel no
+ * dice: interpretarlos es trabajo de `lib/medicacion/desde-documento.ts`, que
+ * solo traduce lo inequívoco y deja el resto para la persona.
+ */
+export interface MedicamentoExtraido {
+  nombre: string;
+  droga: string;
+  presentacion: string;
+  /** Cuánto se toma por vez, LITERAL. Cadena vacía = el papel no lo dice. */
+  dosis_texto: string;
+  /** Cada cuánto se toma, LITERAL. Cadena vacía = el papel no lo dice. */
+  frecuencia_texto: string;
+}
+
 /** Una métrica de laboratorio extraída de un documento (espejo de `public.lab_metrics`). */
 export interface MetricaExtraida {
   nombre: string;
@@ -362,6 +506,18 @@ export interface DocumentoMedicoExtraido {
    */
   titulo?: string;
   /**
+   * Para qué sirve el papel (Sprint 20). Ver `IntencionDocumentoExtraida`.
+   *
+   * `?` por DOS motivos, no uno: el criterio defensivo de siempre (un modelo
+   * puede omitir un campo pedido) y, sobre todo, porque este tipo también
+   * describe los jsonb `documents.ai_extraction` que ya estaban guardados ANTES
+   * de este sprint, que no lo traen. Nadie lo lee crudo: se lee con
+   * `intencionDeExtraccion` (`lib/documentos/intencion.ts`), que devuelve
+   * `"estudio_realizado"` cuando no vino — el mismo comportamiento que la app
+   * tenía antes de existir el clasificador.
+   */
+  intencion?: IntencionDocumentoExtraida;
+  /**
    * Fecha del documento en `YYYY-MM-DD`, o `null` cuando el documento no
    * imprime su propia fecha. Ver el bloque `fecha` del comentario de
    * `SCHEMA_DOCUMENTO_MEDICO`: `null` es una respuesta LEGAL y esperada, no un
@@ -375,6 +531,16 @@ export interface DocumentoMedicoExtraido {
   resumen: string;
   categoria: CategoriaDocumentoExtraida;
   metricas: MetricaExtraida[];
+  /**
+   * Medicamentos indicados por el documento (Sprint 20). Lista vacía en todo lo
+   * que no sea una receta o una lista de remedios.
+   *
+   * `?` por el mismo doble motivo que `intencion`: extracciones viejas no lo
+   * traen, y perder un documento entero porque el modelo omitió un array
+   * accesorio sería repetir exactamente el error que el Sprint 18 midió y
+   * arregló. Se lee siempre como `medicamentos ?? []`.
+   */
+  medicamentos?: MedicamentoExtraido[];
   texto_completo?: string;
   /**
    * Número de orden/protocolo del estudio, tal como lo imprime el laboratorio

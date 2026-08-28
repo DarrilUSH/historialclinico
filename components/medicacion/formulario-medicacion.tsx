@@ -86,11 +86,31 @@ export interface ValoresMedicacion {
   notas: string
 }
 
+/**
+ * La cola de medicamentos que quedó pendiente cuando se llegó desde la foto de
+ * una receta (Sprint 20). Viaja en campos ocultos y `crearMedicacion` la
+ * traduce a la próxima pantalla con `siguientePasoDeCargaDeMedicamentos`
+ * (`lib/documentos/ruteo.ts`).
+ *
+ * Son TRES DATOS, no una URL: un uuid, una lista de posiciones y un contador.
+ * La URL de destino la arma el servidor, así que ningún posteo puede
+ * convertir esto en un redirect abierto.
+ */
+export interface ContinuacionDesdeDocumento {
+  documentoId: string
+  /** Índices de los medicamentos que todavía no se cargaron. */
+  pendientes: readonly number[]
+  /** Cuántos se cargaron ya, SIN contar el que se está por guardar. */
+  hechos: number
+}
+
 export interface FormularioMedicacionProps {
   modo: "crear" | "editar"
   /** Obligatorio cuando `modo === "editar"`: viaja como campo oculto para que `actualizarMedicacion` sepa qué fila tocar. */
   medicacionId?: string
   valoresIniciales?: Partial<ValoresMedicacion>
+  /** Solo en `modo="crear"` y solo cuando se llegó desde un documento. Ver `ContinuacionDesdeDocumento`. */
+  continuacion?: ContinuacionDesdeDocumento
 }
 
 const ESTADO_INICIAL: EstadoMedicacionAccion = { error: null }
@@ -99,6 +119,7 @@ export function FormularioMedicacion({
   modo,
   medicacionId,
   valoresIniciales,
+  continuacion,
 }: FormularioMedicacionProps) {
   const accion = modo === "crear" ? crearMedicacion : actualizarMedicacion
   const [estado, enviarAccion, pendiente] = useActionState(accion, ESTADO_INICIAL)
@@ -112,6 +133,20 @@ export function FormularioMedicacion({
     <form action={enviarAccion} className="flex flex-col gap-5">
       {modo === "editar" && medicacionId && (
         <input type="hidden" name="medicacionId" value={medicacionId} />
+      )}
+
+      {/* La cola de la receta fotografiada (Sprint 20). Solo en alta, y solo
+          cuando se llegó desde un documento. Ver `ContinuacionDesdeDocumento`. */}
+      {modo === "crear" && continuacion && (
+        <>
+          <input type="hidden" name="documentoOrigen" value={continuacion.documentoId} />
+          <input
+            type="hidden"
+            name="medicamentosPendientes"
+            value={continuacion.pendientes.join(",")}
+          />
+          <input type="hidden" name="medicamentosHechos" value={String(continuacion.hechos)} />
+        </>
       )}
 
       <CampoTexto

@@ -16,8 +16,11 @@ import { ArrowLeftIcon } from "lucide-react"
 
 import { FormularioTurno } from "@/components/turnos/formulario-turno"
 import { requerirSesion } from "@/lib/auth/guardas"
+import { intencionDeExtraccion } from "@/lib/documentos/intencion"
+import { leerExtraccionDeDocumento } from "@/lib/documentos/leer-extraccion"
 import { leerEstadoCatalogo } from "@/lib/lugares/consulta"
 import { hoyIsoUshuaia } from "@/lib/turnos/fecha"
+import { precargaDesdeOrden, textoParaAnalizador } from "@/lib/turnos/desde-documento"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { obtenerUltimaUbicacionConocida } from "@/lib/ubicacion/ultima-usada"
 
@@ -36,10 +39,26 @@ export const metadata: Metadata = {
  */
 const PATRON_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+/**
+ * Sprint 20, "una foto, el lugar correcto": `?doc=<uuid>` cuando se llega desde
+ * el cartel de ruteo de la pantalla de revisión de un documento. Dos formas de
+ * precarga, según lo que el clasificador dijo que era el papel:
+ *
+ * - **`turno_o_cita`** (la captura de la agenda de la clínica): el TEXTO
+ *   transcripto va al analizador de mensajes, que ya sabe leer 1..N turnos y
+ *   crearlos en lote. No se traduce nada acá — ver
+ *   `lib/turnos/desde-documento.ts` para por qué reimplementarlo sería peor.
+ * - **`orden_de_practica`** (la orden que todavía no tiene fecha): se precargan
+ *   la especialidad y las notas, y la fecha queda VACÍA a propósito. No hay
+ *   nada que analizar: el papel no dice cuándo.
+ *
+ * Cualquier otra intención -o un `doc` que RLS no devuelva- no precarga nada y
+ * la pantalla queda como el alta manual de siempre.
+ */
 export default async function PaginaNuevoTurno({
   searchParams,
 }: {
-  searchParams: Promise<{ gmail?: string }>
+  searchParams: Promise<{ gmail?: string; doc?: string }>
 }) {
   const activo = await obtenerPerfilActivo()
 
@@ -53,7 +72,7 @@ export default async function PaginaNuevoTurno({
 
   const { supabase } = await requerirSesion({ desde: "/turnos/nuevo" })
 
-  const { gmail } = await searchParams
+  const { gmail, doc } = await searchParams
   let correoGmailId: string | undefined
   if (typeof gmail === "string" && PATRON_UUID.test(gmail)) {
     const { data: correo } = await supabase
@@ -63,6 +82,20 @@ export default async function PaginaNuevoTurno({
       .maybeSingle()
     correoGmailId = correo?.id
   }
+
+  // Precarga desde un documento fotografiado (Sprint 20). Ver el comentario de
+  // arriba. Con `?gmail=` presente esto no se consulta: son dos orígenes del
+  // mismo dato y la bandeja de Gmail ya tiene su propio camino.
+  const origen = correoGmailId ? null : await leerExtraccionDeDocumento(supabase, doc)
+  const intencionOrigen = origen ? intencionDeExtraccion(origen.extraccion) : null
+  const precargaOrden =
+    intencionOrigen === "orden_de_practica" && origen
+      ? precargaDesdeOrden(origen.extraccion)
+      : null
+  const textoDelDocumento =
+    intencionOrigen === "turno_o_cita" && origen
+      ? textoParaAnalizador(origen.extraccion)
+      : undefined
 
   const [{ data: medicos }, ultimaUbicacion, estadoCatalogo] = await Promise.all([
     supabase
@@ -93,7 +126,11 @@ export default async function PaginaNuevoTurno({
       <div className="flex flex-col gap-1">
         <h1 className="text-2xl font-semibold tracking-tight text-balance">Nuevo turno</h1>
         <p className="text-base text-muted-foreground">
-          Cargá los datos del turno de {activo.perfil.full_name}.
+          {precargaOrden
+            ? `Es el pedido que fotografiaste. Cargá el día y la hora del turno de ${activo.perfil.full_name} cuando lo saques.`
+            : textoDelDocumento
+              ? `Leímos la foto que subiste. Revisá lo que encontramos y confirmá el turno de ${activo.perfil.full_name}.`
+              : `Cargá los datos del turno de ${activo.perfil.full_name}.`}
         </p>
       </div>
 
@@ -103,11 +140,16 @@ export default async function PaginaNuevoTurno({
         fechaMinimaIso={hoyIsoUshuaia()}
         catalogoDisponible={estadoCatalogo.centros > 0}
         correoGmailId={correoGmailId}
-        valoresIniciales={
-          ultimaUbicacion
+        textoParaAnalizar={textoDelDocumento}
+        valoresIniciales={{
+          ...(ultimaUbicacion
             ? { lugarCiudad: ultimaUbicacion.ciudad, lugarProvincia: ultimaUbicacion.provincia }
-            : undefined
-        }
+            : {}),
+          // La orden pisa la especialidad y las notas, no la ubicación: la
+          // última ciudad usada sigue siendo una sugerencia útil para el lugar
+          // donde se va a atender, que la orden no dice.
+          ...(precargaOrden ?? {}),
+        }}
       />
     </div>
   )

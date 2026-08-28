@@ -215,6 +215,18 @@ export interface FormularioTurnoProps {
    * oculto para que `crearTurno` deje ese correo marcado como ingresado.
    */
   correoGmailId?: string
+  /**
+   * Texto ya transcripto de un documento fotografiado (Sprint 20, ruteo por
+   * intención). Se le pasa tal cual a `AnalizadorMensajeTurno`, que arranca
+   * abierto y analiza solo — así la captura de la agenda de una clínica con dos
+   * turnos termina proponiendo los DOS, por el mismo camino de lote que ya
+   * existía desde agosto de 2026.
+   *
+   * Mutuamente excluyente con `correoGmailId` en la práctica: son dos orígenes
+   * distintos de lo mismo, y `PrecargaGmail` tiene prioridad si llegaran los
+   * dos.
+   */
+  textoParaAnalizar?: string
 }
 
 const ESTADO_INICIAL: EstadoTurnoAccion = { error: null }
@@ -228,6 +240,7 @@ export function FormularioTurno({
   fechaMinimaIso,
   catalogoDisponible = false,
   correoGmailId,
+  textoParaAnalizar,
 }: FormularioTurnoProps) {
   const accion = modo === "crear" ? crearTurno : actualizarTurno
   const [estado, enviarAccion, pendiente] = useActionState(accion, ESTADO_INICIAL)
@@ -467,7 +480,10 @@ export function FormularioTurno({
       {correoGmailId ? (
         <PrecargaGmail correoId={correoGmailId} onAplicarPropuesta={aplicarPropuesta} />
       ) : (
-        <AnalizadorMensajeTurno onAplicarPropuesta={aplicarPropuesta} />
+        <AnalizadorMensajeTurno
+          onAplicarPropuesta={aplicarPropuesta}
+          textoInicial={textoParaAnalizar}
+        />
       )}
 
       <form id={ID_FORMULARIO} action={enviarAccion} className="flex flex-col gap-5">

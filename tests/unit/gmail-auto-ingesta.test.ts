@@ -36,6 +36,7 @@ const DOCUMENTO_PERFECTO: EntradaDocumentoAutoCarga = {
   nombrePerfilDestino: "Roberto Gómez",
   fecha: "2026-08-15",
   categoria: "laboratory",
+  intencion: "estudio_realizado",
   tituloDetectado: true,
   huellaDuplicada: false,
   marcadoPosibleDuplicado: false,

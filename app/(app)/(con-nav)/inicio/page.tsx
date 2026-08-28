@@ -52,6 +52,7 @@ import { redirect } from "next/navigation"
 
 import {
   ActivityIcon,
+  CameraIcon,
   CircleHelpIcon,
   ClipboardListIcon,
   CreditCardIcon,
@@ -185,6 +186,56 @@ export default async function PaginaInicio() {
           derecha- desde adentro del propio componente (`components/turnos/tarjeta-turno.tsx`),
           así la mejora alcanza también a `/turnos` sin duplicar código acá. */}
       <ProximoTurno />
+
+      {/*
+        La cámara de la pantalla principal (Sprint 20, "una foto, el lugar
+        correcto"). Pedido textual de un usuario de ~70 años, el padre del
+        dueño: *"yo pondría en la página principal un iconito con forma de
+        cámara: sacás una foto de cualquier cosa -una receta, un listado de
+        medicamentos, una orden, un turno- y la IA define QUÉ es y lo deriva a
+        donde corresponda"*.
+
+        Va SUELTA y a ancho completo, no como un tile más de la grilla de abajo,
+        y esa es la diferencia entre cumplir el pedido y no cumplirlo: `/estudios`
+        ya tenía su acceso ahí, y era exactamente eso -un cuadradito entre nueve-
+        lo que hacía que la función más útil de la aplicación no se encontrara. Va
+        arriba de la grilla y debajo del próximo turno, que es el único dato que
+        merece ganarle atención.
+
+        El copy dice qué papeles sirven, en el orden en que la persona los
+        nombró. Antes decía "estudio": una palabra que excluye, sin querer, las
+        otras tres cosas que ahora la aplicación sabe recibir.
+
+        Solo con `can_upload`: sin permiso de carga, el destino redirige y
+        ofrecer el botón sería prometer algo que no se puede hacer -mismo
+        criterio que el resto de los accesos de esta pantalla-.
+      */}
+      {permisos.canUpload && (
+        <Link
+          href="/estudios/nuevo"
+          className={cn(
+            CLASE_TARJETA_BASE,
+            CLASE_TARJETA_INTERACTIVA,
+            "w-full max-w-sm flex-row items-center gap-4 px-(--card-spacing) text-left",
+            "chica:gap-3",
+          )}
+        >
+          <span
+            className="flex size-13 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground chica:size-11"
+            aria-hidden="true"
+          >
+            <CameraIcon className="size-6.5 chica:size-5.5" />
+          </span>
+          <span className="flex min-w-0 flex-col">
+            <span className="text-lg font-semibold text-foreground chica:text-base">
+              Sacar una foto
+            </span>
+            <span className="text-sm text-muted-foreground text-pretty">
+              De un estudio, una receta, un turno o una orden. La leemos y te decimos dónde va.
+            </span>
+          </span>
+        </Link>
+      )}
 
       {/*
         Tutorial de bienvenida (tarea #14, docs/tutorial-bienvenida.md): UN

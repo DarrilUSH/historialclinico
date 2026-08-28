@@ -61,7 +61,10 @@
  * - `"no_coincide"` → `nombre_no_coincide`, como siempre.
  */
 
-import type { CategoriaDocumentoExtraida } from "@/lib/gemini/schemas"
+import type {
+  CategoriaDocumentoExtraida,
+  IntencionDocumentoExtraida,
+} from "@/lib/gemini/schemas"
 import { evaluarTitularidad, nombreApareceEnTexto } from "@/lib/gmail/coincidencia-nombre"
 import type { ResultadoAnalisisMensaje } from "@/lib/turnos/construir-propuestas"
 
@@ -90,6 +93,12 @@ export type MotivoRevision =
   | "fecha_no_confiable"
   /** El lector no pudo clasificar el documento: quedó en "otro". */
   | "categoria_indeterminada"
+  /**
+   * El adjunto no es un estudio realizado: es una receta, un turno o una orden
+   * (Sprint 20). Se carga a mano para que la persona lo mande a donde
+   * corresponde, con el cartel de ruteo de la pantalla de revisión.
+   */
+  | "no_es_un_estudio"
   /** No se detectó institución, ni especialidad, ni médico: el título saldría genérico. */
   | "sin_datos_de_contexto"
   /** El perfil ya tiene un documento con la misma huella. */
@@ -124,6 +133,7 @@ export const TEXTO_MOTIVO: Record<MotivoRevision, string> = {
   lectura_fallida: "no pudimos leer el archivo automáticamente",
   fecha_no_confiable: "no pudimos leer con seguridad la fecha",
   categoria_indeterminada: "no pudimos identificar qué tipo de estudio es",
+  no_es_un_estudio: "no parece un estudio sino una receta, un turno o una orden",
   sin_datos_de_contexto: "no pudimos ponerle un nombre que lo distinga de otros estudios",
   duplicado_exacto: "ya tenías cargado un archivo idéntico",
   posible_duplicado: "puede estar repetido con otro correo",
@@ -220,6 +230,14 @@ export interface EntradaDocumentoAutoCarga {
   fecha: string
   categoria: CategoriaDocumentoExtraida
   /**
+   * Para qué sirve el papel, según el clasificador del Sprint 20
+   * (`lib/documentos/intencion.ts`). Ya viene resuelto por
+   * `intencionDeExtraccion`, así que nunca es `undefined`: una extracción vieja
+   * o un campo que el modelo omitió llegan acá como `"estudio_realizado"`, que
+   * es el comportamiento que la auto-carga tenía antes del sprint.
+   */
+  intencion: IntencionDocumentoExtraida
+  /**
    * `sugerirTitulo(...).detectado`. Desde el Sprint 19 significa "el lector
    * NOMBRÓ el estudio" (`DocumentoMedicoExtraido.titulo`), no ya "había
    * institución, especialidad o médico": el título genérico compuesto dejó de
@@ -298,6 +316,29 @@ export function evaluarDocumentoParaAutoCarga(
   // señal de que no entendió qué tenía delante.
   if (entrada.categoria === "other") {
     motivos.push("categoria_indeterminada")
+  }
+
+  // Sprint 20: la auto-carga sigue cargando SOLO estudios, y su comportamiento
+  // no cambia ni un poco. Lo que cambia es que ahora hay una señal para
+  // reconocer al adjunto que NO es un estudio -una receta escaneada, la captura
+  // de un turno, una orden- y mandarlo a revisión con su motivo, en vez de
+  // meterlo al historial como un estudio sin clasificar.
+  //
+  // Esa era exactamente la queja que originó el sprint, dicha sobre la subida a
+  // mano: tres capturas de turnos que quedaron "en el limbo". Por el camino
+  // automático el mismo error sería peor -entraría sin que nadie lo mirara-, y
+  // ahora no puede ocurrir: el correo queda en la bandeja, y al abrirlo la
+  // pantalla de revisión le ofrece el ruteo que corresponde.
+  //
+  // `otro` NO suma motivo acá: ya lo cubre `categoria_indeterminada` cuando
+  // corresponde, y sumar dos motivos por lo mismo haría que la frase de la
+  // bandeja dijera dos veces que no se entendió el archivo.
+  if (
+    entrada.intencion === "receta_o_medicacion" ||
+    entrada.intencion === "turno_o_cita" ||
+    entrada.intencion === "orden_de_practica"
+  ) {
+    motivos.push("no_es_un_estudio")
   }
 
   // Sin un título del lector, lo que se guardaría es el genérico

@@ -74,10 +74,25 @@ const PATRON_UUID =
 /** Tope de títulos que se traen para cotejar repetidos (Sprint 19). */
 const MAX_TITULOS_COTEJADOS = 500
 
+/**
+ * Cuántos medicamentos se acaban de cargar desde este documento (Sprint 20).
+ * Llega en `?medicamentos=N` cuando la cola de `/medicacion/nuevo` terminó y
+ * devolvió a la persona acá para que decida qué hacer con el papel.
+ *
+ * Es un CONTADOR para una frase, no una autorización de nada: se acota a un
+ * rango sensato y cualquier otra cosa se lee como 0 -un `?medicamentos=999`
+ * escrito a mano solo consigue no ver el cartel-.
+ */
+function medicamentosCargadosDesdeParametro(crudo: string | undefined): number {
+  if (!crudo || !/^\d{1,2}$/.test(crudo)) return 0
+  const cantidad = Number(crudo)
+  return cantidad > 0 && cantidad <= 20 ? cantidad : 0
+}
+
 export default async function PaginaProcesando({
   searchParams,
 }: {
-  searchParams: Promise<{ doc?: string }>
+  searchParams: Promise<{ doc?: string; medicamentos?: string }>
 }) {
   const activo = await obtenerPerfilActivo()
 
@@ -85,8 +100,9 @@ export default async function PaginaProcesando({
     redirect("/perfiles")
   }
 
-  const { doc } = await searchParams
+  const { doc, medicamentos } = await searchParams
   const documentoId = doc && PATRON_UUID.test(doc) ? doc : null
+  const medicamentosCargados = medicamentosCargadosDesdeParametro(medicamentos)
 
   if (!documentoId) {
     redirect("/estudios/nuevo")
@@ -174,6 +190,7 @@ export default async function PaginaProcesando({
         medicos={medicos ?? []}
         catalogoDisponible={estadoCatalogo.centros > 0}
         titulosExistentes={titulosExistentes}
+        medicamentosCargados={medicamentosCargados}
       />
     </div>
   )

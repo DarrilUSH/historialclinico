@@ -49,6 +49,7 @@ import { redirect } from "next/navigation"
 import { revalidatePath } from "next/cache"
 
 import { esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
+import { siguientePasoDeCargaDeMedicamentos } from "@/lib/documentos/ruteo"
 import { generarTomasDelDiaComoServicio } from "@/lib/medicacion/generar-tomas-admin"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
 import { validarMedicacion } from "@/lib/validacion/medicacion.schema"
@@ -175,7 +176,59 @@ export async function crearMedicacion(
   }
 
   revalidatePath("/medicacion")
+
+  // Sprint 20: si esta alta vino de la foto de una receta, el recorrido no
+  // termina en `/medicacion` — sigue con el próximo medicamento de la cola, o
+  // vuelve a la pantalla de revisión del documento para decidir qué hacer con
+  // el papel. Ver `continuacionDesdeDocumento`, abajo, para por qué esto no es
+  // un redirect abierto.
+  const continuacion = continuacionDesdeDocumento(formData)
+  if (continuacion) {
+    redirect(continuacion)
+  }
+
   redirect("/medicacion?creada=1")
+}
+
+/**
+ * La próxima pantalla cuando el alta vino de un documento (Sprint 20), o `null`
+ * cuando es un alta normal.
+ *
+ * ## Por qué el formulario NO manda una URL
+ *
+ * Un campo oculto con la URL de destino sería un redirect abierto de manual:
+ * cualquiera puede postear una Server Action con los campos que quiera. Acá
+ * viajan un uuid, una lista de números y un contador, los tres validados por
+ * forma, y la URL la arma `siguientePasoDeCargaDeMedicamentos`
+ * (`lib/documentos/ruteo.ts`), que solo sabe construir DOS destinos internos.
+ * Por construcción, esto no puede apuntar afuera de la aplicación.
+ *
+ * Y no hace falta ninguna guarda de permisos extra: los dos destinos son
+ * pantallas que vuelven a verificar sesión, perfil activo y `can_upload` por su
+ * cuenta, y la de revisión además lee la fila del documento por RLS. Un uuid
+ * inventado acá solo consigue aterrizar en una pantalla que redirige.
+ */
+function continuacionDesdeDocumento(formData: FormData): string | null {
+  const documentoId = campo(formData, "documentoOrigen")
+  if (!PATRON_UUID.test(documentoId)) {
+    return null
+  }
+
+  const crudoPendientes = campo(formData, "medicamentosPendientes")
+  const pendientes =
+    crudoPendientes.length > 0 && /^\d{1,3}(,\d{1,3})*$/.test(crudoPendientes)
+      ? crudoPendientes.split(",").map(Number)
+      : []
+
+  const crudoHechos = campo(formData, "medicamentosHechos")
+  const hechos = /^\d{1,2}$/.test(crudoHechos) ? Number(crudoHechos) : 0
+
+  return siguientePasoDeCargaDeMedicamentos({
+    documentoId,
+    pendientes,
+    // El que se acaba de guardar cuenta: por eso el +1.
+    hechos: hechos + 1,
+  })
 }
 
 /** Edición de los datos de una medicación YA cargada. No toca `is_active`/`suspended_at`: eso lo hacen `suspenderMedicacion`/`reactivarMedicacion`. */

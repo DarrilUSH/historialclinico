@@ -108,6 +108,22 @@
  * igual- y el documento sigue con el resto. Es la misma lección del Sprint 18
  * llevada al array: no se pierden 38 métricas buenas por una vacía.
  *
+ * ## Sprint 20 — dos campos nuevos, y por qué NINGUNO puede tirar el documento
+ *
+ * `intencion` (para qué sirve el papel) y `medicamentos` (los renglones de una
+ * receta) entran como `.optional()`, no como campos obligatorios del espejo. No
+ * es descuido: este mismo schema valida los jsonb `documents.ai_extraction` que
+ * ya estaban guardados ANTES del sprint y que no traen ninguno de los dos.
+ * Exigirlos convertiría en "ilegible" a todo documento que estuviera esperando
+ * revisión el día del deploy. Quien los lee lo hace con
+ * `intencionDeExtraccion(...)` y `medicamentos ?? []`
+ * (`lib/documentos/intencion.ts`), que devuelven el comportamiento previo al
+ * sprint cuando no vinieron.
+ *
+ * Lo que SÍ rechaza es una `intencion` presente pero fuera del enum, por el
+ * mismo motivo que `categoria`: elegir un valor válido en su lugar sería
+ * decidir por el modelo hacia dónde rutear un papel médico.
+ *
  * Uso en `app/api/documentos/extraer/route.ts`:
  *   const resultado = validarExtraccion(datosDeGemini)
  *   if (!resultado.ok) {
@@ -260,6 +276,47 @@ function normalizarMetricas(
 }
 
 /**
+ * Tope de medicamentos por documento. Mismo criterio que `MAX_METRICAS`: el
+ * excedente se DESCARTA en vez de tirar la extracción. Veinte renglones ya son
+ * una lista de remedios larguísima para una persona.
+ */
+const MAX_MEDICAMENTOS = 20
+
+/**
+ * Deja la lista de medicamentos lista para `MedicamentoExtraido[]`:
+ *
+ * 1. Los cuatro campos que no son el nombre pasan a cadena vacía cuando el
+ *    modelo los omite — así el tipo de salida es el del contrato y quien lo
+ *    consume no tiene que distinguir `undefined` de `""`. Los dos significan lo
+ *    mismo: **el papel no lo dice**.
+ * 2. Un medicamento sin nombre no se puede mostrar ni cargar: se descarta ese
+ *    solo (no el documento). Zod ya lo rechaza por el `.refine`, pero el filtro
+ *    queda por si el recorte lo deja vacío.
+ * 3. El excedente por encima de `MAX_MEDICAMENTOS` se corta.
+ */
+function normalizarMedicamentos(
+  medicamentos: readonly {
+    nombre: string
+    droga?: string
+    presentacion?: string
+    dosis_texto?: string
+    frecuencia_texto?: string
+  }[],
+) {
+  const utiles = medicamentos
+    .filter((medicamento) => medicamento.nombre.length > 0)
+    .map((medicamento) => ({
+      nombre: medicamento.nombre,
+      droga: medicamento.droga ?? '',
+      presentacion: medicamento.presentacion ?? '',
+      dosis_texto: medicamento.dosis_texto ?? '',
+      frecuencia_texto: medicamento.frecuencia_texto ?? '',
+    }))
+
+  return utiles.length > MAX_MEDICAMENTOS ? utiles.slice(0, MAX_MEDICAMENTOS) : utiles
+}
+
+/**
  * Schema Zod espejo de `SCHEMA_DOCUMENTO_MEDICO`.
  *
  * Todos los campos tienen mensajes custom en español. Las coerciones
@@ -376,9 +433,71 @@ export const schemaExtraccionDocumento = z
       )
       .transform(normalizarMetricas),
 
+    // Para qué sirve el papel (Sprint 20). `.optional()` con dos motivos, y
+    // ninguno es pereza:
+    //
+    // 1. Este schema también valida jsonb `ai_extraction` guardados ANTES del
+    //    Sprint 20, que no traen el campo. Rechazarlos convertiría documentos
+    //    que estaban esperando revisión en documentos ilegibles.
+    // 2. Es la lección del Sprint 18 aplicada a un campo nuevo: perder la
+    //    extracción entera porque el modelo omitió la clasificación sería
+    //    exactamente el error que este archivo existe para no repetir.
+    //
+    // Un valor PRESENTE pero fuera del enum sí rechaza, igual que `categoria`:
+    // es un enum cerrado, y "corregirlo" a algo válido sería elegir por el
+    // modelo hacia dónde rutear un papel médico.
+    intencion: z
+      .enum(
+        ['estudio_realizado', 'receta_o_medicacion', 'turno_o_cita', 'orden_de_practica', 'otro'],
+        {
+          message:
+            'La intención debe ser una de: estudio_realizado, receta_o_medicacion, turno_o_cita, orden_de_practica, otro',
+        },
+      )
+      .optional(),
+
+    // Medicamentos de una receta o de una lista de remedios (Sprint 20).
+    // Opcional por los mismos dos motivos que `intencion`, y con la misma
+    // política de recorte que `metricas`: los campos son todos DESCRIPTIVOS
+    // -texto para mostrar y para que una persona corrija-, así que se recortan
+    // y nunca hacen fallar el documento.
+    //
+    // `dosis_texto` y `frecuencia_texto` son texto LITERAL a propósito: no hay
+    // acá ningún `z.number()` de dosis donde un valor inventado pudiera
+    // colarse con forma de dato válido. La traducción a los campos del
+    // formulario -y su negativa a adivinar- vive en
+    // `lib/medicacion/desde-documento.ts`.
+    medicamentos: z
+      .array(
+        z.object(
+          {
+            nombre: textoRecortado(200, 'El nombre del medicamento debe ser texto').refine(
+              (valor) => valor.length > 0,
+              'El nombre del medicamento no puede estar vacío',
+            ),
+            droga: textoRecortado(150, 'La droga debe ser texto').optional(),
+            presentacion: textoRecortado(150, 'La presentación debe ser texto').optional(),
+            dosis_texto: textoRecortado(150, 'La dosis debe ser texto').optional(),
+            frecuencia_texto: textoRecortado(150, 'La frecuencia debe ser texto').optional(),
+          },
+          { message: 'Cada medicamento debe tener al menos un nombre' },
+        ),
+      )
+      .transform(normalizarMedicamentos)
+      .optional(),
+
     // El caso real que costó tres documentos: 507 caracteres contra un tope
     // de 500. Siete de más. Se recorta.
-    texto_completo: textoRecortado(500, 'El texto completo debe ser texto').optional(),
+    //
+    // Sprint 20: el tope sube de 500 a 2000 porque un turno o una orden piden
+    // TRANSCRIPCIÓN LITERAL, no extracto -es el único insumo con el que después
+    // se arman los turnos, y un dato que no entre acá se pierde-. Para los
+    // estudios el prompt sigue pidiendo ≤500, así que su lectura no cambia; y
+    // `documents.raw_ocr_text` sigue recortándose a 500 en
+    // `app/api/documentos/extraer/route.ts`, así que la columna tampoco cambia.
+    // El texto largo vive solo en el jsonb transitorio `ai_extraction`, que se
+    // limpia al confirmar.
+    texto_completo: textoRecortado(2000, 'El texto completo debe ser texto').optional(),
 
     // Número de orden/protocolo del estudio (hotfix de duplicados semánticos):
     // mismo patrón opcional que `texto_completo` — no todo documento lo trae.

@@ -112,6 +112,8 @@ export interface PantallaProcesandoProps {
   catalogoDisponible: boolean
   /** Títulos que el perfil DESTINO ya usa, para avisar cuando el propuesto se repite (Sprint 19). Pasa tal cual a `FormularioRevision`. */
   titulosExistentes: readonly string[]
+  /** Medicamentos recién cargados desde este documento (Sprint 20), al volver de la cola de `/medicacion/nuevo`. Pasa tal cual a `FormularioRevision`. */
+  medicamentosCargados?: number
 }
 
 type Estado = "leyendo" | "revisando"
@@ -217,6 +219,7 @@ export function PantallaProcesando({
   medicos,
   catalogoDisponible,
   titulosExistentes,
+  medicamentosCargados = 0,
 }: PantallaProcesandoProps) {
   const [estado, setEstado] = React.useState<Estado>("leyendo")
   const [extraccion, setExtraccion] = React.useState<DocumentoMedicoExtraido | null>(null)
@@ -385,6 +388,7 @@ export function PantallaProcesando({
       medicos={medicos}
       catalogoDisponible={catalogoDisponible}
       titulosExistentes={titulosExistentes}
+      medicamentosCargados={medicamentosCargados}
     />
   )
 }

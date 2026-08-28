@@ -243,8 +243,12 @@ describe('lib/validacion/documento.schema.ts', () => {
   // Caso 10: texto_completo excesivamente largo
   // ─────────────────────────────────────────────────────────────────────────
 
-  it('RECORTA texto_completo mayor a 500 caracteres en vez de rechazar', () => {
-    const textoExcesivo = 'a'.repeat(501)
+  // Sprint 20: el tope subió de 500 a 2000 porque un turno o una orden piden
+  // TRANSCRIPCIÓN LITERAL y no extracto — es el único insumo con el que después
+  // se arman los turnos. Lo que NO cambió es la política: se recorta, nunca
+  // rechaza.
+  it('RECORTA texto_completo mayor a 2000 caracteres en vez de rechazar', () => {
+    const textoExcesivo = 'a'.repeat(2001)
     const conTextoBad = {
       ...ejemploValido,
       texto_completo: textoExcesivo,
@@ -252,7 +256,20 @@ describe('lib/validacion/documento.schema.ts', () => {
     const resultado = validarExtraccion(conTextoBad)
     expect(resultado.ok).toBe(true)
     if (resultado.ok) {
-      expect(resultado.datos.texto_completo).toHaveLength(500)
+      expect(resultado.datos.texto_completo).toHaveLength(2000)
+    }
+  })
+
+  it('la transcripción larga de un turno (1500 caracteres) entra ENTERA', () => {
+    const transcripcion = 'a'.repeat(1500)
+    const resultado = validarExtraccion({
+      ...ejemploValido,
+      intencion: 'turno_o_cita',
+      texto_completo: transcripcion,
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) {
+      expect(resultado.datos.texto_completo).toHaveLength(1500)
     }
   })
 
@@ -411,7 +428,7 @@ describe('lib/validacion/documento.schema.ts', () => {
       }
     })
 
-    it('EL CASO REAL DEL TEXTO — 507 caracteres contra un tope de 500: se recorta y el documento entra', () => {
+    it('EL CASO REAL DEL TEXTO — 507 caracteres: el documento entra, y desde el Sprint 20 ni siquiera se recorta', () => {
       const extraccion = extraccionSinPaciente('13-consulta-texto-completo-507')
 
       // Siete caracteres de más tiraban TRES extracciones completas.
@@ -420,8 +437,10 @@ describe('lib/validacion/documento.schema.ts', () => {
       const resultado = validarExtraccion(extraccion)
       expect(resultado.ok).toBe(true)
       if (resultado.ok) {
-        expect(resultado.datos.texto_completo).toHaveLength(500)
-        // Y lo importante: el documento llegó entero.
+        // Sprint 18 lo salvaba recortándolo a 500; con el tope en 2000 llega
+        // completo. La garantía que importa es la misma de siempre y sigue
+        // valiendo: un campo descriptivo largo NUNCA cuesta el documento.
+        expect(resultado.datos.texto_completo).toHaveLength(507)
         expect(resultado.datos.fecha).toBe(extraccion.fecha)
         expect(resultado.datos.categoria).toBe(extraccion.categoria)
       }

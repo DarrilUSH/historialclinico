@@ -171,12 +171,18 @@ export function PantallaNuevoEstudio() {
         >
           <ArrowLeftIcon aria-hidden="true" />
         </Boton>
-        <h1 className="text-2xl font-semibold tracking-tight text-balance">Subir estudio</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-balance">Subir un papel</h1>
       </div>
 
-      <p className="text-base text-muted-foreground">
-        Sacá una foto del análisis o la receta, o elegí un archivo ya guardado. Cuando lo
-        confirmes lo guardamos en tu historial.
+      {/* Sprint 20: el copy dice las CUATRO cosas que la aplicación sabe
+          recibir, no solo "el análisis o la receta". No es cosmética: el
+          usuario que pidió la función subió tres capturas de turnos y quedaron
+          "en el limbo" justamente porque nada en esta pantalla decía que un
+          turno también entraba por acá. */}
+      <p className="text-base text-muted-foreground text-pretty">
+        Sacale una foto a un estudio, una receta, un turno o una orden — o elegí un archivo ya
+        guardado. La leemos, te decimos qué es y adónde conviene guardarla. Nada se guarda hasta
+        que vos lo confirmes.
       </p>
 
       <VeloEspera

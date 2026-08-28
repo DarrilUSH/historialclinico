@@ -212,7 +212,7 @@ export function CargadorDocumento({ onArchivoListo, className }: CargadorDocumen
             </span>
             <span className="text-lg font-semibold text-foreground chica:text-sm">Sacar foto</span>
             <span className="text-base text-muted-foreground chica:hidden">
-              Usá la cámara para fotografiar el estudio o la receta
+              Un estudio, una receta, un turno o una orden
             </span>
           </TarjetaInteractiva>
 

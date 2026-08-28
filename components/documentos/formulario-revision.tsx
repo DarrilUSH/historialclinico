@@ -193,6 +193,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { BannerRuteoDocumento } from "@/components/documentos/banner-ruteo-documento"
+import { intencionDeExtraccion, medicamentosDeExtraccion } from "@/lib/documentos/intencion"
+import { ofrecerRuteo } from "@/lib/documentos/ruteo"
 import { sugerirTitulo, tituloYaUsado } from "@/lib/documentos/sugerir-titulo"
 import {
   TEXTO_MOTIVO_DUPLICADO_SEMANTICO,
@@ -233,6 +236,18 @@ export interface FormularioRevisionProps {
    * mismos que la persona ve en `/estudios`, ningún dato nuevo.
    */
   titulosExistentes?: readonly string[]
+  /**
+   * Cuántos medicamentos se acaban de cargar desde este documento (Sprint 20),
+   * cuando se vuelve acá al terminar la cola de `/medicacion/nuevo`. `0` = no
+   * se viene de ahí.
+   *
+   * Existe para cerrar el círculo que el encargo pide: *"que la persona elija
+   * guardar solo remedios, solo el documento, o ambos"*. Al volver, la pantalla
+   * confirma lo que ya entró y deja las dos salidas a la vista, que son las que
+   * siempre estuvieron ahí: "Confirmar y guardar" (los dos) o "Cancelar" (solo
+   * los remedios).
+   */
+  medicamentosCargados?: number
 }
 
 const ESTADO_INICIAL: EstadoConfirmacion = { error: null }
@@ -244,6 +259,8 @@ const AYUDA_NO_DETECTADO = "No se detectó — completalo vos."
 const AYUDA_TITULO_SUGERIDO = "Sugerido a partir de lo que detectamos. Podés cambiarlo."
 const AYUDA_TITULO_A_COMPLETAR = "Poné un nombre para reconocerlo."
 const AYUDA_FECHA_FALTANTE = "No la encontramos — completala vos."
+/** Sprint 20: la fecha leída todavía no llegó. El cartel de arriba ofrece la salida; acá se dice por qué el campo quedó vacío. */
+const AYUDA_FECHA_FUTURA = "La que leímos todavía no llegó — poné la fecha en que se hizo."
 
 /** id del aviso de título repetido, para asociarlo al campo con `aria-describedby`. */
 const ID_AVISO_TITULO_REPETIDO = "aviso-titulo-repetido"
@@ -287,6 +304,7 @@ export function FormularioRevision({
   medicos,
   catalogoDisponible = false,
   titulosExistentes = [],
+  medicamentosCargados = 0,
 }: FormularioRevisionProps) {
   const [estadoConfirmar, enviarConfirmar, pendienteConfirmar] = useActionState(
     confirmarDocumento,
@@ -312,9 +330,34 @@ export function FormularioRevision({
   // envía hasta que una persona la complete. Con la extracción fallida entera
   // se conserva `fechaProvisional`: ahí no hay ninguna lectura que contradecir.
   const fechaExtraida = extraccion?.fecha ?? null
-  const fechaDetectada = Boolean(fechaExtraida && PATRON_FECHA.test(fechaExtraida))
+  const fechaBienFormada = Boolean(fechaExtraida && PATRON_FECHA.test(fechaExtraida))
+
+  // Sprint 20: una fecha FUTURA deja de ser un callejón sin salida.
+  //
+  // Queja textual del usuario que pidió esta función: subir algo que es futuro
+  // por naturaleza -un turno, una orden- terminaba en "la fecha del estudio no
+  // puede ser futura", sin ninguna salida. *"Si es solo para guardar cosas que
+  // pasaron, es un archivo, no una ayuda médica."*
+  //
+  // La regla NO se afloja -un estudio ya realizado no puede haberse hecho
+  // mañana, y el RPC la sigue haciendo cumplir-. Lo que cambia es que la fecha
+  // futura se trata como lo que es: una lectura que no puede ser de un estudio.
+  // El campo queda vacío (igual que cualquier fecha que no se pudo leer), y
+  // `ofrecerRuteo` levanta el cartel que pregunta si eso era un turno. Antes,
+  // el campo llegaba cargado con un valor que el `max` del input y el RPC
+  // rechazaban, y la persona no tenía ni idea de qué hacer con él.
+  const fechaFutura = Boolean(fechaBienFormada && fechaExtraida && fechaExtraida > fechaMaximaIso)
+  const fechaDetectada = fechaBienFormada && !fechaFutura
   const faltaFecha = Boolean(extraccion) && !fechaDetectada
   const fechaInicial = extraccion ? (fechaDetectada ? (fechaExtraida ?? "") : "") : fechaProvisional
+
+  // El cartel de ruteo (Sprint 20). Todo lo decide `ofrecerRuteo`
+  // (`lib/documentos/ruteo.ts`), que es puro; acá solo se juntan las señales.
+  const intencion = intencionDeExtraccion(extraccion)
+  const medicamentos = medicamentosDeExtraccion(extraccion)
+  const ofertaRuteo = extraccion
+    ? ofrecerRuteo({ intencion, fechaFutura, cantidadMedicamentos: medicamentos.length })
+    : null
 
   // Un solo campo se lleva el foco, y gana el que BLOQUEA: sin fecha no se
   // puede confirmar; sin un buen título sí -el genérico compuesto queda
@@ -424,6 +467,33 @@ export function FormularioRevision({
         </Alerta>
       )}
 
+      {medicamentosCargados > 0 && (
+        <Alerta
+          variante="exito"
+          estatica
+          titulo={
+            medicamentosCargados === 1
+              ? "Cargamos 1 medicamento"
+              : `Cargamos ${medicamentosCargados} medicamentos`
+          }
+        >
+          Ya están en tu medicación. Ahora decidí qué hacer con el papel: guardalo también como
+          documento con «Confirmar y guardar», o descartalo si solo querías los remedios.
+        </Alerta>
+      )}
+
+      {/* Sprint 20: "una foto, el lugar correcto". El cartel va ARRIBA del
+          formulario y no lo reemplaza — ver el encabezado de
+          `components/documentos/banner-ruteo-documento.tsx`. Sin oferta no se
+          renderiza nada y la pantalla es exactamente la de siempre. */}
+      {ofertaRuteo && (
+        <BannerRuteoDocumento
+          documentoId={documentoId}
+          oferta={ofertaRuteo}
+          medicamentos={ofertaRuteo.destino === "medicacion" ? medicamentos : []}
+        />
+      )}
+
       {mostrarAvisoDuplicado && duplicadoSemantico && (
         <div className="flex flex-col gap-3">
           <Alerta variante="advertencia">
@@ -506,9 +576,11 @@ export function FormularioRevision({
             ayuda={
               fechaDetectada
                 ? AYUDA_DETECTADO
-                : faltaFecha
-                  ? AYUDA_FECHA_FALTANTE
-                  : AYUDA_NO_DETECTADO
+                : fechaFutura
+                  ? AYUDA_FECHA_FUTURA
+                  : faltaFecha
+                    ? AYUDA_FECHA_FALTANTE
+                    : AYUDA_NO_DETECTADO
             }
           />
 
