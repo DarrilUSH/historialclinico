@@ -26,7 +26,18 @@ const MAX_TEXTO_CORTO = 300
 const MAX_DIRECCION = 400
 const MAX_NOTA = 600
 const MAX_NOTAS_POR_TURNO = 30
-const MAX_TURNOS = 10
+/**
+ * Tope de turnos por análisis. Era 10 hasta agosto de 2026, elegido cuando el
+ * único caso multi-turno conocido eran DOS mensajes pegados. El mensaje real
+ * de las diez sesiones de kinesiología (`hb-central-kinesiologia-10-sesiones.txt`)
+ * lo rozaba EXACTO: una serie de 12 o 20 sesiones -perfectamente normal en una
+ * indicación de rehabilitación- habría hecho fallar la validación entera y
+ * devuelto "No pudimos analizar el mensaje", perdiendo las 20. 40 cubre las
+ * series largas reales sin dejar de ser una red contra una respuesta corrupta.
+ */
+export const MAX_TURNOS = 40
+/** Serie más larga que se puede numerar sin que el valor deje de ser plausible: protege contra un `totalSesiones` disparatado, no valida negocio. */
+const MAX_NUMERO_SESION = 400
 const MAX_EXPLICACION = 500
 
 const turnoExtraidoCrudoSchema = z
@@ -47,6 +58,16 @@ const turnoExtraidoCrudoSchema = z
     notas: z
       .array(z.string({ message: "Cada nota debe ser texto." }).max(MAX_NOTA))
       .max(MAX_NOTAS_POR_TURNO, `No puede haber más de ${MAX_NOTAS_POR_TURNO} notas por turno.`),
+    numeroSesion: z
+      .number({ message: "numeroSesion debe ser un número." })
+      .int("numeroSesion debe ser un número entero.")
+      .min(0, "numeroSesion no puede ser negativo.")
+      .max(MAX_NUMERO_SESION, `numeroSesion no puede ser mayor que ${MAX_NUMERO_SESION}.`),
+    totalSesiones: z
+      .number({ message: "totalSesiones debe ser un número." })
+      .int("totalSesiones debe ser un número entero.")
+      .min(0, "totalSesiones no puede ser negativo.")
+      .max(MAX_NUMERO_SESION, `totalSesiones no puede ser mayor que ${MAX_NUMERO_SESION}.`),
   })
   .strict()
 

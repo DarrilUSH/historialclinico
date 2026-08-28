@@ -86,6 +86,7 @@ import {
 } from "@/lib/gmail/mensajes-admin"
 import { huellaYaCargadaEnPerfil, otrosPendientesConAdjuntos } from "@/lib/gmail/pendientes-admin"
 import { analizarMensajeTurno } from "@/lib/turnos/analizar-mensaje"
+import { propuestaACamposPrecargables } from "@/lib/turnos/construir-propuestas"
 import { combinarFechaHoraUshuaia, hoyIsoUshuaia } from "@/lib/turnos/fecha"
 import { validarExtraccionConPaciente } from "@/lib/validacion/documento.schema"
 
@@ -414,7 +415,10 @@ async function intentarTurno(
     lugarDireccion: propuesta.lugarDireccion,
     lugarCiudad: propuesta.lugarCiudad,
     lugarProvincia: propuesta.lugarProvincia,
-    notas: propuesta.notasPreparacion,
+    // Mismo helper que usa la precarga del formulario y la creación en lote,
+    // para que "Sesión 3/10" -cuando un correo de un solo turno la trae- no se
+    // pierda solo por entrar por el camino automático.
+    notas: propuestaACamposPrecargables(propuesta).notasPreparacion,
   })
 
   return { cargado: resultado.estado === "creado", tipo: "turno", motivos: motivosDeResultado(resultado) }

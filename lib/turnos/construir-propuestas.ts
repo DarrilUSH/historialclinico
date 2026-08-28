@@ -29,6 +29,42 @@
  *    el turno, para que revisar y guardar nunca choque con un error de "campo
  *    demasiado largo" que la persona no generó a mano.
  *
+ * ## Series de sesiones (agosto 2026): herencia de datos comunes y etiqueta
+ *
+ * El mensaje real que motivó esta ampliación asigna DIEZ sesiones de
+ * kinesiología en un solo texto: un encabezado con profesional, especialidad,
+ * centro y dirección, y después diez líneas "Sesión N/10 · <día> <fecha> -
+ * <hora>". El prompt le pide al modelo repetir los datos comunes en cada
+ * elemento (`lib/gemini/prompt-turno.ts`, punto 8), pero eso es una
+ * INSTRUCCIÓN, no una garantía: si en una corrida el modelo escribe el centro
+ * solo en el primer elemento, nueve turnos quedarían sin lugar. Por eso la
+ * herencia se vuelve a aplicar acá, determinísticamente
+ * (`heredarDatosComunes`), y con una regla estrecha a propósito:
+ *
+ * - Solo para `relacion === "varios_turnos"`, y solo desde el PRIMER turno.
+ * - Solo RELLENA campos vacíos: un turno que trae su propio profesional o su
+ *   propio centro nunca se pisa. Por eso el par del Hospital Británico (dos
+ *   mensajes distintos, cada uno completo) sale exactamente igual que antes.
+ * - Nunca toca lo que es propio de cada cita: fecha, día de la semana, hora,
+ *   número de sesión.
+ *
+ * Rellenar un hueco es estrictamente mejor que dejarlo vacío: en el peor caso
+ * -dos mensajes pegados donde el segundo de verdad no nombraba profesional-
+ * la persona ve el dato heredado en la lista de confirmación y desmarca o lo
+ * corrige después; en el caso normal -la serie de sesiones- evita nueve
+ * turnos mancos.
+ *
+ * **La etiqueta "Sesión 3/10" no necesita columna nueva.** `numeroSesion` y
+ * `totalSesiones` llegan como enteros desde el schema, se formatean acá
+ * (`etiquetaSesion`) y `propuestaACamposPrecargables` la antepone como primera
+ * línea de `notasPreparacion`. Con eso viaja sola por TODO el camino ya
+ * existente sin migrar nada: se guarda en `appointments.preparation_notes`,
+ * se ve en la tarjeta de `/turnos`, se puede editar en `/turnos/[id]/editar`, y
+ * -por ser la primera línea- sobrevive al recorte de 90 caracteres que hace
+ * `lib/turnos/recordatorios.ts` al meter la preparación en el push. Una
+ * columna `session_number` habría exigido migración, tocar RLS, arnés ×2 y
+ * cuatro pantallas, para mostrar exactamente el mismo texto.
+ *
  * ## Deuda declarada: NO se cruza `lugarNombre` contra el catálogo REFES
  *
  * El encargo de la tarea deja como BONUS (opcional, "si es simple") ofrecer
@@ -71,6 +107,26 @@ function recortar(texto: string, max: number): string {
   return texto.length > max ? texto.slice(0, max) : texto
 }
 
+/**
+ * Reconoce una línea que dice SOLO el número de sesión ("Sesión 3/10",
+ * "sesion 3 / 10", "Sesión 3."). El prompt le pide al modelo que NO ponga eso
+ * en `notas` -tiene sus propios campos-, pero si igual lo hace, la línea se
+ * descarta antes de anteponer la etiqueta canónica: sin esto la nota quedaría
+ * "Sesión 3/10\nSesión 3/10".
+ */
+const LINEA_SOLO_SESION = /^sesi[oó]n\s*\d+\s*(?:\/\s*\d+)?\s*\.?$/i
+
+/** `"Sesión 3/10"`, `"Sesión 3"`, o `""`. Un total menor que el número (ej. "Sesión 11/10") se descarta como incoherente y queda solo el número. */
+function formatearEtiquetaSesion(numeroSesion: number, totalSesiones: number): string {
+  if (numeroSesion <= 0) return ""
+  return totalSesiones >= numeroSesion ? `Sesión ${numeroSesion}/${totalSesiones}` : `Sesión ${numeroSesion}`
+}
+
+/** Entero no negativo y finito, o `0` — red contra un `numeroSesion` fraccionario o absurdo que se le escape al schema. */
+function enteroNoNegativo(valor: number): number {
+  return Number.isFinite(valor) && valor > 0 ? Math.floor(valor) : 0
+}
+
 function formatearFechaCorta(iso: string): string {
   if (!iso) return ""
   const [anio, mes, dia] = iso.split("-")
@@ -100,6 +156,10 @@ export interface CamposTurno {
   lugarCiudad: string
   lugarProvincia: string
   notasPreparacion: string
+  /** Número de esta cita dentro de una serie ("Sesión 3/10" → 3). `0` cuando el mensaje no la numera. */
+  numeroSesion: number
+  /** Total de la serie ("Sesión 3/10" → 10). `0` cuando el mensaje no lo dice. */
+  totalSesiones: number
 }
 
 /** Una propuesta lista para precargar el formulario: `CamposTurno` + avisos de revisión + un resumen de una línea. */
@@ -108,6 +168,8 @@ export interface PropuestaTurno extends CamposTurno {
   avisos: string[]
   /** Una línea para identificar esta propuesta en la lista de "otros turnos detectados". */
   resumen: string
+  /** `"Sesión 3/10"`, `"Sesión 3"`, o `""` si el mensaje no numeraba la cita. Se antepone a las notas al precargar. */
+  etiquetaSesion: string
 }
 
 export interface ResultadoAnalisisMensaje {
@@ -174,10 +236,12 @@ function camposDesdeTurnoCrudo(crudo: TurnoExtraidoCrudo, ahora: Date): CamposTu
     notasPreparacion: recortar(
       crudo.notas
         .map((nota) => nota.trim())
-        .filter((nota) => nota.length > 0)
+        .filter((nota) => nota.length > 0 && !LINEA_SOLO_SESION.test(nota))
         .join("\n"),
       MAX_NOTAS,
     ),
+    numeroSesion: enteroNoNegativo(crudo.numeroSesion),
+    totalSesiones: enteroNoNegativo(crudo.totalSesiones),
   }
 }
 
@@ -224,12 +288,18 @@ function resumenTurno(campos: CamposTurno): string {
     .filter((parte) => parte.length > 0)
     .join(" ")
   const quien = campos.medico || campos.especialidad || "sin especialidad"
-  return `${fechaHora} — ${quien}`
+  const etiqueta = formatearEtiquetaSesion(campos.numeroSesion, campos.totalSesiones)
+  return etiqueta.length > 0 ? `${etiqueta} — ${fechaHora} — ${quien}` : `${fechaHora} — ${quien}`
 }
 
 function normalizarTurnoCrudo(crudo: TurnoExtraidoCrudo, ahora: Date): PropuestaTurno {
   const campos = camposDesdeTurnoCrudo(crudo, ahora)
-  return { ...campos, avisos: generarAvisos(campos), resumen: resumenTurno(campos) }
+  return {
+    ...campos,
+    avisos: generarAvisos(campos),
+    resumen: resumenTurno(campos),
+    etiquetaSesion: formatearEtiquetaSesion(campos.numeroSesion, campos.totalSesiones),
+  }
 }
 
 const CAMPOS_VACIOS: CamposTurno = {
@@ -248,6 +318,8 @@ const CAMPOS_VACIOS: CamposTurno = {
   lugarCiudad: "",
   lugarProvincia: "",
   notasPreparacion: "",
+  numeroSesion: 0,
+  totalSesiones: 0,
 }
 
 /**
@@ -298,6 +370,10 @@ function construirFusion(crudo: AnalisisMensajeTurnoExtraido, ahora: Date): Resu
     notasPreparacion: [base.notasPreparacion, confirmacion.notasPreparacion]
       .filter((nota) => nota.length > 0)
       .join("\n"),
+    // El número de sesión es un dato del turno, no de la confirmación: gana
+    // el que exista, con prioridad de la confirmación si los dos lo traen.
+    numeroSesion: confirmacion.numeroSesion || base.numeroSesion,
+    totalSesiones: confirmacion.totalSesiones || base.totalSesiones,
   }
 
   const avisos = generarAvisos(campos)
@@ -315,7 +391,44 @@ function construirFusion(crudo: AnalisisMensajeTurnoExtraido, ahora: Date): Resu
     explicacion: crudo.explicacion,
     contradiccion,
     otrasPropuestas: [],
-    propuestaPrincipal: { ...campos, avisos, resumen: resumenTurno(campos) },
+    propuestaPrincipal: {
+      ...campos,
+      avisos,
+      resumen: resumenTurno(campos),
+      etiquetaSesion: formatearEtiquetaSesion(campos.numeroSesion, campos.totalSesiones),
+    },
+  }
+}
+
+/**
+ * Los campos del encabezado que, en una serie de sesiones, el mensaje escribe
+ * UNA sola vez y valen para todas las citas. Lo que NO está acá es lo propio
+ * de cada cita: `fechaTexto`, `diaSemanaTexto`, `horaTexto`, `numeroSesion`,
+ * `totalSesiones`.
+ *
+ * `tipoProfesional`+`profesionalTexto` y `especialidadTexto`+
+ * `especialidadInferida` se heredan como PAR, nunca sueltos: heredar el
+ * nombre sin su tipo dejaría un "estudio" clasificado como persona (o al
+ * revés), y heredar la especialidad sin su bandera de inferencia diría que un
+ * dato inferido fue explícito.
+ */
+function heredarDatosComunes(primero: TurnoExtraidoCrudo, turno: TurnoExtraidoCrudo): TurnoExtraidoCrudo {
+  const vacio = (texto: string) => texto.trim().length === 0
+
+  const heredaProfesional = turno.tipoProfesional === "ninguno" || vacio(turno.profesionalTexto)
+  const heredaEspecialidad = vacio(turno.especialidadTexto)
+
+  return {
+    ...turno,
+    tipoProfesional: heredaProfesional ? primero.tipoProfesional : turno.tipoProfesional,
+    profesionalTexto: heredaProfesional ? primero.profesionalTexto : turno.profesionalTexto,
+    especialidadTexto: heredaEspecialidad ? primero.especialidadTexto : turno.especialidadTexto,
+    especialidadInferida: heredaEspecialidad ? primero.especialidadInferida : turno.especialidadInferida,
+    lugarNombre: vacio(turno.lugarNombre) ? primero.lugarNombre : turno.lugarNombre,
+    lugarDireccion: vacio(turno.lugarDireccion) ? primero.lugarDireccion : turno.lugarDireccion,
+    lugarCiudad: vacio(turno.lugarCiudad) ? primero.lugarCiudad : turno.lugarCiudad,
+    lugarProvincia: vacio(turno.lugarProvincia) ? primero.lugarProvincia : turno.lugarProvincia,
+    notas: turno.notas.some((nota) => nota.trim().length > 0) ? turno.notas : primero.notas,
   }
 }
 
@@ -337,6 +450,7 @@ export function construirResultadoAnalisis(
         ...CAMPOS_VACIOS,
         avisos: ["No pudimos identificar ningún turno en el mensaje pegado — completá el formulario a mano."],
         resumen: "Sin datos reconocidos",
+        etiquetaSesion: "",
       },
     }
   }
@@ -345,7 +459,18 @@ export function construirResultadoAnalisis(
     return construirFusion(crudo, ahora)
   }
 
-  const normalizados = crudo.turnos.map((turno) => normalizarTurnoCrudo(turno, ahora))
+  // Serie de sesiones: los datos del encabezado que el modelo haya escrito
+  // solo en el primer elemento se rellenan en los demás ANTES de normalizar
+  // -ver "Series de sesiones" en la cabecera del archivo-. Solo rellena
+  // huecos, nunca pisa un dato propio.
+  const crudos =
+    crudo.relacion === "varios_turnos" && crudo.turnos.length > 1
+      ? crudo.turnos.map((turno, indice) =>
+          indice === 0 ? turno : heredarDatosComunes(crudo.turnos[0], turno),
+        )
+      : crudo.turnos
+
+  const normalizados = crudos.map((turno) => normalizarTurnoCrudo(turno, ahora))
 
   if (crudo.relacion === "varios_turnos" && normalizados.length > 1) {
     return {
@@ -379,8 +504,25 @@ export interface CamposPrecargablesTurno {
   notasPreparacion: string
 }
 
-/** Recorta una `PropuestaTurno` a los campos que `aplicarPrecarga` (`lib/turnos/aplicar-precarga.ts`) sabe volcar al formulario. */
+/**
+ * Recorta una `PropuestaTurno` a los campos que `aplicarPrecarga`
+ * (`lib/turnos/aplicar-precarga.ts`) sabe volcar al formulario.
+ *
+ * La etiqueta de sesión entra acá como PRIMERA LÍNEA de `notasPreparacion`:
+ * es el único punto por el que "Sesión 3/10" cruza de la propuesta al turno
+ * guardado, y por eso lo hacen igual el camino de un turno (precarga del
+ * formulario) y el de la creación en lote — ver "Series de sesiones" en la
+ * cabecera del archivo para por qué va en las notas y no en una columna nueva.
+ */
 export function propuestaACamposPrecargables(propuesta: PropuestaTurno): CamposPrecargablesTurno {
+  const notasPreparacion =
+    propuesta.etiquetaSesion.length > 0
+      ? recortar(
+          [propuesta.etiquetaSesion, propuesta.notasPreparacion].filter((parte) => parte.length > 0).join("\n"),
+          MAX_NOTAS,
+        )
+      : propuesta.notasPreparacion
+
   return {
     especialidad: propuesta.especialidad,
     medico: propuesta.medico,
@@ -390,6 +532,6 @@ export function propuestaACamposPrecargables(propuesta: PropuestaTurno): CamposP
     lugarDireccion: propuesta.lugarDireccion,
     lugarCiudad: propuesta.lugarCiudad,
     lugarProvincia: propuesta.lugarProvincia,
-    notasPreparacion: propuesta.notasPreparacion,
+    notasPreparacion,
   }
 }

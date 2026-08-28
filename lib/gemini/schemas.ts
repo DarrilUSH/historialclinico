@@ -775,12 +775,14 @@ export const TIPOS_PROFESIONAL_MENSAJE_TURNO = ['persona', 'estudio', 'ninguno']
 export type TipoProfesionalMensajeTurno = (typeof TIPOS_PROFESIONAL_MENSAJE_TURNO)[number];
 
 /**
- * Cómo se relacionan los turnos detectados en el texto pegado, cuando trae
- * más de un mensaje de WhatsApp concatenado (`tests/fixtures/mensajes-turno/README.md`
- * §"Varios mensajes en un solo paste"):
+ * Cómo se relacionan los turnos detectados en el texto pegado
+ * (`tests/fixtures/mensajes-turno/README.md` §"Varios mensajes en un solo
+ * paste" y §"Un solo mensaje con muchas sesiones"):
  * - `unico`: un solo turno, el caso más común.
- * - `varios_turnos`: DOS mensajes con el mismo template repetido, cada uno
- *   con su fecha/hora completas — son turnos DISTINTOS, hay que dividirlos.
+ * - `varios_turnos`: N turnos DISTINTOS (N ≥ 2), hay que dividirlos. Cubre
+ *   tanto varios mensajes concatenados con el mismo template como UN SOLO
+ *   mensaje que enumera una serie de sesiones ("Sesión 3/10") o una lista de
+ *   fechas bajo un encabezado común.
  * - `turno_mas_confirmacion`: un mensaje largo con contexto + un segundo
  *   mensaje corto de confirmación con los datos finales — es UN turno, hay
  *   que fusionarlos (la confirmación gana en día/hora/profesional).
@@ -868,6 +870,20 @@ function schemaTurnoExtraidoCrudo(): Schema {
           '— una ausencia de preparación no es una nota. Lista vacía si el mensaje no trae ningún aviso de este tipo.',
         items: { type: Type.STRING },
       },
+      numeroSesion: {
+        type: Type.INTEGER,
+        description:
+          'Si el mensaje numera esta cita dentro de una serie ("Sesión 3/10", "3ra sesión", "Turno 2 de 6"), ' +
+          'el número de ESTA cita (3, 3, 2 en los ejemplos). 0 si el mensaje no la numera — NUNCA inventes una ' +
+          'numeración que el texto no escribe, ni la deduzcas del orden en que aparecen las fechas.',
+      },
+      totalSesiones: {
+        type: Type.INTEGER,
+        description:
+          'El total de la serie cuando el mensaje lo dice ("Sesión 3/10" → 10, "Turno 2 de 6" → 6). 0 si el ' +
+          'mensaje numera la sesión pero no dice el total, o si no hay numeración alguna. NUNCA lo deduzcas de ' +
+          'cuántas fechas contaste vos.',
+      },
     },
     required: [
       'fechaTexto',
@@ -882,6 +898,8 @@ function schemaTurnoExtraidoCrudo(): Schema {
       'lugarCiudad',
       'lugarProvincia',
       'notas',
+      'numeroSesion',
+      'totalSesiones',
     ],
     propertyOrdering: [
       'fechaTexto',
@@ -896,6 +914,8 @@ function schemaTurnoExtraidoCrudo(): Schema {
       'lugarCiudad',
       'lugarProvincia',
       'notas',
+      'numeroSesion',
+      'totalSesiones',
     ],
   };
 }
@@ -913,9 +933,11 @@ export const SCHEMA_ANALISIS_MENSAJE_TURNO: Schema = {
     turnos: {
       type: Type.ARRAY,
       description:
-        'Un elemento por cada turno identificado, en el orden en que aparecen en el texto. Normalmente uno ' +
-        'solo. Si relacion es "turno_mas_confirmacion", EXACTAMENTE dos elementos: primero el mensaje con más ' +
-        'contexto, segundo el de confirmación.',
+        'Un elemento por cada cita con fecha propia que el texto ENUMERA, en el orden en que aparece. ' +
+        'Normalmente uno solo, pero una serie de sesiones ("Sesión 1/10 … Sesión 10/10") o una lista de fechas ' +
+        'bajo un encabezado común son N elementos, uno por fecha — repetí en CADA uno los datos comunes del ' +
+        'encabezado (profesional, especialidad, centro, dirección). Si relacion es "turno_mas_confirmacion", ' +
+        'EXACTAMENTE dos elementos: primero el mensaje con más contexto, segundo el de confirmación.',
       items: schemaTurnoExtraidoCrudo(),
     },
     relacion: {
@@ -923,14 +945,16 @@ export const SCHEMA_ANALISIS_MENSAJE_TURNO: Schema = {
       format: 'enum',
       enum: [...RELACIONES_MENSAJE_TURNO],
       description:
-        '"unico" para un solo turno (el caso más común); "varios_turnos" si el texto trae dos turnos DISTINTOS ' +
-        'pegados; "turno_mas_confirmacion" si trae un mensaje largo más su confirmación de datos finales.',
+        '"unico" para un solo turno (el caso más común); "varios_turnos" si el texto enumera dos o más citas ' +
+        'DISTINTAS, sea en mensajes pegados o en una serie de sesiones dentro de un mismo mensaje; ' +
+        '"turno_mas_confirmacion" si trae un mensaje largo más su confirmación de datos finales.',
     },
     explicacion: {
       type: Type.STRING,
       description:
-        'Una frase breve en español explicando por qué elegiste esa relación (ej: "Dos turnos con horarios ' +
-        'distintos el mismo día"). Podés dejarla genérica ("Un solo turno") cuando relacion es "unico".',
+        'Una frase breve en español explicando por qué elegiste esa relación (ej: "Diez sesiones de ' +
+        'kinesiología con el mismo profesional y distinta fecha"). Podés dejarla genérica ("Un solo turno") ' +
+        'cuando relacion es "unico".',
     },
   },
   required: ['turnos', 'relacion', 'explicacion'],
@@ -951,6 +975,10 @@ export interface TurnoExtraidoCrudo {
   lugarCiudad: string;
   lugarProvincia: string;
   notas: string[];
+  /** Número de ESTA cita dentro de una serie ("Sesión 3/10" → 3). `0` si el mensaje no la numera. */
+  numeroSesion: number;
+  /** Total de la serie ("Sesión 3/10" → 10). `0` si el mensaje no lo dice. */
+  totalSesiones: number;
 }
 
 /** Forma exacta del JSON que Gemini devuelve al usar `SCHEMA_ANALISIS_MENSAJE_TURNO` como `responseSchema`. */

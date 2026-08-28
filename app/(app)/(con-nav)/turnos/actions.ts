@@ -3,7 +3,7 @@
 /**
  * Server Actions de `/turnos` (Sprint 6, tarea 6.1 — ROADMAP_SPRINTS.md).
  *
- * Cinco acciones, todas operando sobre el PERFIL ACTIVO (`obtenerPerfilActivo()`),
+ * Seis acciones, todas operando sobre el PERFIL ACTIVO (`obtenerPerfilActivo()`),
  * nunca sobre un `perfilId` que mande el cliente -mismo criterio que
  * `estudios/actions.ts#subirDocumento`-:
  *
@@ -13,6 +13,11 @@
  *   `mensajeGmailId`: si el turno salió de un correo de la bandeja de Gmail,
  *   ese correo queda marcado como ingresado y apuntando al turno creado. Es
  *   best-effort y nunca hace fallar el alta — ver el comentario en el cuerpo.
+ * - `crearTurnosEnLote` — alta de N turnos de una vez, desde un mensaje que
+ *   asigna una serie de sesiones (agosto 2026). Mismo permiso `upload` y
+ *   mismas reglas de validación que `crearTurno`, pero devuelve un reporte
+ *   fila por fila en lugar de redirigir. Ver el bloque "Creación EN LOTE"
+ *   más abajo para las decisiones de atomicidad, duplicados y geocodificación.
  * - `actualizarTurno` — edición de los datos del turno. Exige `manage`
  *   (§6.1: "UPDATE / DELETE | dueño O can_manage"). Fecha futura NO
  *   obligatoria: se puede corregir un turno con fecha pasada.
@@ -71,8 +76,10 @@ import { revalidatePath } from "next/cache"
 import { type ClienteSupabaseServidor, esErrorDeGuarda, requerirPermiso } from "@/lib/auth/guardas"
 import { marcarMensajeResuelto } from "@/lib/gmail/mensajes-admin"
 import { obtenerPerfilActivo } from "@/lib/perfil-activo"
+import { detectarRepeticiones, type TurnoComparable } from "@/lib/turnos/duplicados"
 import { geocodificarDireccion } from "@/lib/ubicacion/geocodificacion"
 import { validarTurno, type DatosTurnoValidado } from "@/lib/validacion/turno.schema"
+import { validarLoteTurnos, type TurnoDelLote } from "@/lib/validacion/turnos-lote.schema"
 import type { EstadoTurno } from "@/types/dominio"
 
 export interface EstadoTurnoAccion {
@@ -278,6 +285,255 @@ export async function crearTurno(
 
   revalidatePath("/turnos")
   redirect("/turnos?creado=1")
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Creación EN LOTE (agosto 2026) — "un mensaje con diez sesiones"
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Un mensaje de WhatsApp puede asignar una serie entera de sesiones
+ * ("Sesión 1/10 … Sesión 10/10"). El analizador ya devuelve las diez
+ * propuestas; esta acción es la que las convierte en diez turnos de VERDAD de
+ * un solo toque, sin obligar a la persona a repetir el formulario diez veces.
+ *
+ * ## Atomicidad: inserciones individuales con reporte honesto, NO un RPC "todo o nada"
+ *
+ * La alternativa era una función SQL que insertara las N filas en una sola
+ * transacción. Se descartó, con tres motivos y en este orden:
+ *
+ * 1. **Todo-o-nada es la política PEOR para este caso.** El error más probable
+ *    de una serie no es un fallo de base: es que la primera sesión ya pasó
+ *    (la persona pega el jueves un mensaje que arrancaba el lunes) y
+ *    `exigirFechaFutura` la rechaza. Con una transacción, esa única fecha
+ *    vencida tiraría abajo las otras nueve, que son perfectamente válidas y
+ *    son justo las que la persona necesita. El encargo pide exactamente lo
+ *    contrario: "si el turno 7 falla, decir cuáles entraron y cuáles no".
+ * 2. **El lote NO es atómico en la realidad de todos modos.** Los turnos que
+ *    ya existían se SALTEAN (ver duplicados abajo), así que un resultado
+ *    parcial es el caso normal, no la excepción — un `BEGIN/COMMIT` no lo
+ *    volvería "todo o nada", solo escondería el reporte.
+ * 3. **Hay red adentro del alta.** `resolverCoordenadas` llama a Nominatim.
+ *    Meter llamadas HTTP dentro de una transacción de Postgres es sostener
+ *    locks mientras se espera a un tercero. Y un RPC nuevo además exigiría
+ *    migración, política RLS propia y dos corridas del arnés, todo para
+ *    empeorar el comportamiento observable.
+ *
+ * Cada fila entra por su cuenta, en orden, y el resultado dice fila por fila
+ * qué pasó: `creado`, `duplicado` o `error` con su motivo. La persona ve
+ * "Creamos 9 de 10" y CUÁL falta.
+ *
+ * ## Duplicados: se saltean, no se rechazan
+ *
+ * Pegar el mismo mensaje dos veces no puede dejar veinte turnos y cuarenta
+ * recordatorios. Antes de insertar nada se leen los turnos que el perfil ya
+ * tiene en el rango de fechas del lote y `detectarRepeticiones`
+ * (`lib/turnos/duplicados.ts`, puro y testeado) marca los que ya están —
+ * mismo instante + mismo profesional + misma especialidad. Esos NO se
+ * insertan y se reportan como `duplicado`, que no es un error: es la
+ * respuesta correcta. `crearTurno` (el alta de a uno, el camino común) queda
+ * INTACTO a propósito -no se le agrega esta guarda- para no cambiarle el
+ * comportamiento a un flujo que la gente ya conoce.
+ *
+ * ## Una sola geocodificación por dirección
+ *
+ * Las diez sesiones comparten la dirección del centro. Geocodificar diez
+ * veces la misma calle sería, además de inútil, una violación de la política
+ * de Nominatim ("nada de geocodificación masiva",
+ * `lib/ubicacion/geocodificacion.ts`) y diez segundos de espera serializada
+ * por su semáforo de 1 req/s. Se resuelve UNA vez por dirección distinta y se
+ * reusa el resultado -incluido el `null` de un fallo, para no reintentar diez
+ * veces algo que ya falló-.
+ */
+
+/** Qué pasó con UN turno del lote. `indice` es la posición en el array que mandó el cliente, para que la pantalla sepa qué fila marcar. */
+export interface ResultadoTurnoDelLote {
+  indice: number
+  estado: "creado" | "duplicado" | "error"
+  /** Motivo en castellano, solo cuando `estado === "error"`. */
+  error: string | null
+}
+
+export interface ResultadoLoteTurnos {
+  /** Error GLOBAL que impidió intentar siquiera (sin perfil, sin permiso, payload inválido). `null` si se procesó el lote. */
+  error: string | null
+  resultados: ResultadoTurnoDelLote[]
+  creados: number
+  duplicados: number
+  fallidos: number
+}
+
+const ERROR_INESPERADO_LOTE =
+  "Ocurrió un problema y no pudimos crear los turnos. Probá de nuevo en unos minutos."
+
+const ERROR_FILA_INESPERADO = "No pudimos guardarlo. Probá cargándolo a mano."
+
+function loteSoloConError(error: string): ResultadoLoteTurnos {
+  return { error, resultados: [], creados: 0, duplicados: 0, fallidos: 0 }
+}
+
+/** Clave de agrupación para geocodificar una sola vez por dirección distinta del lote. */
+function claveDeDireccion(datos: DatosTurnoValidado): string {
+  return [datos.lugarDireccion ?? "", datos.lugarCiudad ?? "", datos.lugarProvincia ?? ""].join("|")
+}
+
+/**
+ * Crea de una sola vez los turnos que la persona marcó en la lista de
+ * confirmación del analizador (`components/turnos/analizador-mensaje-turno.tsx`).
+ *
+ * Recibe un objeto JSON, no un `FormData`: el llamador es un Client Component
+ * que tiene N turnos en estado de React, no un `<form>` (mismo patrón que
+ * `candidatosLugarAction` y `guardarSuscripcion`). Por eso el parámetro es
+ * `unknown` y lo primero que pasa es la validación de forma —nunca se confía
+ * en que el cliente mandó lo que dice mandar—, y el perfil sale de la cookie
+ * activa, jamás del payload.
+ *
+ * No redirige ni lanza: devuelve el reporte para que la pantalla lo muestre.
+ * Ver el bloque de arriba para las decisiones de atomicidad y duplicados.
+ */
+export async function crearTurnosEnLote(datos: unknown): Promise<ResultadoLoteTurnos> {
+  try {
+    const activo = await obtenerPerfilActivo()
+    if (!activo) {
+      return loteSoloConError(SIN_PERFIL_ACTIVO)
+    }
+
+    const validacionLote = validarLoteTurnos(datos)
+    if (!validacionLote.ok) {
+      return loteSoloConError(validacionLote.error)
+    }
+
+    const { supabase } = await requerirPermiso(activo.perfil.id, "upload", {
+      siNoHaySesion: "lanzar",
+    })
+
+    // 1. Validar TODAS las filas primero, con las mismas reglas que el alta de
+    //    a uno. Las que no pasan quedan con su motivo y no se vuelven a mirar.
+    const validados = validacionLote.turnos.map((turno: TurnoDelLote) =>
+      validarTurno(turno, { exigirFechaFutura: true }),
+    )
+
+    // 2. Duplicados. Una sola consulta para todo el lote, acotada al rango de
+    //    fechas de los turnos válidos —no se lee la agenda entera del perfil—.
+    const comparables = new Map<number, TurnoComparable>()
+    validados.forEach((validacion, indice) => {
+      if (validacion.ok) {
+        comparables.set(indice, {
+          fechaHoraIso: validacion.datos.fechaHoraIso,
+          especialidad: validacion.datos.especialidad,
+          medico: validacion.datos.medico ?? null,
+        })
+      }
+    })
+
+    let existentes: TurnoComparable[] = []
+    const instantes = [...comparables.values()].map((turno) => turno.fechaHoraIso).sort()
+    if (instantes.length > 0) {
+      const { data, error } = await supabase
+        .from("appointments")
+        .select("appointment_date, specialty, doctor_name")
+        .eq("profile_id", activo.perfil.id)
+        .gte("appointment_date", instantes[0])
+        .lte("appointment_date", instantes[instantes.length - 1])
+
+      if (error) {
+        // No poder LEER la agenda no puede impedir crear los turnos: se sigue
+        // sin la guarda de duplicados (el peor caso es un turno repetido, que
+        // la persona borra) en vez de dejarla sin ninguno.
+        console.error("[turnos] No se pudieron leer los turnos existentes para detectar repetidos:", error)
+      } else {
+        existentes = (data ?? []).map((fila) => ({
+          fechaHoraIso: fila.appointment_date,
+          especialidad: fila.specialty,
+          medico: fila.doctor_name,
+        }))
+      }
+    }
+
+    // `detectarRepeticiones` razona sobre posiciones de SU array, que solo
+    // tiene los turnos válidos: `indicesComparables` traduce esas posiciones
+    // de vuelta al índice original que espera el cliente.
+    const indicesComparables = [...comparables.keys()]
+    const { yaExistian, repetidosEnElLote } = detectarRepeticiones(
+      indicesComparables.map((indice) => comparables.get(indice)!),
+      existentes,
+    )
+    const duplicadosPorIndice = new Set(
+      indicesComparables.filter(
+        (_indiceOriginal, posicion) => yaExistian.has(posicion) || repetidosEnElLote.has(posicion),
+      ),
+    )
+
+    // 3. Insertar. Una fila por vez, en orden, sin abortar por un fallo.
+    const coordenadasPorDireccion = new Map<string, { latitud: number | null; longitud: number | null }>()
+    const resultados: ResultadoTurnoDelLote[] = []
+
+    for (let indice = 0; indice < validados.length; indice += 1) {
+      const validacion = validados[indice]
+
+      if (!validacion.ok) {
+        resultados.push({ indice, estado: "error", error: validacion.error })
+        continue
+      }
+      if (duplicadosPorIndice.has(indice)) {
+        resultados.push({ indice, estado: "duplicado", error: null })
+        continue
+      }
+
+      const { datos } = validacion
+      const clave = claveDeDireccion(datos)
+      let coordenadas = coordenadasPorDireccion.get(clave)
+      if (!coordenadas) {
+        coordenadas = await resolverCoordenadas(datos)
+        coordenadasPorDireccion.set(clave, coordenadas)
+      }
+
+      const { error } = await supabase.from("appointments").insert({
+        profile_id: activo.perfil.id,
+        specialty: datos.especialidad,
+        doctor_name: datos.medico ?? null,
+        // El lote nunca vincula un médico del directorio: la propuesta de la
+        // IA no elige uno, y adivinarlo diez veces seguidas es exactamente el
+        // tipo de decisión que esta app deja en manos de la persona.
+        doctor_id: null,
+        appointment_date: datos.fechaHoraIso,
+        location_name: datos.lugarNombre ?? null,
+        location_address: datos.lugarDireccion ?? null,
+        location_city: datos.lugarCiudad ?? null,
+        location_province: datos.lugarProvincia ?? null,
+        latitude: coordenadas.latitud,
+        longitude: coordenadas.longitud,
+        preparation_notes: datos.notasPreparacion ?? null,
+      })
+
+      if (error) {
+        console.error(`[turnos] Fallo al crear el turno ${indice + 1} del lote:`, error)
+        resultados.push({ indice, estado: "error", error: ERROR_FILA_INESPERADO })
+        continue
+      }
+
+      resultados.push({ indice, estado: "creado", error: null })
+    }
+
+    const creados = resultados.filter((fila) => fila.estado === "creado").length
+    if (creados > 0) {
+      revalidatePath("/turnos")
+      revalidatePath("/inicio")
+    }
+
+    return {
+      error: null,
+      resultados,
+      creados,
+      duplicados: resultados.filter((fila) => fila.estado === "duplicado").length,
+      fallidos: resultados.filter((fila) => fila.estado === "error").length,
+    }
+  } catch (error) {
+    if (esErrorDeGuarda(error)) {
+      return loteSoloConError(error.message)
+    }
+    console.error("[turnos] Fallo inesperado al crear turnos en lote:", error)
+    return loteSoloConError(ERROR_INESPERADO_LOTE)
+  }
 }
 
 /**

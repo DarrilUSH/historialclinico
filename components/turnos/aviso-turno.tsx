@@ -17,6 +17,22 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
 
+/**
+ * `?creados=10` (creación en lote desde un mensaje con varias sesiones,
+ * agosto 2026) es el único param que lleva un VALOR con significado: la
+ * cantidad. Se lee aparte porque el resto son banderas `=1` y el título tiene
+ * que decir el número -"10 turnos guardados" es la confirmación que la persona
+ * necesita para saber que no se perdió ninguna sesión-.
+ */
+const PARAM_LOTE = "creados"
+
+/** Cantidad plausible de turnos de un lote, o `null`. Un valor manipulado en la URL no pinta ningún toast en vez de pintar uno absurdo. */
+function cantidadCreada(valor: string | null): number | null {
+  if (valor === null) return null
+  const numero = Number(valor)
+  return Number.isInteger(numero) && numero > 0 && numero <= 100 ? numero : null
+}
+
 const MENSAJE_POR_PARAM: Record<string, { titulo: string; descripcion: string }> = {
   creado: { titulo: "Turno guardado", descripcion: "Ya lo vas a ver en tus próximos turnos." },
   editado: { titulo: "Turno actualizado", descripcion: "Guardamos los cambios." },
@@ -31,6 +47,15 @@ export function AvisoTurno() {
   const pathname = usePathname()
 
   React.useEffect(() => {
+    const cantidad = cantidadCreada(searchParams.get(PARAM_LOTE))
+    if (cantidad !== null) {
+      toast.success(cantidad === 1 ? "Turno guardado" : `${cantidad} turnos guardados`, {
+        description: "Ya los vas a ver en tus próximos turnos, cada uno con su recordatorio.",
+      })
+      router.replace(pathname)
+      return
+    }
+
     const clave = Object.keys(MENSAJE_POR_PARAM).find((param) => searchParams.get(param))
     if (!clave) return
 

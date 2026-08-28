@@ -31,6 +31,32 @@ ejemplos nuevos sin pasar por la misma limpieza.
 (TCba) y aún así usan templates distintos — no alcanza con "aprender el
 formato de una institución"; cada mensaje se analiza por su contenido.
 
+## Un solo mensaje con MUCHAS citas (agosto 2026)
+
+Los ocho casos de arriba son todos de UNA cita. Faltaba el caso que rompió en
+producción: **un solo mensaje que asigna una serie entera de sesiones.** Una
+usuaria pegó el mensaje de sus diez sesiones de kinesiología y se cargó UN
+turno — las otras nueve no existieron para ningún recordatorio.
+
+El primero de estos cuatro es real (anonimizado con el mismo criterio que los
+de arriba); los otros tres son **sintéticos**, escritos para cubrir formatos de
+enumeración distintos y provincias distintas, y están marcados como tales para
+que nadie los lea como evidencia de campo.
+
+| Archivo | Origen | Qué enseña |
+|---|---|---|
+| `hb-central-kinesiologia-10-sesiones.txt` | **REAL** (HB Central) | **El caso que motivó todo.** Encabezado con profesional/especialidad/centro/consultorio/dirección UNA sola vez, y debajo diez bloques `Sesión N/10` + `<Día> <fecha> - <hora>` separados por líneas de ruido ("Cancelar turno"). Debe dar **10 turnos**, cada uno con SU fecha y hora, todos heredando el encabezado, y cada uno etiquetado `Sesión N/10`. Las horas cambian entre sesiones (11:00, 12:30, 09:30, 08:30): copiar la del encabezado sería tan malo como perder las sesiones |
+| `instituto-comahue-6-sesiones.txt` | Sintético (Neuquén) | La MISMA idea con otra sintaxis de numeración (`Sesión Nº 1 de 6 -> 08/09/2026 09:15`, flecha y fecha+hora en la misma línea) y otro formato de nombre (`LIC. RUIZ DIAZ, GABRIELA`). Debe dar **6 turnos** — prueba que la detección no está atada al literal "Sesión N/M" |
+| `centro-parana-lista-de-fechas.txt` | Sintético (Entre Ríos) | Enumeración **sin numerar**: `Próximos turnos:` y cuatro viñetas de fecha + hora, con el profesional y el domicilio en prosa alrededor. Debe dar **4 turnos** SIN etiqueta de sesión inventada — el analizador no numera lo que el mensaje no numeró |
+| `sanatorio-cuyo-reprogramado.txt` | Sintético (Mendoza) | **El contraejemplo, tan importante como los otros tres.** Dos fechas escritas (la original y la nueva) y UNA sola cita: debe dar **1 turno**, con la fecha NUEVA. Es el caso que impide que "ante la duda, dividí" se convierta en "cualquier texto con dos fechas son dos turnos" |
+
+**La regla que los cuatro fijan juntos** (y que está escrita en el punto 8 de
+`lib/gemini/prompt-turno.ts`): lo que se cuenta no son fechas escritas sino
+citas que **van a ocurrir**. Diez fechas que CONVIVEN son diez turnos; dos
+fechas donde una PISA a la otra son un turno. `scripts/test-analizar-mensaje.mjs`
+verifica la cantidad exacta de cada uno contra el Gemini real, y es el único
+chequeo con veredicto duro de ese script.
+
 ## Varios mensajes en un solo paste: ¿dividir o fusionar?
 
 El usuario va a pegar más de un mensaje junto en dos escenarios REALES y
@@ -50,3 +76,14 @@ Heurística: mismo remitente/institución + uno de los mensajes es claramente
 de confirmación/datos finales → fusionar; mismo template repetido con
 fecha+hora completas cada uno → dividir. Ante la duda, preguntar mostrando
 lo que entendió.
+
+**Importante para la fusión** (aprendido al generalizar el punto 8 del prompt
+en agosto de 2026): en el caso de fusionar, el análisis tiene que devolver las
+DOS lecturas -`relacion: "turno_mas_confirmacion"` con dos elementos-, no un
+elemento ya fusionado. La fusión la hace
+`lib/turnos/construir-propuestas.ts#construirFusion`, que es determinística y
+además es la que AVISA cuando las dos fechas no coincidían ("el primer mensaje
+decía 14/07 y la confirmación dice 26/05 — revisá cuál es"). Si el modelo
+fusiona por su cuenta y devuelve un solo elemento, el resultado se ve bien
+pero esa advertencia se pierde en silencio, que es justo lo que el par de Casa
+Salud existe para impedir.

@@ -20,6 +20,8 @@ function turno(cambios: Partial<TurnoExtraidoCrudo>): TurnoExtraidoCrudo {
     lugarCiudad: "",
     lugarProvincia: "",
     notas: [],
+    numeroSesion: 0,
+    totalSesiones: 0,
     ...cambios,
   }
 }
@@ -360,5 +362,264 @@ describe("propuestaACamposPrecargables", () => {
         "notasPreparacion",
       ].sort(),
     )
+  })
+})
+
+/* ══════════════════════════════════════════════════════════════════════════ *
+ *  Series de sesiones: un solo mensaje que asigna N citas (agosto 2026)
+ *
+ *  El caso real: un mensaje con DIEZ sesiones de kinesiología entraba como UN
+ *  turno. Estos tests fijan el contrato de la capa pura ante la respuesta que
+ *  Gemini devuelve para ese mensaje (SIMULADA acá; contra el Gemini real la
+ *  verifica `scripts/test-analizar-mensaje.mjs`, que además chequea la
+ *  cantidad exacta de turnos por fixture).
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** Encabezado común de la serie de kinesiología — los datos que el mensaje escribe UNA sola vez. */
+const ENCABEZADO_KINE = {
+  tipoProfesional: "persona" as const,
+  profesionalTexto: "BUET DAIANA EDITH",
+  especialidadTexto: "SESION DE KINESIOLOGIA COMPLEJA PARA COLUMNA REHABILITACION",
+  lugarNombre: "HB Central",
+  lugarDireccion: "Av. Entre Ríos 2142",
+}
+
+/** Las 10 sesiones del mensaje real, con los datos comunes repetidos en cada una (lo que el prompt le pide al modelo). */
+function serieDeDiezSesiones(): AnalisisMensajeTurnoExtraido {
+  const fechas: [string, string, string][] = [
+    ["21/08/2026", "Viernes", "11:00"],
+    ["24/08/2026", "Lunes", "12:30"],
+    ["25/08/2026", "Martes", "11:00"],
+    ["26/08/2026", "Miércoles", "12:30"],
+    ["27/08/2026", "Jueves", "11:00"],
+    ["28/08/2026", "Viernes", "09:30"],
+    ["31/08/2026", "Lunes", "11:00"],
+    ["01/09/2026", "Martes", "11:00"],
+    ["02/09/2026", "Miércoles", "08:30"],
+    ["03/09/2026", "Jueves", "08:30"],
+  ]
+
+  return {
+    relacion: "varios_turnos",
+    explicacion: "Diez sesiones de kinesiología con el mismo profesional y distinta fecha.",
+    turnos: fechas.map(([fechaTexto, diaSemanaTexto, horaTexto], indice) =>
+      turno({
+        ...ENCABEZADO_KINE,
+        fechaTexto,
+        diaSemanaTexto,
+        horaTexto,
+        numeroSesion: indice + 1,
+        totalSesiones: 10,
+      }),
+    ),
+  }
+}
+
+describe("construirResultadoAnalisis — serie de sesiones", () => {
+  it("un mensaje con diez sesiones da DIEZ propuestas, cada una con SU fecha y SU hora", () => {
+    const resultado = construirResultadoAnalisis(serieDeDiezSesiones(), AHORA)
+
+    expect(resultado.relacion).toBe("varios_turnos")
+    const propuestas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
+    expect(propuestas).toHaveLength(10)
+
+    expect(propuestas.map((p) => p.fecha)).toEqual([
+      "2026-08-21",
+      "2026-08-24",
+      "2026-08-25",
+      "2026-08-26",
+      "2026-08-27",
+      "2026-08-28",
+      "2026-08-31",
+      "2026-09-01",
+      "2026-09-02",
+      "2026-09-03",
+    ])
+    expect(propuestas.map((p) => p.hora)).toEqual([
+      "11:00",
+      "12:30",
+      "11:00",
+      "12:30",
+      "11:00",
+      "09:30",
+      "11:00",
+      "11:00",
+      "08:30",
+      "08:30",
+    ])
+    // Las diez fechas caen en el día de la semana que decía el mensaje.
+    expect(propuestas.every((p) => p.discrepanciaDiaSemana === false)).toBe(true)
+  })
+
+  it("cada sesión queda etiquetada con su número, y la etiqueta encabeza las notas al precargar", () => {
+    const resultado = construirResultadoAnalisis(serieDeDiezSesiones(), AHORA)
+    const propuestas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
+
+    expect(propuestas.map((p) => p.etiquetaSesion)).toEqual([
+      "Sesión 1/10",
+      "Sesión 2/10",
+      "Sesión 3/10",
+      "Sesión 4/10",
+      "Sesión 5/10",
+      "Sesión 6/10",
+      "Sesión 7/10",
+      "Sesión 8/10",
+      "Sesión 9/10",
+      "Sesión 10/10",
+    ])
+
+    // La etiqueta es la PRIMERA línea de las notas: así viaja al turno guardado
+    // sin columna nueva, y sobrevive al recorte del texto del recordatorio.
+    expect(propuestaACamposPrecargables(propuestas[2]).notasPreparacion.split("\n")[0]).toBe("Sesión 3/10")
+    expect(propuestas[2].resumen).toContain("Sesión 3/10")
+  })
+
+  it("el profesional, la especialidad y el lugar son los mismos en las diez", () => {
+    const resultado = construirResultadoAnalisis(serieDeDiezSesiones(), AHORA)
+    const propuestas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
+
+    expect(new Set(propuestas.map((p) => p.medico))).toEqual(new Set(["BUET DAIANA EDITH"]))
+    expect(new Set(propuestas.map((p) => p.lugarNombre))).toEqual(new Set(["HB Central"]))
+    expect(new Set(propuestas.map((p) => p.lugarDireccion))).toEqual(new Set(["Av. Entre Ríos 2142"]))
+    expect(propuestas.every((p) => p.especialidad.length > 0)).toBe(true)
+  })
+
+  it("hereda del primer turno los datos comunes que el modelo escribió UNA sola vez", () => {
+    // El peor caso del modelo: pone el encabezado solo en el primer elemento y
+    // deja los otros dos con nada más que su fecha y su hora.
+    const crudo: AnalisisMensajeTurnoExtraido = {
+      relacion: "varios_turnos",
+      explicacion: "Tres sesiones.",
+      turnos: [
+        turno({
+          ...ENCABEZADO_KINE,
+          fechaTexto: "21/08/2026",
+          horaTexto: "11:00",
+          numeroSesion: 1,
+          totalSesiones: 3,
+          notas: ["Traer la orden médica."],
+        }),
+        turno({ fechaTexto: "24/08/2026", horaTexto: "12:30", numeroSesion: 2, totalSesiones: 3 }),
+        turno({ fechaTexto: "25/08/2026", horaTexto: "11:00", numeroSesion: 3, totalSesiones: 3 }),
+      ],
+    }
+
+    const resultado = construirResultadoAnalisis(crudo, AHORA)
+    const propuestas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
+
+    expect(propuestas).toHaveLength(3)
+    for (const propuesta of propuestas) {
+      expect(propuesta.medico).toBe("BUET DAIANA EDITH")
+      expect(propuesta.lugarNombre).toBe("HB Central")
+      expect(propuesta.lugarDireccion).toBe("Av. Entre Ríos 2142")
+      expect(propuesta.especialidad.length).toBeGreaterThan(0)
+      expect(propuesta.notasPreparacion).toContain("Traer la orden médica.")
+    }
+    // Lo propio de cada cita NO se hereda.
+    expect(propuestas.map((p) => p.fecha)).toEqual(["2026-08-21", "2026-08-24", "2026-08-25"])
+    expect(propuestas.map((p) => p.hora)).toEqual(["11:00", "12:30", "11:00"])
+    expect(propuestas.map((p) => p.etiquetaSesion)).toEqual(["Sesión 1/3", "Sesión 2/3", "Sesión 3/3"])
+  })
+
+  it("la herencia NUNCA pisa un dato propio: dos turnos completos y distintos salen intactos", () => {
+    // El par del Hospital Británico: dos mensajes distintos, cada uno con TODO.
+    const crudo: AnalisisMensajeTurnoExtraido = {
+      relacion: "varios_turnos",
+      explicacion: "Dos turnos con horarios distintos el mismo día.",
+      turnos: [
+        turno({
+          fechaTexto: "14/08/2026",
+          horaTexto: "11:30",
+          tipoProfesional: "estudio",
+          profesionalTexto: "MAMOGRAFIA MAMOGRAFIA",
+          lugarNombre: "MICROCEN",
+        }),
+        turno({
+          fechaTexto: "14/08/2026",
+          horaTexto: "11:55",
+          tipoProfesional: "persona",
+          profesionalTexto: "VIDALES VALERIA",
+          lugarNombre: "MICROCEN",
+        }),
+      ],
+    }
+
+    const resultado = construirResultadoAnalisis(crudo, AHORA)
+    const [primera, segunda] = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
+
+    expect(primera.esEstudioNoProfesional).toBe(true)
+    expect(primera.medico).toBe("")
+    // El segundo NO heredó el "estudio" del primero: trae su propia persona.
+    expect(segunda.esEstudioNoProfesional).toBe(false)
+    expect(segunda.medico.length).toBeGreaterThan(0)
+    expect(segunda.hora).toBe("11:55")
+  })
+
+  it("una lista de fechas sin numerar da N propuestas sin etiqueta de sesión inventada", () => {
+    const crudo: AnalisisMensajeTurnoExtraido = {
+      relacion: "varios_turnos",
+      explicacion: "Cuatro fechas de fonoaudiología.",
+      turnos: ["15/09/2026", "22/09/2026", "29/09/2026", "06/10/2026"].map((fechaTexto) =>
+        turno({
+          fechaTexto,
+          horaTexto: "16:00",
+          tipoProfesional: "persona",
+          profesionalTexto: "Lic. Marta Sosa",
+          especialidadTexto: "Fonoaudiología",
+        }),
+      ),
+    }
+
+    const resultado = construirResultadoAnalisis(crudo, AHORA)
+    const propuestas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
+
+    expect(propuestas).toHaveLength(4)
+    expect(propuestas.every((p) => p.etiquetaSesion === "")).toBe(true)
+    // Sin etiqueta, las notas quedan tal cual: nada se antepone.
+    expect(propuestaACamposPrecargables(propuestas[0]).notasPreparacion).toBe("")
+  })
+
+  it("no duplica el número de sesión si el modelo igual lo metió en las notas", () => {
+    const crudo: AnalisisMensajeTurnoExtraido = {
+      relacion: "unico",
+      explicacion: "",
+      turnos: [
+        turno({
+          fechaTexto: "25/08/2026",
+          horaTexto: "11:00",
+          numeroSesion: 3,
+          totalSesiones: 10,
+          notas: ["Sesión 3/10", "Traer la orden médica."],
+        }),
+      ],
+    }
+
+    const propuesta = construirResultadoAnalisis(crudo, AHORA).propuestaPrincipal
+    expect(propuesta.notasPreparacion).toBe("Traer la orden médica.")
+    expect(propuestaACamposPrecargables(propuesta).notasPreparacion).toBe(
+      "Sesión 3/10\nTraer la orden médica.",
+    )
+  })
+
+  it("un total incoherente (Sesión 11/10) deja solo el número, sin inventar un total", () => {
+    const crudo: AnalisisMensajeTurnoExtraido = {
+      relacion: "unico",
+      explicacion: "",
+      turnos: [turno({ fechaTexto: "25/08/2026", horaTexto: "11:00", numeroSesion: 11, totalSesiones: 10 })],
+    }
+
+    expect(construirResultadoAnalisis(crudo, AHORA).propuestaPrincipal.etiquetaSesion).toBe("Sesión 11")
+  })
+
+  it("varios_turnos con un solo elemento degrada a único (la pantalla no queda en modo lote con una fila)", () => {
+    const crudo: AnalisisMensajeTurnoExtraido = {
+      relacion: "varios_turnos",
+      explicacion: "Inconsistente: dijo varios y trajo uno.",
+      turnos: [turno({ fechaTexto: "25/08/2026", horaTexto: "11:00" })],
+    }
+
+    const resultado = construirResultadoAnalisis(crudo, AHORA)
+    expect(resultado.relacion).toBe("unico")
+    expect(resultado.otrasPropuestas).toEqual([])
   })
 })

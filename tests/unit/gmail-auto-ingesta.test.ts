@@ -164,6 +164,9 @@ const PROPUESTA_LIMPIA: PropuestaTurno = {
   lugarCiudad: "Ushuaia",
   lugarProvincia: "Tierra del Fuego",
   notasPreparacion: "",
+  numeroSesion: 0,
+  totalSesiones: 0,
+  etiquetaSesion: "",
   avisos: [],
   resumen: "25/08/2026 14:30 — Dra. Pérez",
 }

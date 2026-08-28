@@ -32,8 +32,29 @@ const FORMATO_FECHA_CORTA = new Intl.DateTimeFormat("es-AR", {
   month: "short",
 })
 
+/**
+ * "martes 25 de agosto de 2026". CON día de la semana, a diferencia de
+ * `FORMATO_FECHA_LARGA`: se usa en la lista de confirmación de un mensaje con
+ * varias sesiones (`components/turnos/analizador-mensaje-turno.tsx`), donde
+ * diez fechas seguidas del mismo mes se distinguen mucho mejor por el día de
+ * la semana que por el número, y donde además es la señal que deja detectar
+ * de un vistazo que una sesión cayó en un día raro.
+ */
+const FORMATO_FECHA_CON_DIA = new Intl.DateTimeFormat("es-AR", {
+  timeZone: ZONA_HORARIA_TURNOS,
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+})
+
 export function formatearFechaLargaTurno(fechaIso: string): string {
   return FORMATO_FECHA_LARGA.format(new Date(fechaIso))
+}
+
+/** "martes 25 de agosto de 2026", sin la coma que `es-AR` mete después del día de la semana. */
+export function formatearFechaConDiaTurno(fechaIso: string): string {
+  return FORMATO_FECHA_CON_DIA.format(new Date(fechaIso)).replace(",", "")
 }
 
 export function formatearFechaCortaTurno(fechaIso: string): string {

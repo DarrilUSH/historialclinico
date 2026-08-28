@@ -28,6 +28,8 @@ function turnoValido(): TurnoExtraidoCrudo {
     lugarCiudad: "",
     lugarProvincia: "",
     notas: ["Asistir 15 minutos antes con orden médica."],
+    numeroSesion: 0,
+    totalSesiones: 0,
   }
 }
 
@@ -112,5 +114,63 @@ describe("validarAnalisisMensajeTurno", () => {
       expect(textoErrores).not.toContain("12345678")
       expect(textoErrores).not.toContain("PEREZ")
     }
+  })
+})
+
+/* ══════════════════════════════════════════════════════════════════════════ *
+ *  Series largas y número de sesión (agosto 2026)
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+describe("AnalisisMensajeTurnoSchema — series de sesiones", () => {
+  /** Un análisis con `cantidad` turnos, todos válidos. */
+  function analisisConTurnos(cantidad: number): AnalisisMensajeTurnoExtraido {
+    return {
+      relacion: "varios_turnos",
+      explicacion: `${cantidad} sesiones.`,
+      turnos: Array.from({ length: cantidad }, (_, indice) => ({
+        ...turnoValido(),
+        numeroSesion: indice + 1,
+        totalSesiones: cantidad,
+      })),
+    }
+  }
+
+  it("acepta las DIEZ sesiones del mensaje real de kinesiología", () => {
+    expect(validarAnalisisMensajeTurno(analisisConTurnos(10)).ok).toBe(true)
+  })
+
+  it("acepta una serie larga de 40 — el tope viejo de 10 habría tirado abajo el análisis entero", () => {
+    expect(validarAnalisisMensajeTurno(analisisConTurnos(20)).ok).toBe(true)
+    expect(validarAnalisisMensajeTurno(analisisConTurnos(40)).ok).toBe(true)
+  })
+
+  it("rechaza una cantidad de turnos absurda (red contra una respuesta corrupta)", () => {
+    expect(validarAnalisisMensajeTurno(analisisConTurnos(41)).ok).toBe(false)
+  })
+
+  it("rechaza numeroSesion que no sea un entero no negativo", () => {
+    for (const valor of [-1, 1.5, "3", null]) {
+      const invalido = {
+        ...analisisValido(),
+        turnos: [{ ...turnoValido(), numeroSesion: valor as never }],
+      }
+      expect(validarAnalisisMensajeTurno(invalido).ok).toBe(false)
+    }
+  })
+
+  it("rechaza el análisis si falta numeroSesion o totalSesiones", () => {
+    for (const campo of ["numeroSesion", "totalSesiones"]) {
+      const incompleto: Record<string, unknown> = { ...turnoValido() }
+      delete incompleto[campo]
+      expect(validarAnalisisMensajeTurno({ ...analisisValido(), turnos: [incompleto] }).ok).toBe(false)
+    }
+  })
+
+  it("0/0 es válido: es como se dice 'este mensaje no numera la cita'", () => {
+    const sinNumerar = {
+      ...analisisValido(),
+      turnos: [{ ...turnoValido(), numeroSesion: 0, totalSesiones: 0 }],
+    }
+    expect(validarAnalisisMensajeTurno(sinNumerar).ok).toBe(true)
   })
 })

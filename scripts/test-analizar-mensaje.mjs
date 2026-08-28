@@ -1,21 +1,28 @@
 #!/usr/bin/env node
 /**
  * Prueba end-to-end REAL de `lib/turnos/analizar-mensaje.ts` contra la API de
- * Gemini, usando los 8 fixtures de `tests/fixtures/mensajes-turno/` (Sprint
- * 16, tarea 16.4).
+ * Gemini, usando los fixtures de `tests/fixtures/mensajes-turno/` (Sprint
+ * 16, tarea 16.4; ampliado en agosto de 2026 con los mensajes multi-turno).
  *
  * Qué hace:
  *   1. Carga `.env.local` a mano (mismo parser que `scripts/test-gemini.mjs`).
  *      NUNCA imprime la clave.
- *   2. Corre los 8 fixtures individuales contra `analizarMensajeTurno` (el
+ *   2. Corre los fixtures individuales contra `analizarMensajeTurno` (el
  *      orquestador REAL: prompt real + `SCHEMA_ANALISIS_MENSAJE_TURNO` real +
  *      validación Zod real + la capa pura de normalización real).
- *   3. Corre el par de Casa Salud JUNTO (fusión esperada) y el par del
+ *   3. Corre los fixtures MULTI-TURNO verificando la CANTIDAD de turnos
+ *      devueltos contra la esperada -el único chequeo con veredicto duro:
+ *      es el bug de "diez sesiones, un turno" el que se está previniendo- y
+ *      lista las etiquetas de sesión.
+ *   4. Corre el par de Casa Salud JUNTO (fusión esperada) y el par del
  *      Hospital Británico JUNTO (división esperada).
- *   4. Corre el fixture de la Clínica San Jorge DOS VECES para verificar
+ *   5. Corre el fixture de la Clínica San Jorge DOS VECES para verificar
  *      estructura estable entre llamadas (mismo criterio que la tarea 10.3).
- *   5. Imprime una tabla mensaje → qué extrajo (fecha/hora/profesional/
+ *   6. Imprime una tabla mensaje → qué extrajo (fecha/hora/profesional/
  *      especialidad/lugar/flags) para pegar en el resumen de entrega.
+ *
+ * UNA llamada a Gemini por mensaje analizado, nunca una por sesión: los diez
+ * turnos del fixture de kinesiología salen de una sola llamada.
  *
  * Uso:
  *   node scripts/test-analizar-mensaje.mjs
@@ -100,6 +107,7 @@ function leerFixture(nombre) {
 
 function resumenPropuesta(p) {
   const flags = [];
+  if (p.etiquetaSesion) flags.push(p.etiquetaSesion);
   if (p.anioInferido) flags.push('año inferido');
   if (p.discrepanciaDiaSemana) flags.push('DISCREPANCIA día semana');
   if (p.especialidadInferida) flags.push('especialidad inferida');
@@ -171,10 +179,47 @@ const FIXTURES_INDIVIDUALES = [
   'casa-salud-confirmacion.txt',
   'centro-loria-sin-anio.txt',
   'tcba-salguero-puncion.txt',
+  'sanatorio-cuyo-reprogramado.txt',
 ];
 
 for (const nombre of FIXTURES_INDIVIDUALES) {
   await correr(`FIXTURE INDIVIDUAL: ${nombre}`, leerFixture(nombre));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 3 bis. Mensajes MULTI-TURNO (agosto 2026): un solo mensaje, varias citas
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cada entrada declara cuántos turnos TIENE que devolver el análisis. Es el
+ * único chequeo con veredicto duro de este script -el resto imprime para que
+ * una persona lea-: proponer de menos es exactamente el bug que estos
+ * fixtures existen para no repetir (diez sesiones entrando como un turno).
+ */
+const FIXTURES_MULTITURNO = [
+  { nombre: 'hb-central-kinesiologia-10-sesiones.txt', turnosEsperados: 10 },
+  { nombre: 'instituto-comahue-6-sesiones.txt', turnosEsperados: 6 },
+  { nombre: 'centro-parana-lista-de-fechas.txt', turnosEsperados: 4 },
+  // El reprogramado es el contraejemplo: dos fechas en el texto, UN solo turno.
+  { nombre: 'sanatorio-cuyo-reprogramado.txt', turnosEsperados: 1 },
+];
+
+for (const { nombre, turnosEsperados } of FIXTURES_MULTITURNO) {
+  const resultado = await correr(
+    `FIXTURE MULTI-TURNO: ${nombre} (se esperan ${turnosEsperados})`,
+    leerFixture(nombre),
+  );
+  if (resultado) {
+    const cantidad = 1 + resultado.otrasPropuestas.length;
+    const ok = cantidad === turnosEsperados;
+    console.log(`\nTurnos devueltos: ${cantidad} — esperados ${turnosEsperados}: ${ok ? 'OK' : 'FALLA'}`);
+    if (!ok) huboError = true;
+
+    const etiquetas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
+      .map((p) => p.etiquetaSesion || '(sin numerar)')
+      .join(', ');
+    console.log(`Etiquetas de sesión: ${etiquetas}`);
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -214,7 +259,11 @@ if (corrida1 && corrida2) {
 // ─────────────────────────────────────────────────────────────────────────
 
 console.log(`\n${'='.repeat(78)}`);
-console.log(huboError ? 'FAIL — al menos un fixture terminó en error.' : 'PASS — los 8 fixtures + los 2 pares + la corrida doble terminaron sin error.');
+console.log(
+  huboError
+    ? 'FAIL — al menos un fixture terminó en error, o devolvió una cantidad de turnos distinta de la esperada.'
+    : 'PASS — los fixtures individuales, los multi-turno (con su cantidad exacta), los 2 pares y la corrida doble terminaron sin error.',
+);
 console.log('='.repeat(78));
 
 process.exitCode = huboError ? 1 : 0;
