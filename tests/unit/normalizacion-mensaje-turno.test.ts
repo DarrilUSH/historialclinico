@@ -175,4 +175,85 @@ describe("normalizarNombreProfesional", () => {
   it("devuelve vacío sin duda si el texto de entrada está vacío", () => {
     expect(normalizarNombreProfesional("")).toEqual({ texto: "", dudaOrden: false })
   })
+
+  it("con tratamiento pegado adelante del apellido y coma, lo saca antes de reordenar y lo re-antepone (caso reportado)", () => {
+    expect(normalizarNombreProfesional("LIC. RUIZ DIAZ, GABRIELA")).toEqual({
+      texto: "LIC. GABRIELA RUIZ DIAZ",
+      dudaOrden: false,
+    })
+  })
+
+  it("mismo caso con Dr. y Dra. con coma", () => {
+    expect(normalizarNombreProfesional("Dr. Fernandez, Carlos")).toEqual({
+      texto: "Dr. Carlos Fernandez",
+      dudaOrden: false,
+    })
+    expect(normalizarNombreProfesional("Dra. Gomez, Ana")).toEqual({
+      texto: "Dra. Ana Gomez",
+      dudaOrden: false,
+    })
+  })
+
+  it("tratamiento sin punto, estilo 'DRA ' con coma", () => {
+    expect(normalizarNombreProfesional("DRA RUIZ DIAZ, GABRIELA")).toEqual({
+      texto: "DRA GABRIELA RUIZ DIAZ",
+      dudaOrden: false,
+    })
+  })
+
+  it("sin tratamiento, el reordenamiento por coma no cambia (fixture ya cubierto, chequeo directo)", () => {
+    expect(normalizarNombreProfesional("Fernandez, Carlos")).toEqual({
+      texto: "Carlos Fernandez",
+      dudaOrden: false,
+    })
+  })
+
+  it("apellidos-trampa: 'Licciardi' y 'Drago' no son tratamientos aunque empiecen igual que 'Lic'/'Dr'", () => {
+    expect(normalizarNombreProfesional("Licciardi, Maria")).toEqual({
+      texto: "Maria Licciardi",
+      dudaOrden: false,
+    })
+    expect(normalizarNombreProfesional("Drago, Juan")).toEqual({
+      texto: "Juan Drago",
+      dudaOrden: false,
+    })
+  })
+
+  it("nombre ya en orden natural con tratamiento sin punto, sin coma, no cambia", () => {
+    expect(normalizarNombreProfesional("Dra Diulio")).toEqual({
+      texto: "Dra Diulio",
+      dudaOrden: false,
+    })
+  })
+
+  it("cubre los demás tratamientos del listado (Bioq./Klgo./Klga./Od./Obst./Farm./Téc.) con coma", () => {
+    expect(normalizarNombreProfesional("Bioq. Ruiz Diaz, Gabriela")).toEqual({
+      texto: "Bioq. Gabriela Ruiz Diaz",
+      dudaOrden: false,
+    })
+    expect(normalizarNombreProfesional("Klgo. Ruiz Diaz, Gabriela")).toEqual({
+      texto: "Klgo. Gabriela Ruiz Diaz",
+      dudaOrden: false,
+    })
+    expect(normalizarNombreProfesional("Klga. Ruiz Diaz, Gabriela")).toEqual({
+      texto: "Klga. Gabriela Ruiz Diaz",
+      dudaOrden: false,
+    })
+    expect(normalizarNombreProfesional("Od. Ruiz Diaz, Gabriela")).toEqual({
+      texto: "Od. Gabriela Ruiz Diaz",
+      dudaOrden: false,
+    })
+    expect(normalizarNombreProfesional("Obst. Ruiz Diaz, Gabriela")).toEqual({
+      texto: "Obst. Gabriela Ruiz Diaz",
+      dudaOrden: false,
+    })
+    expect(normalizarNombreProfesional("Farm. Ruiz Diaz, Gabriela")).toEqual({
+      texto: "Farm. Gabriela Ruiz Diaz",
+      dudaOrden: false,
+    })
+    expect(normalizarNombreProfesional("Téc. Ruiz Diaz, Gabriela")).toEqual({
+      texto: "Téc. Gabriela Ruiz Diaz",
+      dudaOrden: false,
+    })
+  })
 })

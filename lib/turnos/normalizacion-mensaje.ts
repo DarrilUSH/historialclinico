@@ -168,7 +168,13 @@ export function cotejarDiaSemana(fechaIso: string, diaSemanaTexto: string): bool
 }
 
 const SUFIJO_ADMINISTRATIVO = /\s*\(\s*[A-Za-zÁÉÍÓÚÑáéíóúñ]{1,4}\s*\)\s*$/
-const PATRON_TITULO = /^(dr|dra|lic|prof)\.?\s+/i
+// Tratamientos reconocidos, con o sin punto final ("Lic." / "Lic ") y en
+// cualquier mayúscula/minúscula. El `\.?\s+` obligatorio después de la
+// palabra es lo que evita falsos positivos con apellidos que arrancan igual
+// -"Licciardi" o "Drago" no tienen ni punto ni espacio pegado a "lic"/"dr",
+// así que no matchean-.
+const PATRON_TITULO =
+  /^(dr|dra|lic|prof|bioq|klgo|klga|od|obst|farm|t[eé]c)\.?\s+/i
 
 export interface NombreProfesionalNormalizado {
   /** Nombre listo para mostrar: reordenado si el mensaje traía "Apellido, Nombre", sin sufijos administrativos. */
@@ -193,9 +199,13 @@ export interface NombreProfesionalNormalizado {
  * Reglas, en orden:
  * 1. Saca sufijos administrativos finales entre paréntesis (ej. "(C)").
  * 2. "Apellido, Nombre" (con o sin espacios irregulares alrededor de la
- *    coma): se reordena a "Nombre Apellido", sin duda.
- * 3. Con tratamiento al principio (Dr./Dra./Lic./Prof.): el resto ya está en
- *    orden natural, sin duda.
+ *    coma): se reordena a "Nombre Apellido", sin duda. Si el tratamiento
+ *    quedó pegado adelante del apellido ("Lic. Ruiz Diaz, Gabriela") se
+ *    extrae ANTES de reordenar y se re-antepone al resultado ("Lic. Gabriela
+ *    Ruiz Diaz") -si no, queda pegado en el medio ("Gabriela Lic. Ruiz
+ *    Diaz")-.
+ * 3. Con tratamiento al principio y sin coma (Dr./Dra./Lic./Prof./etc.): el
+ *    resto ya está en orden natural, sin duda.
  * 4. Una sola palabra (solo apellido, ej. "Ardans"): nada que reordenar.
  * 5. Dos o más palabras sueltas sin coma ni tratamiento: orden ambiguo,
  *    `dudaOrden: true`.
@@ -213,6 +223,19 @@ export function normalizarNombreProfesional(crudo: string): NombreProfesionalNor
     const apellido = partesPorComa[0].trim()
     const nombre = partesPorComa[1].trim()
     if (apellido.length > 0 && nombre.length > 0) {
+      // El tratamiento puede venir pegado adelante del apellido
+      // ("LIC. RUIZ DIAZ, GABRIELA"): si no se saca ANTES de reordenar,
+      // termina en el medio del nombre reordenado ("GABRIELA LIC. RUIZ
+      // DIAZ"). Se extrae, se reordena el resto, y se re-antepone al final.
+      const matchTratamiento = apellido.match(PATRON_TITULO)
+      const tratamiento = matchTratamiento?.[0].trim() ?? ""
+      const apellidoSinTratamiento = tratamiento
+        ? apellido.slice(matchTratamiento![0].length).trim()
+        : apellido
+
+      if (tratamiento && apellidoSinTratamiento.length > 0) {
+        return { texto: `${tratamiento} ${nombre} ${apellidoSinTratamiento}`, dudaOrden: false }
+      }
       return { texto: `${nombre} ${apellido}`, dudaOrden: false }
     }
   }
