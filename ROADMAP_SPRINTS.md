@@ -992,6 +992,13 @@ Conectar la cuenta de Gmail del usuario vía OAuth (gratuito, scopes mínimos de
 - **Prohibido incorporar APIs o servicios pagos** sin pedido explícito del usuario: nada de Google Maps API (geocoding/places), SMS, email transaccional pago, etc. Para geocodificar direcciones de turnos (Sprint 6): entrada manual asistida o Nominatim/OpenStreetMap respetando su política de uso — decisión registrada.
 - **Cuidados de capa gratuita**: Supabase Free pausa proyectos tras ~1 semana sin actividad (documentar cómo despertarlo); mantener las imágenes comprimidas (el compresor client-side del Sprint 4 también protege el límite de 1 GB); si el uso se masifica, el usuario decidirá qué plan pagar.
 
+### Neutralidad geográfica (regla dura del usuario, 2026-08-28)
+
+- **La app funciona en todo el mundo: ninguna lógica se condiciona por ciudad, provincia o país.** Pedido textual del dueño: *"no te concentres en Ushuaia, la idea es que esta app funcione en todo el mundo, donde se quiera utilizar."*
+- Los textos siguen en castellano rioplatense (decisión de producto, no de lógica) y las fuentes de datos regionales que ya existen (catálogo REFES, el formato `dd/mm/aaaa` que el prompt de turnos le explica al modelo) son DATOS y EJEMPLOS, nunca supuestos del código.
+- Caso ya cazado por la regla: `linkComoLlegar` le pegaba `", Argentina"` a toda dirección para armar el enlace de "Cómo llegar" — una dirección de Madrid terminaba buscándose en otro continente. Se sacó (`c07a64f`, 2026-08-28); el enlace se manda tal como se cargó la dirección. Mismo commit: los tres atajos fijos de apps de viaje (Uber, DiDi, Cabify) se redujeron al único cuyo enlace es una URL HTTPS común (no un esquema `app://` que no abre nada donde la app no está instalada), sin filtrar por ciudad.
+- Antes de escribir lógica nueva que dependa de ciudad/provincia/país, revisar si hace falta de verdad — el criterio es del mismo nivel que "nada específico de un laboratorio": nada específico de una geografía. Deuda declarada bajo esta regla: `ZONA_HORARIA_TURNOS` sigue clavada en Ushuaia (ver `docs/estado-proyecto.md` § Deudas conocidas).
+
 ### Ley 25.326 (Protección de Datos Personales, Argentina)
 
 - Los datos de salud son **datos sensibles**: requieren consentimiento libre, expreso e informado, y su tratamiento debe limitarse a la finalidad declarada.

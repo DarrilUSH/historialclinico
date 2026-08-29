@@ -125,7 +125,7 @@ npx supabase start
 # 3. Aplicar las 39 migraciones + seed a la base local
 npx supabase db reset
 
-# 4. Suite de tests unitarios — esperado: 1616/1616
+# 4. Suite de tests unitarios — esperado: 1870/1870
 npm run test
 
 # 5. Arnés de RLS — esperado: 551/551 PASS, corrido dos veces (debe dar
