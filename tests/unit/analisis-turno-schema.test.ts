@@ -174,3 +174,42 @@ describe("AnalisisMensajeTurnoSchema — series de sesiones", () => {
     expect(validarAnalisisMensajeTurno(sinNumerar).ok).toBe(true)
   })
 })
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  `anioProbable`: el año que sugiere el modelo (agosto 2026)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Es OPCIONAL en el espejo Zod aunque el `responseSchema` lo pida en
+ * `required`: si el modelo lo omite, la ausencia tiene que valer "sin
+ * candidato extra" y no tirar abajo el análisis entero -que es lo que dejaría
+ * a la persona sin sus diez turnos por un campo accesorio-.
+ */
+describe("validarAnalisisMensajeTurno — anioProbable", () => {
+  it("acepta que no venga y lo completa en 0", () => {
+    const resultado = validarAnalisisMensajeTurno(analisisValido())
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) expect(resultado.datos.turnos[0].anioProbable).toBe(0)
+  })
+
+  it("acepta un año razonable", () => {
+    const resultado = validarAnalisisMensajeTurno({
+      turnos: [{ ...turnoValido(), anioProbable: 2026 }],
+      relacion: "unico",
+      explicacion: "Un solo turno.",
+    })
+    expect(resultado.ok).toBe(true)
+    if (resultado.ok) expect(resultado.datos.turnos[0].anioProbable).toBe(2026)
+  })
+
+  it("rechaza un año que no puede ser un año", () => {
+    for (const anioProbable of [7, 20260, -2026, 2026.5]) {
+      const resultado = validarAnalisisMensajeTurno({
+        turnos: [{ ...turnoValido(), anioProbable }],
+        relacion: "unico",
+        explicacion: "Un solo turno.",
+      })
+      expect(resultado.ok).toBe(false)
+      if (!resultado.ok) expect(resultado.errores.join(" ")).toContain("anioProbable")
+    }
+  })
+})

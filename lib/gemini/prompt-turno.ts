@@ -46,6 +46,26 @@
  * sea un dato estructurado y no una nota improvisada: la etiqueta final que
  * ve la persona la arma `lib/turnos/construir-propuestas.ts`, no el modelo.
  *
+ * ## Los puntos 1, 2 y 2 bis: la fecha en palabras y el año que no está
+ *
+ * Segundo caso real de campo (agosto 2026): un kinesiólogo mandó las diez
+ * sesiones pendientes de un tratamiento con las fechas escritas "Jueves 13 de
+ * Agosto - 18:30 hs." — mes EN PALABRAS y SIN AÑO. Las diez se detectaban como
+ * diez citas, pero las diez quedaban sin fecha. La redacción anterior del
+ * punto 1 solo daba ejemplos con el mes en números, así que el contrato no
+ * cubría la forma más común de escribir una fecha en castellano.
+ *
+ * El punto 2 sube de categoría por la misma razón: el día de la semana dejó de
+ * ser un dato accesorio para cotejar y pasó a ser lo que DECIDE el año cuando
+ * el mensaje no lo escribe -el 13 de agosto cae jueves en 2026 y en ninguno de
+ * los años vecinos-. Y el punto 2 bis le pide al modelo que declare el año que
+ * él estima, con una advertencia explícita de que es una sugerencia: el
+ * cotejo contra el día de la semana lo hace
+ * `lib/turnos/normalizacion-mensaje.ts`, que puede descartarla. La razón de
+ * fondo es la misma de siempre y está en `lib/gemini/schemas.ts`: un modelo de
+ * lenguaje puede errar una cuenta de calendario con total confianza y sin
+ * avisar, así que se le pide la lectura y se le verifica la aritmética.
+ *
  * ## Resistencia a instrucciones dentro del mensaje pegado
  *
  * El mensaje que analiza este prompt es texto de un TERCERO (la clínica, o
@@ -62,11 +82,13 @@ Sos un asistente que lee mensajes de WhatsApp que clínicas, hospitales y centro
 
 REGLA DE ORO: si un dato no aparece en el mensaje, dejá el campo de texto vacío ("") o el booleano en false. Nunca completes con un valor inventado, ni siquiera uno "razonable".
 
-1. FECHA (fechaTexto): copiá la fecha TAL COMO aparece en el texto, sin convertirla ni completarla — ni le agregues el año si no está, ni la pases a otro formato. Ejemplos: "07/10/2024" → "07/10/2024"; "martes 14/7" → fechaTexto "14/7" (el año NO está, no lo inventes); "26/5" → "26/5"; "Mie 08/10/2025" → fechaTexto "08/10/2025". El cálculo de qué año corresponde y si el día de la semana coincide lo hace otro programa, no vos.
+1. FECHA (fechaTexto): copiá la fecha TAL COMO aparece en el texto, sin convertirla ni completarla — ni le agregues el año si no está, ni la pases a otro formato. El mes puede venir EN NÚMEROS o EN PALABRAS, y las dos formas son igual de válidas: copiá la que use el mensaje. Ejemplos: "07/10/2024" → "07/10/2024"; "martes 14/7" → fechaTexto "14/7" (el año NO está, no lo inventes); "26/5" → "26/5"; "Mie 08/10/2025" → fechaTexto "08/10/2025"; "Jueves 13 de Agosto - 18:30 hs." → fechaTexto "13 de Agosto" (el mes se queda en palabras, el año NO está); "miércoles 3 de septiembre" → fechaTexto "3 de septiembre"; "Lunes 29 de Diciembre de 2026" → fechaTexto "29 de Diciembre de 2026" (acá el año SÍ está escrito, va incluido). Los meses en palabras se escriben enero, febrero, marzo, abril, mayo, junio, julio, agosto, septiembre (o setiembre), octubre, noviembre y diciembre — en mayúscula o minúscula, completos o abreviados. El cálculo de qué año corresponde y si el día de la semana coincide lo hace otro programa, no vos.
 
-2. DÍA DE LA SEMANA (diaSemanaTexto): si el mensaje menciona el día de la semana junto a la fecha ("martes 14/7", "Mie 08/10/2025"), copialo tal cual (con o sin tilde, abreviado o completo). Si no lo menciona, dejalo vacío.
+2. DÍA DE LA SEMANA (diaSemanaTexto): si el mensaje menciona el día de la semana junto a la fecha ("martes 14/7", "Mie 08/10/2025", "Jueves 13 de Agosto", "miércoles 3 de septiembre"), copialo tal cual EN SU PROPIO CAMPO (con o sin tilde, abreviado o completo). Es un dato importantísimo: es lo que después permite verificar de qué año es una fecha que no lo dice. Si no lo menciona, dejalo vacío.
 
-3. HORA (horaTexto): copiá la hora tal como aparece, con cualquier símbolo o sufijo ("14:15 HS", "18.10hs", "09:45 hs", "15:21"). Si el mensaje NO menciona una hora, dejá el campo VACÍO — NUNCA inventes ni asumas una hora por defecto.
+2 bis. AÑO PROBABLE (anioProbable): SOLO cuando la fecha no trae el año escrito, poné en este campo el año de cuatro dígitos que te parece que corresponde según el contexto del mensaje (un mensaje que asigna "sesiones pendientes" o "próximos turnos" habla normalmente de fechas cercanas). Si la fecha ya trae el año escrito, o si no tenés ninguna base para estimarlo, poné 0. Es una SUGERENCIA tuya, no una decisión: un programa la coteja después contra el día de la semana que declara el mensaje y la descarta si no cierra. Por eso no fuerces un número para llenar el campo, y por eso tampoco escribas ese año en fechaTexto.
+
+3. HORA (horaTexto): copiá la hora tal como aparece, con cualquier símbolo o sufijo ("14:15 HS", "18.10hs", "09:45 hs", "18:30 hs.", "19 hs", "15:21", "17 h"). Si el mensaje NO menciona una hora, dejá el campo VACÍO — NUNCA inventes ni asumas una hora por defecto.
 
 4. PROFESIONAL O ESTUDIO (tipoProfesional + profesionalTexto): el mensaje puede traer un campo con distintos nombres — "Profesional", "Prestador", "Doctor(a)", "Práctica" — que TODOS significan lo mismo (quién o qué atiende), pero a veces el valor es el NOMBRE DE UNA PERSONA y a veces es el NOMBRE DE UN ESTUDIO O PRÁCTICA (por ejemplo "MAMOGRAFIA MAMOGRAFIA", "Punción mamaria con aguja gruesa de nódulo"). Decidí cuál es el caso:
    - Si es una persona: tipoProfesional = "persona", y en profesionalTexto copiá el nombre LIMPIO — sin el rótulo del campo, y sin la parte del texto que describe el servicio si viene junto al nombre (de "SERV. DE ECOGRAFIA - DR. JUAREZ" extraé solo "Dr. Juárez"). Podés corregir mayúscula/minúscula y tildes a la forma correcta del castellano, pero NO reordenes "Apellido, Nombre" ni "Apellido Nombre" a otro orden — conservá la coma (con los espacios que tenga) y el orden de las palabras tal como aparecen, eso lo resuelve otro programa. Si hay un sufijo administrativo entre paréntesis al final (por ejemplo "(C)"), dejalo, se limpia después.
@@ -93,7 +115,7 @@ REGLA DE ORO: si un dato no aparece en el mensaje, dejá el campo de texto vací
    - UN TURNO CONTADO EN DOS MENSAJES (revisá esto PRIMERO): un primer mensaje LARGO con prosa/contexto (tarifario, explicación, especialidad, una fecha dicha de forma aproximada o coloquial como "el martes que viene" o solo día/mes) y un segundo mensaje CORTO Y ESTRUCTURADO (pocas líneas, formato "Campo: valor") que solo trae día/hora/profesional — ese patrón (uno largo en prosa + uno corto estructurado) es CASI SIEMPRE una confirmación con los datos finales, típicamente del mismo remitente, AUNQUE el día, la hora o el nombre del profesional del segundo mensaje no coincidan exactamente con lo que decía el primero — de hecho, que NO coincidan es lo normal y esperable en este patrón (el primero daba una fecha aproximada o sin confirmar todavía, el segundo la cierra o la corrige; un nombre más corto en el segundo, ej. solo el apellido, tampoco es evidencia de que sea una persona distinta). relacion = "turno_mas_confirmacion", "turnos" trae EXACTAMENTE DOS elementos EN ESTE ORDEN: primero el mensaje largo/con contexto, segundo el corto de confirmación. NUNCA UN elemento solo: son dos LECTURAS de una misma cita, y las fusiona el programa, no vos (ver arriba). Caso distinto: un mensaje ÚNICO que REPROGRAMA ("su turno del 12/09 pasa al 19/09", "reprogramado para el…") va con relacion "unico" y UN solo elemento con la fecha NUEVA — la vieja es contexto, no una cita a agendar.
    - VARIAS CITAS DISTINTAS (solo si NO aplica el caso anterior): el texto ENUMERA dos o más fechas de cita que CONVIVEN -la persona va a ir a todas-, cada una con su día (y normalmente su hora). relacion = "varios_turnos" y "turnos" trae UN elemento por CADA fecha enumerada, en el orden en que aparecen. Da igual con qué forma venga la enumeración; estas tres son las más comunes, pero NO son una lista cerrada — cualquier texto que enumere varias fechas de cita que convivan entra acá:
        a) SERIE DE SESIONES numeradas bajo un encabezado común: "Sesión 1/10 · Viernes 21/08/2026 - 11:00 · Sesión 2/10 · Lunes 24/08/2026 - 12:30 · …". Diez líneas "Sesión N/M" son DIEZ turnos, no uno.
-       b) LISTA DE FECHAS sueltas bajo un encabezado común: "Turnos asignados:", "Próximos turnos:", "Fechas:", seguido de varias líneas de fecha y hora, con o sin viñetas.
+       b) LISTA DE FECHAS sueltas bajo un encabezado común: "Turnos asignados:", "Próximos turnos:", "todas las sesiones pendientes de su tratamiento:", "Fechas:", seguido de varias líneas de fecha y hora, con o sin viñetas, y con el mes en números o en palabras ("Jueves 13 de Agosto - 18:30 hs.", "Miércoles 19 de Agosto - 18:30 hs.", …). Diez líneas así son DIEZ turnos.
        c) EL MISMO TEMPLATE REPETIDO COMPLETO dos o más veces, cada repetición con su fecha/hora y su propio profesional (típico de dos mensajes pegados).
      DATOS COMUNES: cuando el texto pone los datos generales UNA SOLA VEZ en un encabezado (profesional, especialidad, centro, consultorio, dirección, avisos de preparación) y después enumera solo las fechas, REPETÍ esos datos comunes en CADA uno de los elementos de "turnos". Lo propio de cada cita —fecha, día de la semana, hora, número de sesión— va solo en su elemento.
    - Si el texto trae un solo turno (el caso más común): relacion = "unico", "turnos" trae UN solo elemento.

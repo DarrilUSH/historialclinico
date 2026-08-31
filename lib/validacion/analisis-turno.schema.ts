@@ -40,9 +40,33 @@ export const MAX_TURNOS = 40
 const MAX_NUMERO_SESION = 400
 const MAX_EXPLICACION = 500
 
+/**
+ * Ventana de años aceptable para `anioProbable`. No valida negocio: es la
+ * misma red de seguridad que el resto del archivo, contra un `1` o un
+ * `20260` que le haría creer al cotejo de día de la semana que hay un
+ * candidato razonable donde solo hay ruido.
+ */
+const ANIO_PROBABLE_MINIMO = 1900
+const ANIO_PROBABLE_MAXIMO = 2200
+
 const turnoExtraidoCrudoSchema = z
   .object({
     fechaTexto: z.string({ message: "fechaTexto debe ser texto." }).max(MAX_TEXTO_CORTO),
+    /**
+     * OPCIONAL a propósito, aunque el `responseSchema` lo pida en `required`:
+     * mismo criterio defensivo que `texto_completo` en el schema de
+     * documentos. Si el modelo lo omite, la ausencia vale `0` -sin candidato
+     * extra- en vez de invalidar el análisis entero y perder los diez turnos.
+     */
+    anioProbable: z
+      .number({ message: "anioProbable debe ser un número." })
+      .int("anioProbable debe ser un número entero.")
+      .refine(
+        (valor) => valor === 0 || (valor >= ANIO_PROBABLE_MINIMO && valor <= ANIO_PROBABLE_MAXIMO),
+        `anioProbable debe ser 0 o un año entre ${ANIO_PROBABLE_MINIMO} y ${ANIO_PROBABLE_MAXIMO}.`,
+      )
+      .optional()
+      .default(0),
     diaSemanaTexto: z.string({ message: "diaSemanaTexto debe ser texto." }).max(60),
     horaTexto: z.string({ message: "horaTexto debe ser texto." }).max(60),
     tipoProfesional: z.enum(TIPOS_PROFESIONAL_MENSAJE_TURNO, {

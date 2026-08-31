@@ -623,3 +623,150 @@ describe("construirResultadoAnalisis — serie de sesiones", () => {
     expect(resultado.otrasPropuestas).toEqual([])
   })
 })
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  "Jueves 13 de Agosto - 18:30 hs." — el mensaje del kinesiólogo
+ *  (bug real de campo, agosto 2026)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Diez sesiones con la fecha EN PALABRAS y SIN AÑO. Lo que se prueba acá es el
+ * resultado de punta a punta de la capa pura: que las diez salgan con fecha,
+ * con el año elegido por el día de la semana, y SIN el aviso de "asumimos el
+ * año" -que multiplicado por diez enterraba lo único que hay que revisar-.
+ */
+describe("construirResultadoAnalisis — fechas en palabras y sin año", () => {
+  /** El mensaje se pegó el 28/08/2026, con la serie ya empezada. */
+  const AHORA_REAL = new Date(2026, 7, 28)
+
+  /** Las diez líneas del mensaje real, tal como las devolvería Gemini. */
+  const SESIONES: [string, string, string][] = [
+    ["Jueves", "13 de Agosto", "18:30 hs."],
+    ["Miércoles", "19 de Agosto", "18:30 hs."],
+    ["Viernes", "21 de Agosto", "17:30 hs."],
+    ["Miércoles", "26 de Agosto", "19:30 hs."],
+    ["Viernes", "28 de Agosto", "19:00 hs."],
+    ["Lunes", "31 de Agosto", "19:00 hs."],
+    ["Miércoles", "2 de Septiembre", "19:00 hs."],
+    ["Viernes", "4 de Septiembre", "18:30 hs."],
+    ["Lunes", "7 de Septiembre", "19:00 hs."],
+    ["Miércoles", "9 de Septiembre", "19:00 hs."],
+  ]
+
+  function analisisDelKinesiologo(): AnalisisMensajeTurnoExtraido {
+    return {
+      relacion: "varios_turnos",
+      explicacion: "Diez sesiones pendientes del mismo tratamiento, cada una con su fecha y hora.",
+      turnos: SESIONES.map(([diaSemanaTexto, fechaTexto, horaTexto], indice) =>
+        turno({
+          fechaTexto,
+          diaSemanaTexto,
+          horaTexto,
+          especialidadTexto: "Kinesiología",
+          lugarDireccion: "San Martín 1507, 1° piso dpto. 104",
+          notas: indice === 0 ? ["Al ingresar anunciarse con nombre completo en mesa."] : [],
+        }),
+      ),
+    }
+  }
+
+  it("resuelve las DIEZ fechas, todas en 2026, con su hora", () => {
+    const resultado = construirResultadoAnalisis(analisisDelKinesiologo(), AHORA_REAL)
+    const propuestas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
+
+    expect(propuestas).toHaveLength(10)
+    expect(propuestas.map((p) => p.fecha)).toEqual([
+      "2026-08-13",
+      "2026-08-19",
+      "2026-08-21",
+      "2026-08-26",
+      "2026-08-28",
+      "2026-08-31",
+      "2026-09-02",
+      "2026-09-04",
+      "2026-09-07",
+      "2026-09-09",
+    ])
+    expect(propuestas.map((p) => p.hora)).toEqual([
+      "18:30",
+      "18:30",
+      "17:30",
+      "19:30",
+      "19:00",
+      "19:00",
+      "19:00",
+      "18:30",
+      "19:00",
+      "19:00",
+    ])
+  })
+
+  it("no pide confirmar un año que el día de la semana ya confirmó", () => {
+    const resultado = construirResultadoAnalisis(analisisDelKinesiologo(), AHORA_REAL)
+    const propuestas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
+
+    expect(propuestas.every((p) => p.anioInferido)).toBe(true)
+    expect(propuestas.every((p) => p.anioConfirmadoPorDiaSemana)).toBe(true)
+    expect(propuestas.flatMap((p) => p.avisos).filter((aviso) => aviso.includes("año"))).toEqual([])
+    // Y tampoco hay discrepancia de día de la semana: el año se eligió justo
+    // para que no la haya.
+    expect(propuestas.some((p) => p.discrepanciaDiaSemana)).toBe(false)
+  })
+
+  it("una fecha cuyo día de la semana no cierra queda vacía y lo explica", () => {
+    const crudo: AnalisisMensajeTurnoExtraido = {
+      relacion: "unico",
+      explicacion: "Un solo turno.",
+      turnos: [turno({ fechaTexto: "13 de Agosto", diaSemanaTexto: "Lunes", horaTexto: "18:30 hs." })],
+    }
+
+    const propuesta = construirResultadoAnalisis(crudo, AHORA_REAL).propuestaPrincipal
+    expect(propuesta.fecha).toBe("")
+    expect(propuesta.diaSemanaIncongruente).toBe(true)
+    expect(propuesta.avisos).toContain(
+      'El mensaje decía "Lunes 13 de Agosto", pero esa fecha no cae lunes en ninguno de los años posibles — completala vos.',
+    )
+    // El aviso genérico de "no la pudimos interpretar" mandaría a buscar un
+    // error de lectura que no existe: acá el dato incoherente es del mensaje.
+    expect(propuesta.avisos).not.toContain(
+      "El mensaje no traía una fecha que pudiéramos interpretar — completala vos.",
+    )
+  })
+
+  it("una serie que cruza el año nuevo sale con los dos años", () => {
+    const crudo: AnalisisMensajeTurnoExtraido = {
+      relacion: "varios_turnos",
+      explicacion: "Cuatro sesiones entre diciembre y enero.",
+      turnos: [
+        turno({ fechaTexto: "29 de Diciembre", diaSemanaTexto: "Martes", horaTexto: "10:00" }),
+        turno({ fechaTexto: "31 de Diciembre", diaSemanaTexto: "Jueves", horaTexto: "10:00" }),
+        turno({ fechaTexto: "2 de Enero", diaSemanaTexto: "Sábado", horaTexto: "10:00" }),
+        turno({ fechaTexto: "5 de Enero", diaSemanaTexto: "Martes", horaTexto: "10:00" }),
+      ],
+    }
+
+    const resultado = construirResultadoAnalisis(crudo, new Date(2026, 11, 20))
+    expect([resultado.propuestaPrincipal, ...resultado.otrasPropuestas].map((p) => p.fecha)).toEqual([
+      "2026-12-29",
+      "2026-12-31",
+      "2027-01-02",
+      "2027-01-05",
+    ])
+  })
+
+  it("el año que declara el modelo no le gana al día de la semana", () => {
+    const crudo: AnalisisMensajeTurnoExtraido = {
+      relacion: "unico",
+      explicacion: "Un solo turno.",
+      turnos: [
+        turno({
+          fechaTexto: "13 de Agosto",
+          diaSemanaTexto: "Jueves",
+          horaTexto: "18:30 hs.",
+          anioProbable: 2031,
+        }),
+      ],
+    }
+
+    expect(construirResultadoAnalisis(crudo, AHORA_REAL).propuestaPrincipal.fecha).toBe("2026-08-13")
+  })
+})

@@ -6,6 +6,7 @@ import {
   normalizarHora,
   normalizarNombreProfesional,
   parsearFechaArgentina,
+  resolverFechasDeSerie,
 } from "@/lib/turnos/normalizacion-mensaje"
 
 describe("normalizarHora", () => {
@@ -39,15 +40,37 @@ describe("normalizarHora", () => {
   it("acolcha una hora de un solo dígito", () => {
     expect(normalizarHora("9:45")).toBe("09:45")
   })
+
+  it("saca el sufijo 'hs.' con punto final (mensaje de las diez sesiones de kinesiología)", () => {
+    expect(normalizarHora("18:30 hs.")).toBe("18:30")
+    expect(normalizarHora("19:00 hs.")).toBe("19:00")
+  })
+
+  it("completa los minutos de una hora en punto dicha sin ellos", () => {
+    expect(normalizarHora("19 hs")).toBe("19:00")
+    expect(normalizarHora("9 h")).toBe("09:00")
+  })
+
+  it("sigue rechazando un número que no puede ser una hora", () => {
+    expect(normalizarHora("35 hs")).toBe("")
+  })
 })
 
 describe("parsearFechaArgentina", () => {
   const AHORA = new Date(2026, 7, 17) // 17/08/2026 (mes 0-indexado: 7 = agosto)
 
+  /** Los tres campos que agregó la resolución de año por día de la semana, en su valor "no aplica". */
+  const SIN_DIA_SEMANA = {
+    anioConfirmadoPorDiaSemana: false,
+    diaSemanaTexto: "",
+    diaSemanaIncongruente: false,
+  }
+
   it("parsea DD/MM/AAAA sin inferir nada (fixture San Jorge)", () => {
     expect(parsearFechaArgentina("07/10/2024", AHORA)).toEqual({
       fecha: "2024-10-07",
       anioInferido: false,
+      ...SIN_DIA_SEMANA,
     })
   })
 
@@ -60,6 +83,7 @@ describe("parsearFechaArgentina", () => {
     expect(parsearFechaArgentina("14/12", AHORA)).toEqual({
       fecha: "2026-12-14",
       anioInferido: true,
+      ...SIN_DIA_SEMANA,
     })
   })
 
@@ -68,6 +92,7 @@ describe("parsearFechaArgentina", () => {
     expect(parsearFechaArgentina("14/7", AHORA)).toEqual({
       fecha: "2027-07-14",
       anioInferido: true,
+      ...SIN_DIA_SEMANA,
     })
   })
 
@@ -75,6 +100,7 @@ describe("parsearFechaArgentina", () => {
     expect(parsearFechaArgentina("26/5", AHORA)).toEqual({
       fecha: "2027-05-26",
       anioInferido: true,
+      ...SIN_DIA_SEMANA,
     })
   })
 
@@ -82,6 +108,7 @@ describe("parsearFechaArgentina", () => {
     expect(parsearFechaArgentina("28/04", AHORA)).toEqual({
       fecha: "2027-04-28",
       anioInferido: true,
+      ...SIN_DIA_SEMANA,
     })
   })
 
@@ -89,12 +116,205 @@ describe("parsearFechaArgentina", () => {
     expect(parsearFechaArgentina("17/8", AHORA)).toEqual({
       fecha: "2026-08-17",
       anioInferido: true,
+      ...SIN_DIA_SEMANA,
     })
+  })
+
+  /* ───────────────────────────────────────────────────────────────────────
+   *  Mes en palabras y año elegido por el día de la semana (agosto 2026)
+   *  El caso real: "Jueves 13 de Agosto - 18:30 hs." × 10, sin año.
+   * ─────────────────────────────────────────────────────────────────────── */
+
+  it("lee el mes EN PALABRAS y usa el día de la semana para elegir el año", () => {
+    // El 13 de agosto cae jueves en 2026 (en 2025 fue miércoles, en 2027 viernes).
+    expect(parsearFechaArgentina("13 de Agosto", AHORA, "Jueves")).toEqual({
+      fecha: "2026-08-13",
+      anioInferido: true,
+      anioConfirmadoPorDiaSemana: true,
+      diaSemanaTexto: "Jueves",
+      diaSemanaIncongruente: false,
+    })
+  })
+
+  it("tolera que el día de la semana venga PEGADO a la fecha, sin campo aparte", () => {
+    expect(parsearFechaArgentina("Jueves 13 de Agosto", AHORA)).toEqual({
+      fecha: "2026-08-13",
+      anioInferido: true,
+      anioConfirmadoPorDiaSemana: true,
+      diaSemanaTexto: "Jueves",
+      diaSemanaIncongruente: false,
+    })
+  })
+
+  it("acepta el mes en minúscula y el día con tilde ('miércoles 2 de septiembre')", () => {
+    expect(parsearFechaArgentina("2 de septiembre", AHORA, "miércoles")).toMatchObject({
+      fecha: "2026-09-02",
+      anioConfirmadoPorDiaSemana: true,
+    })
+  })
+
+  it("acepta el mes abreviado y la variante 'setiembre'", () => {
+    expect(parsearFechaArgentina("2 sep", AHORA, "miércoles")).toMatchObject({ fecha: "2026-09-02" })
+    expect(parsearFechaArgentina("2 de setiembre", AHORA, "miércoles")).toMatchObject({
+      fecha: "2026-09-02",
+    })
+  })
+
+  it("respeta el año cuando la fecha en palabras SÍ lo trae escrito", () => {
+    expect(parsearFechaArgentina("29 de Diciembre de 2026", AHORA, "Martes")).toEqual({
+      fecha: "2026-12-29",
+      anioInferido: false,
+      anioConfirmadoPorDiaSemana: false,
+      diaSemanaTexto: "Martes",
+      diaSemanaIncongruente: false,
+    })
+  })
+
+  it("elige un año PASADO si es el que coincide — no fuerza futuro", () => {
+    // "Hoy" es 17/08/2026 y el 13/08 ya pasó: se resuelve igual, con su año
+    // correcto. Que la sesión ya haya ocurrido lo decide después quien crea.
+    expect(parsearFechaArgentina("13 de agosto", AHORA, "jueves")?.fecha).toBe("2026-08-13")
+  })
+
+  it("deja la fecha VACÍA cuando el día de la semana no cae en ningún año candidato", () => {
+    // El 13 de agosto no cae lunes ni en 2025, ni en 2026, ni en 2027: el
+    // mensaje tiene un error de tipeo y lo tiene que resolver una persona.
+    expect(parsearFechaArgentina("13 de Agosto", AHORA, "Lunes")).toEqual({
+      fecha: "",
+      anioInferido: false,
+      anioConfirmadoPorDiaSemana: false,
+      diaSemanaTexto: "Lunes",
+      diaSemanaIncongruente: true,
+    })
+  })
+
+  it("el año que declara el modelo NO le gana a la ventana de años vecinos", () => {
+    expect(parsearFechaArgentina("13 de Agosto", AHORA, "Jueves", 2020)?.fecha).toBe("2026-08-13")
+  })
+
+  it("el año que declara el modelo tampoco decide solo: tiene que cerrar con el día de la semana", () => {
+    // 2031 es un año del que el modelo no sabe nada útil, y el 13/08/2031 no
+    // cae lunes: no hay candidato válido y la fecha queda para la persona.
+    expect(parsearFechaArgentina("13 de Agosto", AHORA, "Lunes", 2031)?.fecha).toBe("")
+  })
+
+  it("sin día de la semana, una fecha en palabras cae en la regla de siempre", () => {
+    // 13/08 ya pasó respecto de 17/08/2026 → la próxima ocurrencia, marcada
+    // como inferida y SIN confirmar, para que la pantalla lo pregunte.
+    expect(parsearFechaArgentina("13 de Agosto", AHORA)).toEqual({
+      fecha: "2027-08-13",
+      anioInferido: true,
+      ...SIN_DIA_SEMANA,
+    })
+  })
+
+  it("un mes que no existe no es una fecha", () => {
+    expect(parsearFechaArgentina("13 de Brumario", AHORA, "Jueves")).toBeNull()
   })
 
   it("devuelve null ante texto vacío o no reconocible", () => {
     expect(parsearFechaArgentina("", AHORA)).toBeNull()
     expect(parsearFechaArgentina("no hay fecha", AHORA)).toBeNull()
+  })
+})
+
+describe("resolverFechasDeSerie", () => {
+  /** Atajo: una entrada de serie con su fecha, su día de la semana y sin año declarado. */
+  function entrada(fechaTexto: string, diaSemanaTexto = "") {
+    return { fechaTexto, diaSemanaTexto, anioProbable: 0 }
+  }
+
+  it("resuelve las diez sesiones del mensaje real, todas en 2026", () => {
+    // El mensaje se pegó el 28/08/2026, con la serie ya empezada.
+    const ahora = new Date(2026, 7, 28)
+    const serie = [
+      entrada("13 de Agosto", "Jueves"),
+      entrada("19 de Agosto", "Miércoles"),
+      entrada("21 de Agosto", "Viernes"),
+      entrada("26 de Agosto", "Miércoles"),
+      entrada("28 de Agosto", "Viernes"),
+      entrada("31 de Agosto", "Lunes"),
+      entrada("2 de Septiembre", "Miércoles"),
+      entrada("4 de Septiembre", "Viernes"),
+      entrada("7 de Septiembre", "Lunes"),
+      entrada("9 de Septiembre", "Miércoles"),
+    ]
+
+    expect(resolverFechasDeSerie(serie, ahora).map((fecha) => fecha?.fecha)).toEqual([
+      "2026-08-13",
+      "2026-08-19",
+      "2026-08-21",
+      "2026-08-26",
+      "2026-08-28",
+      "2026-08-31",
+      "2026-09-02",
+      "2026-09-04",
+      "2026-09-07",
+      "2026-09-09",
+    ])
+  })
+
+  it("una serie puede cruzar el año nuevo: cada fecha valida el SUYO", () => {
+    const ahora = new Date(2026, 11, 20) // 20/12/2026
+    const serie = [
+      entrada("29 de Diciembre", "Martes"),
+      entrada("31 de Diciembre", "Jueves"),
+      entrada("2 de Enero", "Sábado"),
+      entrada("5 de Enero", "Martes"),
+    ]
+
+    expect(resolverFechasDeSerie(serie, ahora).map((fecha) => fecha?.fecha)).toEqual([
+      "2026-12-29",
+      "2026-12-31",
+      "2027-01-02",
+      "2027-01-05",
+    ])
+  })
+
+  it("ancla al año de sus hermanas la fecha que no trae día de la semana", () => {
+    // Suelto, "19 de Agosto" leído el 28/08/2026 se iría a 2027 (la próxima
+    // ocurrencia futura) y se despegaría un año del resto de la serie.
+    const ahora = new Date(2026, 7, 28)
+    const serie = [entrada("13 de Agosto", "Jueves"), entrada("19 de Agosto"), entrada("21 de Agosto", "Viernes")]
+
+    expect(resolverFechasDeSerie(serie, ahora).map((fecha) => fecha?.fecha)).toEqual([
+      "2026-08-13",
+      "2026-08-19",
+      "2026-08-21",
+    ])
+  })
+
+  it("el anclaje también cruza el año nuevo: el 2 de enero se va con diciembre", () => {
+    const ahora = new Date(2026, 11, 20)
+    const serie = [entrada("29 de Diciembre", "Martes"), entrada("2 de Enero")]
+
+    expect(resolverFechasDeSerie(serie, ahora).map((fecha) => fecha?.fecha)).toEqual([
+      "2026-12-29",
+      "2027-01-02",
+    ])
+  })
+
+  it("una fecha incongruente de la serie queda vacía y no arrastra a las demás", () => {
+    const ahora = new Date(2026, 7, 28)
+    const serie = [
+      entrada("13 de Agosto", "Jueves"),
+      entrada("14 de Agosto", "Lunes"), // el 14/08 no cae lunes en ningún año candidato
+      entrada("21 de Agosto", "Viernes"),
+    ]
+
+    const resueltas = resolverFechasDeSerie(serie, ahora)
+    expect(resueltas.map((fecha) => fecha?.fecha)).toEqual(["2026-08-13", "", "2026-08-21"])
+    expect(resueltas[1]?.diaSemanaIncongruente).toBe(true)
+  })
+
+  it("sin ninguna fecha respaldada no hay a qué anclar: cada una queda con su resolución individual", () => {
+    const ahora = new Date(2026, 7, 17)
+    const serie = [entrada("28/04"), entrada("26/5")]
+
+    expect(resolverFechasDeSerie(serie, ahora).map((fecha) => fecha?.fecha)).toEqual([
+      "2027-04-28",
+      "2027-05-26",
+    ])
   })
 })
 

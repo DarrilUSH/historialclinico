@@ -11,9 +11,12 @@
  *      orquestador REAL: prompt real + `SCHEMA_ANALISIS_MENSAJE_TURNO` real +
  *      validación Zod real + la capa pura de normalización real).
  *   3. Corre los fixtures MULTI-TURNO verificando la CANTIDAD de turnos
- *      devueltos contra la esperada -el único chequeo con veredicto duro:
- *      es el bug de "diez sesiones, un turno" el que se está previniendo- y
- *      lista las etiquetas de sesión.
+ *      devueltos contra la esperada -el primero de los dos chequeos con
+ *      veredicto duro: es el bug de "diez sesiones, un turno" el que se está
+ *      previniendo- y lista las etiquetas de sesión. Los fixtures marcados
+ *      con `exigirFechas` suman el SEGUNDO veredicto duro: que ninguna de sus
+ *      fechas quede vacía, que es el bug de "diez sesiones detectadas, diez
+ *      sin fecha" de los mensajes con el mes en palabras.
  *   4. Corre el par de Casa Salud JUNTO (fusión esperada) y el par del
  *      Hospital Británico JUNTO (división esperada).
  *   5. Corre el fixture de la Clínica San Jorge DOS VECES para verificar
@@ -200,25 +203,44 @@ const FIXTURES_MULTITURNO = [
   { nombre: 'hb-central-kinesiologia-10-sesiones.txt', turnosEsperados: 10 },
   { nombre: 'instituto-comahue-6-sesiones.txt', turnosEsperados: 6 },
   { nombre: 'centro-parana-lista-de-fechas.txt', turnosEsperados: 4 },
+  // Fechas EN PALABRAS y SIN AÑO: además de las diez, se exige que las diez
+  // salgan CON fecha —el bug de campo era que salían las diez sin ninguna—.
+  { nombre: 'kinesiologia-fechas-en-palabras.txt', turnosEsperados: 10, exigirFechas: true },
+  // Serie que cruza el año nuevo, con los meses en minúscula y con tilde.
+  { nombre: 'centro-rehabilitacion-diciembre-enero.txt', turnosEsperados: 4, exigirFechas: true },
   // El reprogramado es el contraejemplo: dos fechas en el texto, UN solo turno.
   { nombre: 'sanatorio-cuyo-reprogramado.txt', turnosEsperados: 1 },
 ];
 
-for (const { nombre, turnosEsperados } of FIXTURES_MULTITURNO) {
+for (const { nombre, turnosEsperados, exigirFechas } of FIXTURES_MULTITURNO) {
   const resultado = await correr(
     `FIXTURE MULTI-TURNO: ${nombre} (se esperan ${turnosEsperados})`,
     leerFixture(nombre),
   );
   if (resultado) {
-    const cantidad = 1 + resultado.otrasPropuestas.length;
+    const propuestas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas];
+    const cantidad = propuestas.length;
     const ok = cantidad === turnosEsperados;
     console.log(`\nTurnos devueltos: ${cantidad} — esperados ${turnosEsperados}: ${ok ? 'OK' : 'FALLA'}`);
     if (!ok) huboError = true;
 
-    const etiquetas = [resultado.propuestaPrincipal, ...resultado.otrasPropuestas]
-      .map((p) => p.etiquetaSesion || '(sin numerar)')
-      .join(', ');
+    const etiquetas = propuestas.map((p) => p.etiquetaSesion || '(sin numerar)').join(', ');
     console.log(`Etiquetas de sesión: ${etiquetas}`);
+
+    // Segundo veredicto duro, solo para los fixtures que lo declaran: una
+    // fecha vacía es exactamente el bug de "detectó los diez turnos, ninguno
+    // con fecha", y en pantalla se traduce en diez filas que no se pueden
+    // crear.
+    if (exigirFechas) {
+      const sinFecha = propuestas.filter((p) => !p.fecha).length;
+      console.log(
+        `Fechas resueltas: ${cantidad - sinFecha}/${cantidad} — ${sinFecha === 0 ? 'OK' : 'FALLA'}`,
+      );
+      console.log(
+        `Fecha · hora por turno: ${propuestas.map((p) => `${p.fecha || '(sin fecha)'} ${p.hora || '(sin hora)'}`).join(' | ')}`,
+      );
+      if (sinFecha > 0) huboError = true;
+    }
   }
 }
 
@@ -261,8 +283,8 @@ if (corrida1 && corrida2) {
 console.log(`\n${'='.repeat(78)}`);
 console.log(
   huboError
-    ? 'FAIL — al menos un fixture terminó en error, o devolvió una cantidad de turnos distinta de la esperada.'
-    : 'PASS — los fixtures individuales, los multi-turno (con su cantidad exacta), los 2 pares y la corrida doble terminaron sin error.',
+    ? 'FAIL — al menos un fixture terminó en error, devolvió una cantidad de turnos distinta de la esperada, o dejó una fecha sin resolver.'
+    : 'PASS — los fixtures individuales, los multi-turno (con su cantidad exacta y sus fechas resueltas), los 2 pares y la corrida doble terminaron sin error.',
 );
 console.log('='.repeat(78));
 

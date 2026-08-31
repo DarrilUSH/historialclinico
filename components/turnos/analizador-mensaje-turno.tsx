@@ -54,6 +54,40 @@
  *   solo botón, con el reporte fila por fila que devuelve la Server Action
  *   -incluidos los turnos que ya existían, que se saltean en vez de
  *   duplicarse-.
+ *
+ * ## La lista no puede ofrecer lo que ella misma declara imposible
+ *
+ * Bug reportado con captura (agosto 2026): con un mensaje cuyas diez fechas no
+ * se pudieron interpretar, las diez filas decían "Sin fecha — no lo podemos
+ * crear" y las diez estaban TILDADAS, debajo de un botón que ofrecía "Crear
+ * los 10 turnos". La pantalla prometía diez turnos que ya sabía que iban a
+ * fallar.
+ *
+ * Ahora la casilla de una fila no creable está desmarcada y deshabilitada, el
+ * botón cuenta SOLO lo creable y marcado (`indicesAEnviar`), y cuando no queda
+ * nada que crear el botón se apaga con un texto que dice qué falta. El
+ * veredicto de "creable" no se decide acá: lo calcula `motivoNoCreable`
+ * (`lib/turnos/lote-propuestas.ts`), que espeja los requisitos reales de
+ * `crearTurnosEnLote` y está probado aparte, como todo lo demás que esta
+ * pantalla solo pinta.
+ *
+ * ## El único dato que se completa acá: la especialidad de la serie
+ *
+ * Medido con el mensaje real contra Gemini, tres corridas seguidas: el texto
+ * del kinesiólogo dice "todas las sesiones pendientes de su tratamiento" y
+ * nunca nombra la práctica, así que la especialidad sale vacía -y sale bien
+ * vacía: no está escrita en ninguna parte, inventarla sería peor-. Pero sin
+ * especialidad no se puede guardar NINGÚN turno (`lib/validacion/turno.schema.ts`),
+ * o sea que la coherencia recién arreglada terminaba, en el caso real que la
+ * motivó, en diez filas bloqueadas y un botón apagado.
+ *
+ * Por eso -y solo por eso- esta pantalla gana UN campo: la especialidad, que
+ * es un dato COMÚN a toda la serie y se completa una vez para las diez. Es el
+ * mismo `CampoAutocompletar` con el mismo catálogo que el formulario de abajo,
+ * aparece únicamente cuando alguna propuesta llegó sin especialidad, y solo
+ * RELLENA huecos: nunca pisa la especialidad que el mensaje sí traía. La fecha
+ * y la hora no se editan acá a propósito -son propias de cada cita, no del
+ * lote, y una lista de diez mini-formularios sería otra pantalla-.
  */
 
 import * as React from "react"
@@ -63,14 +97,17 @@ import { CalendarPlusIcon, SparklesIcon } from "lucide-react"
 
 import { Alerta } from "@/components/base/alerta"
 import { Boton } from "@/components/base/boton"
+import { CampoAutocompletar } from "@/components/base/campo-autocompletar"
 import { CampoTextarea } from "@/components/base/campo-textarea"
 import { VeloEspera } from "@/components/base/velo-espera"
+import { CATALOGO_ESPECIALIDADES } from "@/lib/especialidades/catalogo"
 import {
   crearTurnosEnLote,
   type ResultadoLoteTurnos,
   type ResultadoTurnoDelLote,
 } from "@/app/(app)/(con-nav)/turnos/actions"
 import {
+  AVISO_SIN_ESPECIALIDAD,
   propuestaACamposPrecargables,
   type PropuestaTurno,
   type ResultadoAnalisisMensaje,
@@ -79,6 +116,7 @@ import { formatearFechaConDiaTurno } from "@/lib/turnos/formato"
 import { combinarFechaHoraUshuaia } from "@/lib/turnos/fecha"
 import {
   describirLoteDePropuestas,
+  faltaParaCrearElLote,
   frasesDelResultadoDelLote,
   tituloDelResultadoDelLote,
   type FilaDelLote,
@@ -129,9 +167,16 @@ function extraerResultado(cuerpo: unknown): ResultadoAnalisisMensaje | null {
   return null
 }
 
-/** "martes 25 de agosto de 2026 · 11:00", o lo que se pueda con lo que haya. */
+/**
+ * "martes 25 de agosto de 2026 · 11:00", o lo que se pueda con lo que haya.
+ *
+ * Solo dice CUÁNDO. La consecuencia de que falte un dato -que el turno no se
+ * pueda crear- la dice `FilaDelLote.motivo`, en su propio renglón: mezclar las
+ * dos cosas en esta línea era lo que producía el "Sin fecha — no lo podemos
+ * crear" debajo de una casilla tildada.
+ */
 function cuandoTexto(fila: FilaDelLote): string {
-  if (fila.fecha.length === 0) return "Sin fecha — no lo podemos crear"
+  if (fila.fecha.length === 0) return "Sin fecha"
 
   const instante = combinarFechaHoraUshuaia(fila.fecha, fila.hora || "00:00")
   const fechaTexto = instante ? formatearFechaConDiaTurno(instante.toISOString()) : fila.fecha
@@ -155,6 +200,12 @@ export function AnalizadorMensajeTurno({
 
   // Estado exclusivo del camino de varios turnos.
   const [marcados, setMarcados] = React.useState<boolean[]>([])
+  /**
+   * La especialidad que la persona completa para TODA la serie cuando el
+   * mensaje no la dice (ver "El único dato que se completa acá" en el
+   * encabezado). Solo rellena las propuestas que la tienen vacía.
+   */
+  const [especialidadDelLote, setEspecialidadDelLote] = React.useState("")
   const [creando, setCreando] = React.useState(false)
   const [errorLote, setErrorLote] = React.useState<string | null>(null)
   const [reporte, setReporte] = React.useState<ResultadoLoteTurnos | null>(null)
@@ -170,17 +221,59 @@ export function AnalizadorMensajeTurno({
   )
 
   const esLote = resultado?.relacion === "varios_turnos" && resultado.otrasPropuestas.length > 0
-  const propuestas = React.useMemo(
+  const propuestasCrudas = React.useMemo(
     () => (resultado ? [resultado.propuestaPrincipal, ...resultado.otrasPropuestas] : []),
     [resultado],
   )
+
+  /** `true` si al menos una propuesta llegó sin especialidad: el mensaje no la decía y nadie la puede adivinar. */
+  const faltaEspecialidad = propuestasCrudas.some((propuesta) => propuesta.especialidad.trim().length === 0)
+
+  /**
+   * Las propuestas tal como se van a crear: con la especialidad que completó
+   * la persona puesta en las que no traían ninguna. Nunca pisa una que el
+   * mensaje sí traía — el criterio de "solo rellena huecos" es el mismo que
+   * usa `heredarDatosComunes` para el resto de los datos del encabezado.
+   */
+  const propuestas = React.useMemo(() => {
+    const completada = especialidadDelLote.trim()
+    if (completada.length === 0) return propuestasCrudas
+    return propuestasCrudas.map((propuesta) =>
+      propuesta.especialidad.trim().length > 0
+        ? propuesta
+        : {
+            ...propuesta,
+            especialidad: completada,
+            // El aviso de "no pudimos identificar la especialidad" deja de ser
+            // cierto en cuanto la persona la escribe: dejarlo puesto sería
+            // señalar como problema justo lo que se acaba de resolver.
+            avisos: propuesta.avisos.filter((aviso) => aviso !== AVISO_SIN_ESPECIALIDAD),
+          },
+    )
+  }, [propuestasCrudas, especialidadDelLote])
+  // El "ahora" contra el que se decide si una cita ya pasó se fija al armar la
+  // lista, no en cada render: así la pantalla no se le mueve debajo del dedo a
+  // la persona mientras la lee. Lo que pase después de tocar el botón lo
+  // resuelve la Server Action, que valida con su propio reloj.
   const { comunes, avisosComunes, filas } = React.useMemo(
-    () => describirLoteDePropuestas(esLote ? propuestas : []),
+    () => describirLoteDePropuestas(esLote ? propuestas : [], new Date()),
     [esLote, propuestas],
   )
   const hayAlgoComun =
     Boolean(comunes.especialidad || comunes.medico || comunes.lugarNombre || comunes.lugarDireccion) ||
     avisosComunes.length > 0
+
+  /**
+   * Los índices que se van a mandar: marcados Y creables. La intersección se
+   * hace acá, no al marcar, para que la cuenta del botón nunca pueda incluir
+   * una fila que la lista está mostrando como imposible.
+   */
+  const indicesAEnviar = React.useMemo(
+    () => filas.filter((fila) => fila.creable && (marcados[fila.indice] ?? false)).map((fila) => fila.indice),
+    [filas, marcados],
+  )
+  const cantidadMarcados = indicesAEnviar.length
+  const faltaParaCrear = faltaParaCrearElLote(filas)
 
   async function analizar() {
     if (mensaje.trim().length === 0) {
@@ -206,7 +299,13 @@ export function AnalizadorMensajeTurno({
 
       if (resultadoRecibido) {
         setResultado(resultadoRecibido)
+        setEspecialidadDelLote("")
         const cantidad = 1 + resultadoRecibido.otrasPropuestas.length
+        // `marcados` guarda la ELECCIÓN de la persona, que arranca en "todos".
+        // Que una fila sea creable o no es otra cosa, se recalcula en cada
+        // render y se cruza con esto en `indicesAEnviar`: así una fila que
+        // pasa a ser creable -porque se completó la especialidad de la serie-
+        // no queda desmarcada por una decisión tomada antes de que existiera.
         setMarcados(Array.from({ length: cantidad }, () => true))
         // Solo el camino de UN turno toca el formulario de abajo — ver el
         // encabezado del archivo para por qué el lote no lo precarga.
@@ -256,8 +355,6 @@ export function AnalizadorMensajeTurno({
     setMarcados((previos) => previos.map((marcado, i) => (i === indice ? !marcado : marcado)))
   }
 
-  const cantidadMarcados = marcados.filter(Boolean).length
-
   /**
    * Crea de una vez los turnos marcados. Reintentar después de un resultado
    * parcial es seguro: la Server Action saltea los que ya existen, así que un
@@ -275,9 +372,9 @@ export function AnalizadorMensajeTurno({
     setReporte(null)
 
     // Índices de la lista completa que se están mandando, EN ORDEN: es la
-    // tabla de traducción entre el reporte (indexado 0..n-1 sobre lo marcado)
+    // tabla de traducción entre el reporte (indexado 0..n-1 sobre lo enviado)
     // y las filas que ve la persona.
-    const indicesEnviados = marcados.flatMap((marcado, indice) => (marcado ? [indice] : []))
+    const indicesEnviados = indicesAEnviar
 
     try {
       const respuesta = await crearTurnosEnLote({
@@ -318,6 +415,7 @@ export function AnalizadorMensajeTurno({
     setMensaje("")
     setResultado(null)
     setMarcados([])
+    setEspecialidadDelLote("")
     setReporte(null)
     setEstadoPorIndice(new Map())
     setErrorAnalisis(null)
@@ -419,6 +517,24 @@ export function AnalizadorMensajeTurno({
                   Elegí cuáles crear
                 </legend>
 
+                {/* El mensaje no decía de qué son las sesiones, y sin
+                    especialidad no se puede guardar ningún turno. Es un dato
+                    COMÚN a toda la serie, así que se pide una sola vez acá en
+                    vez de mandar a cargar diez turnos a mano — ver "El único
+                    dato que se completa acá" en el encabezado. */}
+                {faltaEspecialidad && (
+                  <CampoAutocompletar
+                    id="especialidad-del-lote"
+                    label="¿De qué son estas sesiones?"
+                    required
+                    maxLength={100}
+                    value={especialidadDelLote}
+                    onChange={setEspecialidadDelLote}
+                    opciones={CATALOGO_ESPECIALIDADES}
+                    ayuda="El mensaje no lo decía. Escribilo una vez y vale para todas las sesiones de la lista (ej: Kinesiología, Fonoaudiología)."
+                  />
+                )}
+
                 {hayAlgoComun && (
                   <dl className="flex flex-col gap-1 rounded-md bg-muted px-3 py-2 text-sm chica:text-xs">
                     <p className="font-medium text-foreground">Todos comparten:</p>
@@ -467,13 +583,28 @@ export function AnalizadorMensajeTurno({
                     const estado = estadoPorIndice.get(fila.indice)
                     return (
                       <li key={fila.indice}>
-                        <label className="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-muted chica:gap-2">
+                        <label
+                          className={
+                            fila.creable
+                              ? "flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-muted chica:gap-2"
+                              : "flex items-start gap-3 rounded-md p-2 chica:gap-2"
+                          }
+                        >
+                          {/* Una fila que no se puede crear queda desmarcada y
+                              sin poder marcarse: el motivo está justo debajo.
+                              Antes se podía tildar igual y el botón la contaba,
+                              prometiendo lo que la propia fila declaraba
+                              imposible. */}
                           <input
                             type="checkbox"
-                            checked={marcados[fila.indice] ?? false}
+                            checked={fila.creable && (marcados[fila.indice] ?? false)}
                             onChange={() => alternarMarcado(fila.indice)}
-                            disabled={creando || estado?.estado === "creado"}
-                            className="mt-1 size-6 shrink-0 cursor-pointer accent-primary chica:size-5"
+                            disabled={creando || !fila.creable || estado?.estado === "creado"}
+                            className={
+                              fila.creable
+                                ? "mt-1 size-6 shrink-0 cursor-pointer accent-primary chica:size-5"
+                                : "mt-1 size-6 shrink-0 accent-primary chica:size-5"
+                            }
                           />
                           <span className="flex flex-col gap-0.5">
                             <span className="text-base font-medium text-foreground chica:text-sm">
@@ -482,6 +613,11 @@ export function AnalizadorMensajeTurno({
                             <span className="text-base text-foreground chica:text-sm">
                               {cuandoTexto(fila)}
                             </span>
+                            {!fila.creable && (
+                              <span className="text-sm font-medium text-advertencia-fuerte chica:text-xs">
+                                {fila.motivo}
+                              </span>
+                            )}
                             {fila.propios.map((dato) => (
                               <span key={dato.etiqueta} className="text-sm text-muted-foreground chica:text-xs">
                                 {dato.etiqueta}: {dato.valor}
@@ -517,6 +653,21 @@ export function AnalizadorMensajeTurno({
 
               {errorLote && <Alerta variante="error">{errorLote}</Alerta>}
 
+              {/* Sin ninguna fila creable el botón queda apagado, y esto dice
+                  qué falta y qué se puede hacer igual: un botón deshabilitado
+                  y mudo se lee como que la app se rompió. */}
+              {faltaParaCrear.length > 0 && (
+                <Alerta variante="advertencia" titulo="No podemos crear estos turnos todavía">
+                  {faltaParaCrear}
+                </Alerta>
+              )}
+
+              {/* Quedan turnos creables pero la persona los desmarcó todos:
+                  no es un problema de la app, así que no es una alerta. */}
+              {cantidadMarcados === 0 && faltaParaCrear.length === 0 && (
+                <p className="text-sm text-muted-foreground chica:text-xs">{MENSAJE_NINGUNO_MARCADO}</p>
+              )}
+
               <Boton
                 type="button"
                 onClick={() => void crearMarcados()}
@@ -525,7 +676,11 @@ export function AnalizadorMensajeTurno({
                 className="w-fit"
               >
                 <CalendarPlusIcon aria-hidden="true" />
-                {cantidadMarcados === 1 ? "Crear 1 turno" : `Crear los ${cantidadMarcados} turnos`}
+                {cantidadMarcados === 0
+                  ? "Crear los turnos"
+                  : cantidadMarcados === 1
+                    ? "Crear 1 turno"
+                    : `Crear los ${cantidadMarcados} turnos`}
               </Boton>
             </div>
           )}

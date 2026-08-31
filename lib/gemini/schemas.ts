@@ -964,8 +964,18 @@ function schemaTurnoExtraidoCrudo(): Schema {
       fechaTexto: {
         type: Type.STRING,
         description:
-          'La fecha EXACTAMENTE como aparece en el mensaje (ej: "07/10/2024", "14/7", "26/5"). NO le agregues ' +
-          'el año si no está, NO la conviertas a otro formato. Cadena vacía si el mensaje no trae fecha.',
+          'La fecha EXACTAMENTE como aparece en el mensaje (ej: "07/10/2024", "14/7", "26/5", ' +
+          '"13 de Agosto", "3 de septiembre"). El mes puede venir EN PALABRAS: copialo igual, en palabras. ' +
+          'NO le agregues el año si no está, NO la conviertas a otro formato, NO la pases a números. ' +
+          'Cadena vacía si el mensaje no trae fecha.',
+      },
+      anioProbable: {
+        type: Type.INTEGER,
+        description:
+          'Si la fecha NO trae año escrito, el año de CUATRO DÍGITOS que te parece que corresponde según el ' +
+          'contexto del mensaje (que suele hablar de turnos próximos). 0 si la fecha ya trae el año escrito, ' +
+          'o si no tenés ninguna base para estimarlo. Es una SUGERENCIA: un programa la coteja después contra ' +
+          'el día de la semana y puede descartarla, así que no fuerces un número para llenar el campo.',
       },
       diaSemanaTexto: {
         type: Type.STRING,
@@ -1053,6 +1063,7 @@ function schemaTurnoExtraidoCrudo(): Schema {
     },
     required: [
       'fechaTexto',
+      'anioProbable',
       'diaSemanaTexto',
       'horaTexto',
       'tipoProfesional',
@@ -1069,6 +1080,7 @@ function schemaTurnoExtraidoCrudo(): Schema {
     ],
     propertyOrdering: [
       'fechaTexto',
+      'anioProbable',
       'diaSemanaTexto',
       'horaTexto',
       'tipoProfesional',
@@ -1130,6 +1142,20 @@ export const SCHEMA_ANALISIS_MENSAJE_TURNO: Schema = {
 /** Un turno tal como lo extrajo Gemini, sin normalizar — espejo de `schemaTurnoExtraidoCrudo()`. */
 export interface TurnoExtraidoCrudo {
   fechaTexto: string;
+  /**
+   * El año de cuatro dígitos que el modelo estima cuando la fecha no lo trae
+   * escrito, o `0`. **Nunca decide solo**: es un candidato más que
+   * `lib/turnos/normalizacion-mensaje.ts` coteja contra el día de la semana
+   * declarado, y solo lo mira cuando la ventana de años vecinos no dio
+   * ninguna coincidencia. Ver la escalera de decisión del año en el
+   * encabezado de ese archivo.
+   *
+   * `?` aunque el `responseSchema` lo pida en `required`, por el mismo
+   * criterio defensivo que `titulo` en `DocumentoMedicoExtraido`: un modelo
+   * puede omitir un campo pedido, y "no vino" tiene que valer exactamente lo
+   * mismo que "vino en 0" -que es no aportar ningún candidato extra-.
+   */
+  anioProbable?: number;
   diaSemanaTexto: string;
   horaTexto: string;
   tipoProfesional: TipoProfesionalMensajeTurno;

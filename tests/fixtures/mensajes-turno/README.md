@@ -54,8 +54,39 @@ que nadie los lea como evidencia de campo.
 `lib/gemini/prompt-turno.ts`): lo que se cuenta no son fechas escritas sino
 citas que **van a ocurrir**. Diez fechas que CONVIVEN son diez turnos; dos
 fechas donde una PISA a la otra son un turno. `scripts/test-analizar-mensaje.mjs`
-verifica la cantidad exacta de cada uno contra el Gemini real, y es el único
-chequeo con veredicto duro de ese script.
+verifica la cantidad exacta de cada uno contra el Gemini real, y es uno de los
+dos chequeos con veredicto duro de ese script.
+
+## La fecha escrita en palabras y sin año (agosto 2026)
+
+Segundo bug real de campo, reportado por el dueño con captura. Los dos casos de
+arriba tenían la fecha en números; este la trae **en palabras y sin año** —que
+es la forma más común de escribir una fecha en castellano—. El análisis detectó
+las diez sesiones y hasta el piso y el departamento de la dirección, pero las
+diez salieron **sin fecha**: los formatos que el parser sabía leer eran
+`DD/MM/AAAA` y `DD/MM`, nada más. Peor todavía, la pantalla mostraba las diez
+tildadas bajo un botón que ofrecía "Crear los 10 turnos".
+
+| Archivo | Origen | Qué enseña |
+|---|---|---|
+| `kinesiologia-fechas-en-palabras.txt` | **REAL** (consultorio de kinesiología) | **El caso que motivó el arreglo.** Diez líneas `<Día> <D> de <Mes> - <HH:MM> hs.`: mes EN PALABRAS, **sin año**, día de la semana pegado a la fecha, hora con `hs.` (con punto). El año de cada fecha se resuelve por congruencia con el día de la semana (las diez son 2026), sin pedirle la cuenta al modelo. Además: encabezado con la indicación de anunciarse en mesa, y dirección con piso y departamento en una línea con emojis (`📍 San Martín 1507, 1° piso dpto. 104`). Debe dar **10 turnos, los 10 con fecha y hora** |
+| `centro-rehabilitacion-diciembre-enero.txt` | Sintético | La serie que **cruza el año nuevo**: dos fechas de diciembre y dos de enero, con los meses en minúscula y el día con tilde (`miércoles`, `sábado`), y la hora dicha sin minutos (`9 hs`). Cada fecha valida su propio año, así que la serie sale repartida entre dos años sin ninguna regla especial. Debe dar **4 turnos, los 4 con fecha** |
+
+`scripts/test-analizar-mensaje.mjs` les aplica a estos dos un **segundo
+veredicto duro** además de la cantidad: que ninguna de sus fechas quede vacía.
+Detectar los diez turnos y no poder fechar ninguno es, para la persona, el
+mismo resultado que no haber detectado nada.
+
+**Nota de fidelidad sobre el fixture real:** el mensaje original seguía con más
+condiciones del consultorio (tolerancia de espera, calzado, etc.) que no se
+compartieron; el fixture llega hasta donde llega el texto que se aportó y no se
+completó con nada inventado. Lo que sí está, está byte a byte —salvo el nombre
+de la paciente, reemplazado por uno de fantasía como en todos los demás—.
+
+**Lo que estos dos NO cambian:** los meses y días en castellano son el idioma
+del producto, no una atadura geográfica. No hay ninguna zona horaria, feriado
+ni convención de un país metida en el parser: la única regla es que la fecha
+sin año se resuelve contra el día de la semana que declara el propio mensaje.
 
 ## Varios mensajes en un solo paste: ¿dividir o fusionar?
 

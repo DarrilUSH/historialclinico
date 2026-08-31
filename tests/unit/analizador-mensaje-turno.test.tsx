@@ -24,7 +24,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AnalizadorMensajeTurno } from "@/components/turnos/analizador-mensaje-turno"
-import type { PropuestaTurno, ResultadoAnalisisMensaje } from "@/lib/turnos/construir-propuestas"
+import {
+  AVISO_SIN_ESPECIALIDAD,
+  type PropuestaTurno,
+  type ResultadoAnalisisMensaje,
+} from "@/lib/turnos/construir-propuestas"
 
 const empujar = vi.fn()
 vi.mock("next/navigation", () => ({
@@ -44,7 +48,10 @@ function propuesta(cambios: Partial<PropuestaTurno> = {}): PropuestaTurno {
     esEstudioNoProfesional: false,
     dudaOrdenNombre: false,
     fecha: "2026-08-21",
+    fechaTexto: "21/08/2026",
     anioInferido: false,
+    anioConfirmadoPorDiaSemana: false,
+    diaSemanaIncongruente: false,
     hora: "11:00",
     discrepanciaDiaSemana: false,
     diaSemanaTexto: "",
@@ -117,13 +124,25 @@ async function analizar() {
   fireEvent.click(screen.getByRole("button", { name: "Analizar" }))
 }
 
+/**
+ * "Hoy" fijo para todo el archivo: 20/08/2026, el día en que llegaría el
+ * mensaje de las diez sesiones. Desde que la pantalla no ofrece crear turnos
+ * que ya pasaron (`motivoNoCreable`), las fechas de las propuestas dejaron de
+ * ser decorativas: sin fijar el reloj, este test empezaría a contar menos
+ * casillas a medida que pasa el tiempo real.
+ */
+const HOY = new Date("2026-08-20T12:00:00-03:00")
+
 beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  vi.setSystemTime(HOY)
   empujar.mockReset()
   crearTurnosEnLoteMock.mockReset()
 })
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
@@ -304,6 +323,225 @@ describe("AnalizadorMensajeTurno — mensaje con varias sesiones", () => {
     await waitFor(() => expect(screen.getByText(/10 ya estaban cargados/)).toBeTruthy())
     expect(screen.getAllByText(/Ya estaba cargado/)).toHaveLength(10)
     expect(empujar).not.toHaveBeenCalled()
+  })
+})
+
+/* ═════════════════════════════════════════════════════════════════════════
+ *  La lista no puede ofrecer lo que ella misma declara imposible
+ *  (bug reportado con captura, agosto 2026)
+ * ═════════════════════════════════════════════════════════════════════════ */
+
+/** Un análisis de varios turnos armado con las propuestas que se le pasen. */
+function analisisCon(propuestas: PropuestaTurno[]): ResultadoAnalisisMensaje {
+  return {
+    relacion: "varios_turnos",
+    explicacion: "Varias sesiones del mismo tratamiento.",
+    contradiccion: null,
+    propuestaPrincipal: propuestas[0],
+    otrasPropuestas: propuestas.slice(1),
+  }
+}
+
+describe("AnalizadorMensajeTurno — una fila que no se puede crear no se ofrece", () => {
+  it("la sesión SIN fecha queda desmarcada, no se puede marcar, y el botón no la cuenta", async () => {
+    mockearAnalisis(
+      analisisCon([
+        propuesta({ fecha: "2026-08-21", hora: "11:00", etiquetaSesion: "Sesión 1/3" }),
+        propuesta({
+          fecha: "",
+          fechaTexto: "13 de Agosto",
+          hora: "18:30",
+          etiquetaSesion: "Sesión 2/3",
+          avisos: ["El mensaje no traía una fecha que pudiéramos interpretar — completala vos."],
+        }),
+        propuesta({ fecha: "2026-08-25", hora: "11:00", etiquetaSesion: "Sesión 3/3" }),
+      ]),
+    )
+    render(<AnalizadorMensajeTurno onAplicarPropuesta={vi.fn()} />)
+    await analizar()
+
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(3))
+    const casillas = screen.getAllByRole("checkbox") as HTMLInputElement[]
+
+    // La del medio no está tildada y no se puede tildar.
+    expect(casillas.map((casilla) => casilla.checked)).toEqual([true, false, true])
+    expect(casillas[1].disabled).toBe(true)
+    expect(screen.getByText(/Falta la fecha — no lo podemos crear\./)).toBeTruthy()
+
+    // Y el botón promete DOS, no tres.
+    expect(screen.getByRole("button", { name: /Crear los 2 turnos/ })).toBeTruthy()
+
+    // Tocarla no la marca ni cambia la cuenta.
+    fireEvent.click(casillas[1])
+    expect((screen.getAllByRole("checkbox")[1] as HTMLInputElement).checked).toBe(false)
+    expect(screen.getByRole("button", { name: /Crear los 2 turnos/ })).toBeTruthy()
+  })
+
+  it("con las diez sin fecha, el botón queda apagado y dice qué falta (el bug de la captura)", async () => {
+    mockearAnalisis(
+      analisisCon(
+        Array.from({ length: 10 }, () =>
+          propuesta({
+            fecha: "",
+            fechaTexto: "13 de Agosto",
+            hora: "18:30",
+            numeroSesion: 0,
+            totalSesiones: 0,
+            etiquetaSesion: "",
+          }),
+        ),
+      ),
+    )
+    render(<AnalizadorMensajeTurno onAplicarPropuesta={vi.fn()} />)
+    await analizar()
+
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(10))
+    const casillas = screen.getAllByRole("checkbox") as HTMLInputElement[]
+
+    // Ninguna tildada, ninguna marcable: antes estaban las diez tildadas.
+    expect(casillas.some((casilla) => casilla.checked)).toBe(false)
+    expect(casillas.every((casilla) => casilla.disabled)).toBe(true)
+
+    // Y el botón ya no promete diez turnos imposibles.
+    expect(screen.queryByRole("button", { name: /Crear los 10 turnos/ })).toBeNull()
+    const boton = screen.getByRole("button", { name: /Crear los turnos/ }) as HTMLButtonElement
+    expect(boton.disabled).toBe(true)
+    expect(screen.getByText(/Completá las fechas para poder crearlos/)).toBeTruthy()
+  })
+
+  it("una sesión que ya pasó tampoco se ofrece: se crean solo las futuras", async () => {
+    mockearAnalisis(
+      analisisCon([
+        // "Hoy" es el 20/08/2026 al mediodía.
+        propuesta({ fecha: "2026-08-13", hora: "18:30", etiquetaSesion: "Sesión 1/3" }),
+        propuesta({ fecha: "2026-08-19", hora: "18:30", etiquetaSesion: "Sesión 2/3" }),
+        propuesta({ fecha: "2026-08-21", hora: "17:30", etiquetaSesion: "Sesión 3/3" }),
+      ]),
+    )
+    render(<AnalizadorMensajeTurno onAplicarPropuesta={vi.fn()} />)
+    await analizar()
+
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(3))
+    const casillas = screen.getAllByRole("checkbox") as HTMLInputElement[]
+
+    expect(casillas.map((casilla) => casilla.checked)).toEqual([false, false, true])
+    expect(screen.getAllByText(/Ya pasó — no lo podemos crear\./)).toHaveLength(2)
+    expect(screen.getByRole("button", { name: /Crear 1 turno/ })).toBeTruthy()
+  })
+
+  it("el mensaje que no dice la especialidad la pide UNA vez y desbloquea las diez", async () => {
+    crearTurnosEnLoteMock.mockResolvedValue({
+      error: null,
+      resultados: [
+        { indice: 0, estado: "creado", error: null },
+        { indice: 1, estado: "creado", error: null },
+      ],
+      creados: 2,
+      duplicados: 0,
+      fallidos: 0,
+    })
+    // El mensaje real del kinesiólogo: dice "sesiones pendientes de su
+    // tratamiento" y nunca nombra la práctica.
+    mockearAnalisis(
+      analisisCon([
+        propuesta({
+          especialidad: "",
+          medico: "",
+          fecha: "2026-08-26",
+          hora: "19:30",
+          etiquetaSesion: "",
+          avisos: [AVISO_SIN_ESPECIALIDAD],
+        }),
+        propuesta({
+          especialidad: "",
+          medico: "",
+          fecha: "2026-08-28",
+          hora: "19:00",
+          etiquetaSesion: "",
+          avisos: [AVISO_SIN_ESPECIALIDAD],
+        }),
+      ]),
+    )
+    render(<AnalizadorMensajeTurno onAplicarPropuesta={vi.fn()} />)
+    await analizar()
+
+    // Arranca bloqueado, pero con el campo que lo destraba, no con un
+    // "cargalos a mano".
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2))
+    expect((screen.getByRole("button", { name: /Crear los turnos/ }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/Completá la especialidad para poder crearlos/)).toBeTruthy()
+
+    // Se completa una vez y valen las dos.
+    fireEvent.change(screen.getByLabelText(/De qué son estas sesiones/), {
+      target: { value: "Kinesiología" },
+    })
+
+    const boton = await screen.findByRole("button", { name: /Crear los 2 turnos/ })
+    expect((screen.getAllByRole("checkbox")[0] as HTMLInputElement).checked).toBe(true)
+    // Y el aviso de "no pudimos identificar la especialidad" se retira: dejarlo
+    // señalaría como problema justo lo que la persona acaba de resolver.
+    expect(screen.queryByText(AVISO_SIN_ESPECIALIDAD)).toBeNull()
+    fireEvent.click(boton)
+
+    await waitFor(() => expect(crearTurnosEnLoteMock).toHaveBeenCalledTimes(1))
+    const payload = crearTurnosEnLoteMock.mock.calls[0][0] as { turnos: { especialidad: string }[] }
+    expect(payload.turnos.map((t) => t.especialidad)).toEqual(["Kinesiología", "Kinesiología"])
+  })
+
+  it("la especialidad del lote solo rellena huecos: no pisa la que el mensaje sí traía", async () => {
+    crearTurnosEnLoteMock.mockResolvedValue({
+      error: null,
+      resultados: [
+        { indice: 0, estado: "creado", error: null },
+        { indice: 1, estado: "creado", error: null },
+      ],
+      creados: 2,
+      duplicados: 0,
+      fallidos: 0,
+    })
+    mockearAnalisis(
+      analisisCon([
+        propuesta({ especialidad: "Fonoaudiología", fecha: "2026-08-26", hora: "19:30" }),
+        propuesta({ especialidad: "", fecha: "2026-08-28", hora: "19:00" }),
+      ]),
+    )
+    render(<AnalizadorMensajeTurno onAplicarPropuesta={vi.fn()} />)
+    await analizar()
+
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2))
+    fireEvent.change(screen.getByLabelText(/De qué son estas sesiones/), {
+      target: { value: "Kinesiología" },
+    })
+
+    fireEvent.click(await screen.findByRole("button", { name: /Crear los 2 turnos/ }))
+    await waitFor(() => expect(crearTurnosEnLoteMock).toHaveBeenCalledTimes(1))
+
+    const payload = crearTurnosEnLoteMock.mock.calls[0][0] as { turnos: { especialidad: string }[] }
+    expect(payload.turnos.map((t) => t.especialidad)).toEqual(["Fonoaudiología", "Kinesiología"])
+  })
+
+  it("no pide la especialidad cuando el mensaje ya la trae en todas", async () => {
+    mockearAnalisis(analisisDeDiezSesiones())
+    render(<AnalizadorMensajeTurno onAplicarPropuesta={vi.fn()} />)
+    await analizar()
+
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(10))
+    expect(screen.queryByLabelText(/De qué son estas sesiones/)).toBeNull()
+  })
+
+  it("la sesión sin HORA tampoco se puede crear, y lo dice", async () => {
+    mockearAnalisis(
+      analisisCon([
+        propuesta({ fecha: "2026-08-21", hora: "11:00", etiquetaSesion: "Sesión 1/2" }),
+        propuesta({ fecha: "2026-08-25", hora: "", etiquetaSesion: "Sesión 2/2" }),
+      ]),
+    )
+    render(<AnalizadorMensajeTurno onAplicarPropuesta={vi.fn()} />)
+    await analizar()
+
+    await waitFor(() => expect(screen.getAllByRole("checkbox")).toHaveLength(2))
+    expect(screen.getByText(/Falta la hora — no lo podemos crear\./)).toBeTruthy()
+    expect(screen.getByRole("button", { name: /Crear 1 turno/ })).toBeTruthy()
   })
 })
 

@@ -13,7 +13,9 @@ import { describe, expect, it } from "vitest"
 import type { PropuestaTurno } from "@/lib/turnos/construir-propuestas"
 import {
   describirLoteDePropuestas,
+  faltaParaCrearElLote,
   frasesDelResultadoDelLote,
+  motivoNoCreable,
   tituloDelResultadoDelLote,
   type ConteoDelLote,
 } from "@/lib/turnos/lote-propuestas"
@@ -26,7 +28,10 @@ function propuesta(cambios: Partial<PropuestaTurno> = {}): PropuestaTurno {
     esEstudioNoProfesional: false,
     dudaOrdenNombre: false,
     fecha: "2026-08-25",
+    fechaTexto: "25/08/2026",
     anioInferido: false,
+    anioConfirmadoPorDiaSemana: false,
+    diaSemanaIncongruente: false,
     hora: "11:00",
     discrepanciaDiaSemana: false,
     diaSemanaTexto: "",
@@ -283,5 +288,101 @@ describe("frasesDelResultadoDelLote", () => {
 
   it("nada de nada: una frase que dice explícitamente que no quedó nada nuevo", () => {
     expect(frasesDelResultadoDelLote(conteo())).toEqual(["No quedó ningún turno nuevo cargado."])
+  })
+})
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ *  Qué se puede crear y qué no (bug reportado con captura, agosto 2026)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Las diez sesiones sin fecha aparecían TILDADAS bajo un botón que ofrecía
+ * "Crear los 10 turnos". El veredicto de creable/no creable es lo que impide
+ * que la pantalla vuelva a prometer lo que ella misma declara imposible, y
+ * espeja los requisitos reales de `crearTurnosEnLote`.
+ */
+describe("motivoNoCreable", () => {
+  /** 20/08/2026 al mediodía de Ushuaia. */
+  const AHORA = new Date("2026-08-20T12:00:00-03:00")
+
+  it("un turno futuro con fecha, hora y especialidad se puede crear", () => {
+    expect(motivoNoCreable(propuesta({ fecha: "2026-08-25", hora: "11:00" }), AHORA)).toBe("")
+  })
+
+  it("nombra el dato que falta, uno o varios", () => {
+    expect(motivoNoCreable(propuesta({ fecha: "" }), AHORA)).toBe("Falta la fecha — no lo podemos crear.")
+    expect(motivoNoCreable(propuesta({ hora: "" }), AHORA)).toBe("Falta la hora — no lo podemos crear.")
+    expect(motivoNoCreable(propuesta({ especialidad: "" }), AHORA)).toBe(
+      "Falta la especialidad — no lo podemos crear.",
+    )
+    expect(motivoNoCreable(propuesta({ fecha: "", hora: "" }), AHORA)).toBe(
+      "Faltan la fecha y la hora — no lo podemos crear.",
+    )
+    expect(motivoNoCreable(propuesta({ fecha: "", hora: "", especialidad: "" }), AHORA)).toBe(
+      "Faltan la fecha, la hora y la especialidad — no lo podemos crear.",
+    )
+  })
+
+  it("una cita que ya pasó no se puede crear (la Server Action la rechazaría)", () => {
+    expect(motivoNoCreable(propuesta({ fecha: "2026-08-13", hora: "18:30" }), AHORA)).toBe(
+      "Ya pasó — no lo podemos crear.",
+    )
+    // Y el borde: hoy mismo, más tarde, sí se puede.
+    expect(motivoNoCreable(propuesta({ fecha: "2026-08-20", hora: "19:00" }), AHORA)).toBe("")
+    expect(motivoNoCreable(propuesta({ fecha: "2026-08-20", hora: "09:00" }), AHORA)).toBe(
+      "Ya pasó — no lo podemos crear.",
+    )
+  })
+})
+
+describe("describirLoteDePropuestas — creable y motivo por fila", () => {
+  const AHORA = new Date("2026-08-20T12:00:00-03:00")
+
+  it("marca creable solo lo que se puede crear, con su motivo al lado", () => {
+    const { filas } = describirLoteDePropuestas(
+      [
+        propuesta({ fecha: "2026-08-25", hora: "11:00" }),
+        propuesta({ fecha: "", hora: "18:30" }),
+        propuesta({ fecha: "2026-08-13", hora: "18:30" }),
+      ],
+      AHORA,
+    )
+
+    expect(filas.map((fila) => fila.creable)).toEqual([true, false, false])
+    expect(filas.map((fila) => fila.motivo)).toEqual([
+      "",
+      "Falta la fecha — no lo podemos crear.",
+      "Ya pasó — no lo podemos crear.",
+    ])
+  })
+})
+
+describe("faltaParaCrearElLote", () => {
+  const AHORA = new Date("2026-08-20T12:00:00-03:00")
+
+  function filasDe(propuestas: PropuestaTurno[]) {
+    return describirLoteDePropuestas(propuestas, AHORA).filas
+  }
+
+  it("calla mientras quede algo que crear", () => {
+    expect(
+      faltaParaCrearElLote(filasDe([propuesta({ fecha: "2026-08-25" }), propuesta({ fecha: "" })])),
+    ).toBe("")
+  })
+
+  it("con todas sin fecha, dice exactamente qué falta y la salida que queda", () => {
+    const texto = faltaParaCrearElLote(filasDe([propuesta({ fecha: "" }), propuesta({ fecha: "" })]))
+    expect(texto).toContain("Completá las fechas para poder crearlos")
+    expect(texto).toContain("formulario de abajo")
+  })
+
+  it("con motivos distintos remite al motivo de cada fila", () => {
+    const texto = faltaParaCrearElLote(
+      filasDe([propuesta({ fecha: "" }), propuesta({ fecha: "2026-08-13", hora: "18:30" })]),
+    )
+    expect(texto).toContain("al lado de cada uno está el motivo")
+  })
+
+  it("sin filas no dice nada", () => {
+    expect(faltaParaCrearElLote([])).toBe("")
   })
 })

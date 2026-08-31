@@ -40,8 +40,26 @@
  * las propuestas sube a `avisosComunes` y se dice una vez arriba; los que son
  * de una fila sola se quedan en su fila, que es donde sirven ("esta sesión no
  * trae hora").
+ *
+ * ## Una fila que NO se puede crear no puede aparecer tildada (agosto 2026)
+ *
+ * Reportado por el dueño con captura, sobre el mensaje de las diez sesiones que
+ * llegaron sin fecha interpretable: las diez decían *"Sin fecha — no lo podemos
+ * crear"*, y aun así estaban las diez TILDADAS y el botón ofrecía *"Crear los 10
+ * turnos"*. La pantalla prometía exactamente lo que ella misma acababa de
+ * declarar imposible; el único desenlace posible era diez errores.
+ *
+ * Por eso cada fila ahora dice si es CREABLE (`FilaDelLote.creable`) y por qué
+ * no lo es (`FilaDelLote.motivo`), y esa decisión vive acá, en la capa pura,
+ * junto a todo lo demás que la pantalla solo pinta. Los motivos son los mismos
+ * requisitos que exige guardar un turno (`lib/validacion/turno.schema.ts`, con
+ * `exigirFechaFutura`), evaluados ANTES de mandar nada: falta la fecha, falta
+ * la hora, falta la especialidad, o la cita ya pasó. Que el reporte de la
+ * Server Action siga explicando fila por fila lo que pasó no es excusa para
+ * ofrecer el intento: un error que se puede anticipar se anticipa.
  */
 
+import { combinarFechaHoraUshuaia } from "@/lib/turnos/fecha"
 import type { PropuestaTurno } from "@/lib/turnos/construir-propuestas"
 
 /** Los campos que se muestran una sola vez cuando valen para todo el lote. Cadena vacía = no es común, va por fila. */
@@ -73,6 +91,12 @@ export interface FilaDelLote {
   propios: DatoPropio[]
   /** Avisos que son SOLO de esta propuesta. Los que valen para todas viven en `DescripcionDelLote.avisosComunes`. */
   avisos: string[]
+  /** `true` si este turno se puede crear tal como está. Una fila no creable no se puede marcar ni entra en la cuenta del botón. */
+  creable: boolean
+  /** Por qué no se puede crear, en castellano y listo para mostrar. `""` cuando sí se puede. */
+  motivo: string
+  /** Qué datos obligatorios le faltan. Vacío si no le falta ninguno (puede seguir sin ser creable: ver `motivo`). */
+  faltantes: DatoFaltanteDelTurno[]
 }
 
 export interface DescripcionDelLote {
@@ -80,6 +104,84 @@ export interface DescripcionDelLote {
   /** Avisos que TODAS las propuestas comparten, para decirlos una sola vez arriba. Ver el encabezado. */
   avisosComunes: string[]
   filas: FilaDelLote[]
+}
+
+/** `["la fecha", "la hora"]` → `"la fecha y la hora"`. */
+function enumerarEnCastellano(partes: readonly string[]): string {
+  if (partes.length <= 1) return partes[0] ?? ""
+  return `${partes.slice(0, -1).join(", ")} y ${partes[partes.length - 1]}`
+}
+
+/** Los tres datos que `validarTurno` exige sí o sí para poder guardar un turno. */
+export type DatoFaltanteDelTurno = "fecha" | "hora" | "especialidad"
+
+const ARTICULO_SINGULAR: Record<DatoFaltanteDelTurno, string> = {
+  fecha: "la fecha",
+  hora: "la hora",
+  especialidad: "la especialidad",
+}
+
+/** En plural, para hablar de todo el lote a la vez ("Completá las fechas…"). */
+const ARTICULO_PLURAL: Record<DatoFaltanteDelTurno, string> = {
+  fecha: "las fechas",
+  hora: "los horarios",
+  especialidad: "la especialidad",
+}
+
+/**
+ * La especialidad es el único faltante que la pantalla del lote SÍ puede
+ * arreglar sin salir de ahí: es un dato común a toda la serie y se completa
+ * con un solo campo. Las fechas y los horarios son propios de cada cita y no
+ * se editan en esta lista.
+ */
+export const FALTANTE_COMPLETABLE_EN_EL_LOTE: DatoFaltanteDelTurno = "especialidad"
+
+/** Frase final de un motivo, para que las cuatro suenen igual. */
+const NO_LO_PODEMOS_CREAR = "no lo podemos crear."
+
+/** Texto exacto del motivo de una cita que ya ocurrió, para poder reconocerlo sin repetir el string. */
+export const MOTIVO_YA_PASO = `Ya pasó — ${NO_LO_PODEMOS_CREAR}`
+
+/**
+ * Qué datos obligatorios le faltan a una propuesta. Lista vacía no significa
+ * que se pueda crear: puede estar completa y haber pasado (`motivoNoCreable`).
+ */
+export function datosFaltantes(propuesta: PropuestaTurno): DatoFaltanteDelTurno[] {
+  const faltantes: DatoFaltanteDelTurno[] = []
+  if (propuesta.fecha.trim().length === 0) faltantes.push("fecha")
+  if (propuesta.hora.trim().length === 0) faltantes.push("hora")
+  if (propuesta.especialidad.trim().length === 0) faltantes.push("especialidad")
+  return faltantes
+}
+
+/**
+ * Por qué esta propuesta NO se puede crear, o `""` si se puede.
+ *
+ * Espeja los requisitos de `validarTurno` con `exigirFechaFutura: true`
+ * (`lib/validacion/turno.schema.ts`), que es exactamente lo que va a correr
+ * `crearTurnosEnLote` del otro lado. Adelantar acá el mismo veredicto es lo
+ * que permite que la pantalla no ofrezca un botón que ya sabe que va a
+ * fallar; el reporte de la Server Action sigue siendo la última palabra -y la
+ * que cubre lo que puede cambiar entre que se dibuja la lista y se toca el
+ * botón, como una cita que pasa a ser pasada mientras la pantalla está
+ * abierta-.
+ *
+ * `ahora` es inyectable para que los tests fijen "hoy" sin depender del reloj.
+ */
+export function motivoNoCreable(propuesta: PropuestaTurno, ahora: Date = new Date()): string {
+  const faltantes = datosFaltantes(propuesta)
+
+  if (faltantes.length > 0) {
+    const verbo = faltantes.length === 1 ? "Falta" : "Faltan"
+    const lista = enumerarEnCastellano(faltantes.map((dato) => ARTICULO_SINGULAR[dato]))
+    return `${verbo} ${lista} — ${NO_LO_PODEMOS_CREAR}`
+  }
+
+  const instante = combinarFechaHoraUshuaia(propuesta.fecha, propuesta.hora)
+  if (!instante) return `Esa fecha y hora no existen en el calendario — ${NO_LO_PODEMOS_CREAR}`
+  if (instante.getTime() <= ahora.getTime()) return MOTIVO_YA_PASO
+
+  return ""
 }
 
 /** Un campo es común si todas las propuestas lo traen con el mismo valor no vacío. */
@@ -102,7 +204,10 @@ function avisosCompartidos(propuestas: readonly PropuestaTurno[]): string[] {
   )
 }
 
-export function describirLoteDePropuestas(propuestas: readonly PropuestaTurno[]): DescripcionDelLote {
+export function describirLoteDePropuestas(
+  propuestas: readonly PropuestaTurno[],
+  ahora: Date = new Date(),
+): DescripcionDelLote {
   if (propuestas.length === 0) {
     return {
       comunes: { medico: "", especialidad: "", lugarNombre: "", lugarDireccion: "" },
@@ -133,6 +238,8 @@ export function describirLoteDePropuestas(propuestas: readonly PropuestaTurno[])
     sumarSiEsPropio("Lugar", propuesta.lugarNombre, comunes.lugarNombre)
     sumarSiEsPropio("Dirección", propuesta.lugarDireccion, comunes.lugarDireccion)
 
+    const motivo = motivoNoCreable(propuesta, ahora)
+
     return {
       indice,
       titulo: propuesta.etiquetaSesion.length > 0 ? propuesta.etiquetaSesion : `Turno ${indice + 1}`,
@@ -142,10 +249,45 @@ export function describirLoteDePropuestas(propuestas: readonly PropuestaTurno[])
       propios,
       // Solo lo que es de ESTA fila: lo que comparten todas ya se dijo arriba.
       avisos: propuesta.avisos.filter((aviso) => !esComun.has(aviso)),
+      creable: motivo.length === 0,
+      motivo,
+      faltantes: datosFaltantes(propuesta),
     }
   })
 
   return { comunes, avisosComunes, filas }
+}
+
+/**
+ * Qué falta para poder crear ALGO, cuando no hay ninguna fila creable. `""`
+ * mientras quede al menos una: ahí el botón tiene trabajo y no hace falta
+ * explicar nada.
+ *
+ * Existe para que el botón deshabilitado no sea un callejón sin salida: un
+ * botón apagado y mudo se lee como que la app se rompió. El texto dice qué
+ * falta y, cuando la pantalla no puede arreglarlo, adónde ir -el formulario de
+ * abajo-. La única excepción es la especialidad, que sí se completa acá mismo
+ * con un campo para toda la serie (`FALTANTE_COMPLETABLE_EN_EL_LOTE`): mandar
+ * a cargar diez turnos a mano por un dato compartido sería absurdo.
+ */
+export function faltaParaCrearElLote(filas: readonly FilaDelLote[]): string {
+  if (filas.length === 0 || filas.some((fila) => fila.creable)) return ""
+
+  const faltantes = [...new Set(filas.flatMap((fila) => fila.faltantes))]
+
+  if (faltantes.length > 0 && filas.every((fila) => fila.faltantes.length > 0)) {
+    const lista = enumerarEnCastellano(faltantes.map((dato) => ARTICULO_PLURAL[dato]))
+    const seArreglaAca = faltantes.every((dato) => dato === FALTANTE_COMPLETABLE_EN_EL_LOTE)
+    return seArreglaAca
+      ? `Completá ${lista} para poder crearlos.`
+      : `Completá ${lista} para poder crearlos. Podés cargarlos a mano en el formulario de abajo.`
+  }
+
+  if (filas.every((fila) => fila.motivo === MOTIVO_YA_PASO)) {
+    return "Todas estas sesiones ya pasaron: no hay ninguna nueva para cargar."
+  }
+
+  return "No podemos crear ninguno de estos turnos — al lado de cada uno está el motivo. Podés cargarlos a mano en el formulario de abajo."
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

@@ -65,6 +65,26 @@
  * columna `session_number` habría exigido migración, tocar RLS, arnés ×2 y
  * cuatro pantallas, para mostrar exactamente el mismo texto.
  *
+ * ## La fecha de la serie se resuelve para TODA la serie, no fila por fila
+ *
+ * Segundo caso real (agosto 2026): "Jueves 13 de Agosto - 18:30 hs.", diez
+ * veces, sin año. La lectura del mes en palabras y la elección del año por
+ * congruencia con el día de la semana viven en
+ * `lib/turnos/normalizacion-mensaje.ts` (ahí está la escalera completa de
+ * decisión). Lo que cambia ACÁ es QUIÉN pregunta: cuando la relación es
+ * `varios_turnos`, las fechas se resuelven todas juntas con
+ * `resolverFechasDeSerie` en lugar de una por una, porque el año de una fecha
+ * que no declara su día de la semana depende de las hermanas que sí lo
+ * declaran. Fuera de una serie -un turno solo, o el par mensaje+confirmación-
+ * cada fecha se sigue resolviendo por su cuenta: son textos independientes y
+ * no hay nada que anclar.
+ *
+ * Consecuencia visible en los avisos: un año elegido por el día de la semana
+ * NO genera el aviso de "asumimos el año, confirmalo". No es un descuido — es
+ * que el mensaje trae su propio dígito verificador, y repetirle a la persona
+ * que confirme algo ya comprobado, diez veces, entierra lo que sí tiene que
+ * revisar.
+ *
  * ## Deuda declarada: NO se cruza `lugarNombre` contra el catálogo REFES
  *
  * El encargo de la tarea deja como BONUS (opcional, "si es simple") ofrecer
@@ -88,10 +108,13 @@ import type { AnalisisMensajeTurnoExtraido, TurnoExtraidoCrudo } from "@/lib/gem
 import {
   cotejarDiaSemana,
   nombreDiaSemana,
+  nombreLargoDeDiaSemanaTexto,
   NOMBRE_DIA_SEMANA_LARGO,
   normalizarHora,
   normalizarNombreProfesional,
   parsearFechaArgentina,
+  resolverFechasDeSerie,
+  type FechaArgentinaParseada,
 } from "@/lib/turnos/normalizacion-mensaje"
 
 // Mismos topes que `lib/validacion/turno.schema.ts` — ver el punto 3 del
@@ -102,6 +125,8 @@ const MAX_LUGAR_NOMBRE = 150
 const MAX_LUGAR_DIRECCION = 300
 const MAX_LUGAR_CIUDAD = 100
 const MAX_NOTAS = 2000
+/** No va a ninguna columna: es solo para citar en un aviso lo que decía el mensaje. */
+const MAX_FECHA_TEXTO = 100
 
 function recortar(texto: string, max: number): string {
   return texto.length > max ? texto.slice(0, max) : texto
@@ -144,8 +169,14 @@ export interface CamposTurno {
   dudaOrdenNombre: boolean
   /** `YYYY-MM-DD`, o `""` si no se pudo determinar. */
   fecha: string
-  /** `true` si el mensaje no traía el año y se infirió la próxima ocurrencia futura. */
+  /** La fecha TAL COMO la escribió el mensaje ("Jueves 13 de Agosto"), para poder decir qué fue lo que no se pudo interpretar. */
+  fechaTexto: string
+  /** `true` si el mensaje no traía el año y se dedujo acá (por el día de la semana o por la próxima ocurrencia futura). */
   anioInferido: boolean
+  /** `true` si ese año inferido lo CONFIRMÓ el día de la semana que declaraba el mensaje — el único caso en que no hace falta que la persona lo confirme. */
+  anioConfirmadoPorDiaSemana: boolean
+  /** `true` cuando el mensaje traía una fecha legible pero su día de la semana no cae en ningún año candidato: `fecha` quedó vacía a propósito. */
+  diaSemanaIncongruente: boolean
   /** `HH:mm`, o `""` si el mensaje no traía hora — NUNCA se inventa. */
   hora: string
   /** `true` si el mensaje mencionaba un día de la semana que no coincide con `fecha`. */
@@ -183,18 +214,23 @@ export interface ResultadoAnalisisMensaje {
   contradiccion: string | null
 }
 
-/** Computa los campos de negocio de UN turno crudo, sin avisos — building block reusado por el caso simple y por la fusión. */
-function camposDesdeTurnoCrudo(crudo: TurnoExtraidoCrudo, ahora: Date): CamposTurno {
-  let fecha = ""
-  let anioInferido = false
-  const fechaTexto = crudo.fechaTexto.trim()
-  if (fechaTexto.length > 0) {
-    const parseada = parsearFechaArgentina(fechaTexto, ahora)
-    if (parseada) {
-      fecha = parseada.fecha
-      anioInferido = parseada.anioInferido
-    }
-  }
+/**
+ * Computa los campos de negocio de UN turno crudo, sin avisos — building block
+ * reusado por el caso simple y por la fusión.
+ *
+ * La fecha llega YA RESUELTA (`fechaResuelta`) en vez de parsearse acá: en una
+ * serie de sesiones el año de una fecha puede depender de las demás
+ * (`resolverFechasDeSerie`), así que la resolución es una decisión de todo el
+ * lote y se toma una sola vez, arriba, en `construirResultadoAnalisis`.
+ */
+function camposDesdeTurnoCrudo(
+  crudo: TurnoExtraidoCrudo,
+  fechaResuelta: FechaArgentinaParseada | null,
+): CamposTurno {
+  const fecha = fechaResuelta?.fecha ?? ""
+  const anioInferido = fechaResuelta?.anioInferido ?? false
+  const anioConfirmadoPorDiaSemana = fechaResuelta?.anioConfirmadoPorDiaSemana ?? false
+  const diaSemanaIncongruente = fechaResuelta?.diaSemanaIncongruente ?? false
 
   const hora = normalizarHora(crudo.horaTexto)
 
@@ -214,7 +250,10 @@ function camposDesdeTurnoCrudo(crudo: TurnoExtraidoCrudo, ahora: Date): CamposTu
     }
   }
 
-  const diaSemanaTexto = crudo.diaSemanaTexto.trim()
+  // El día de la semana puede venir en su campo o pegado a la fecha ("Jueves
+  // 13 de Agosto"): `fechaResuelta` devuelve el que efectivamente se usó, así
+  // que el aviso de discrepancia y el cotejo hablan siempre del mismo dato.
+  const diaSemanaTexto = crudo.diaSemanaTexto.trim() || (fechaResuelta?.diaSemanaTexto ?? "")
   const discrepanciaDiaSemana =
     fecha.length > 0 && diaSemanaTexto.length > 0 && cotejarDiaSemana(fecha, diaSemanaTexto) === false
 
@@ -225,7 +264,10 @@ function camposDesdeTurnoCrudo(crudo: TurnoExtraidoCrudo, ahora: Date): CamposTu
     esEstudioNoProfesional,
     dudaOrdenNombre,
     fecha,
+    fechaTexto: recortar(crudo.fechaTexto.trim(), MAX_FECHA_TEXTO),
     anioInferido,
+    anioConfirmadoPorDiaSemana,
+    diaSemanaIncongruente,
     hora,
     discrepanciaDiaSemana,
     diaSemanaTexto,
@@ -245,13 +287,51 @@ function camposDesdeTurnoCrudo(crudo: TurnoExtraidoCrudo, ahora: Date): CamposTu
   }
 }
 
+/**
+ * Cómo lo dijo el mensaje, para poder citarlo en un aviso: la fecha tal cual
+ * la escribió, con el día de la semana adelante si venía en su campo aparte y
+ * no estaba ya incluido en la fecha.
+ */
+function citaDeLaFechaDelMensaje(campos: CamposTurno): string {
+  const fecha = campos.fechaTexto.trim()
+  const dia = campos.diaSemanaTexto.trim()
+  if (dia.length === 0) return fecha
+  if (fecha.toLowerCase().includes(dia.toLowerCase())) return fecha
+  return `${dia} ${fecha}`.trim()
+}
+
+/**
+ * Aviso de que el mensaje no permitió determinar la especialidad.
+ *
+ * Es el único aviso EXPORTADO, y por un motivo puntual: la pantalla del lote
+ * (`components/turnos/analizador-mensaje-turno.tsx`) deja completar la
+ * especialidad para toda la serie, y en cuanto la persona la escribe este
+ * aviso pasa a ser mentira. Al retirarlo hay que nombrarlo, y nombrarlo por
+ * la constante -y no repitiendo el string- es lo que evita que se despeguen.
+ */
+export const AVISO_SIN_ESPECIALIDAD = "No pudimos identificar la especialidad ni el estudio — completalo vos."
+
 /** Avisos de revisión a partir de los campos FINALES (ya fusionados si correspondía). */
 function generarAvisos(campos: CamposTurno): string[] {
   const avisos: string[] = []
 
   if (campos.fecha.length === 0) {
-    avisos.push("El mensaje no traía una fecha que pudiéramos interpretar — completala vos.")
-  } else if (campos.anioInferido) {
+    if (campos.diaSemanaIncongruente) {
+      // El mensaje SÍ traía una fecha; lo que no cierra es su año. Decirle a
+      // la persona "no la pudimos interpretar" la mandaría a buscar un error
+      // de lectura que no existe: el dato que no coincide es el del mensaje.
+      const nombreDia = nombreLargoDeDiaSemanaTexto(campos.diaSemanaTexto)
+      avisos.push(
+        `El mensaje decía "${citaDeLaFechaDelMensaje(campos)}", pero esa fecha no cae ` +
+          `${nombreDia.length > 0 ? nombreDia : "ese día"} en ninguno de los años posibles — completala vos.`,
+      )
+    } else {
+      avisos.push("El mensaje no traía una fecha que pudiéramos interpretar — completala vos.")
+    }
+  } else if (campos.anioInferido && !campos.anioConfirmadoPorDiaSemana) {
+    // Con el año confirmado por el día de la semana NO se avisa nada: el
+    // mensaje trae su propio dígito verificador y pedir que confirmen algo ya
+    // comprobado es ruido — y en una serie de diez sesiones, ruido diez veces.
     avisos.push(
       `El mensaje no decía el año — asumimos ${campos.fecha.slice(0, 4)} (la próxima vez que cae esa fecha). Confirmalo.`,
     )
@@ -275,7 +355,7 @@ function generarAvisos(campos: CamposTurno): string[] {
   }
 
   if (campos.especialidad.length === 0) {
-    avisos.push("No pudimos identificar la especialidad ni el estudio — completalo vos.")
+    avisos.push(AVISO_SIN_ESPECIALIDAD)
   } else if (campos.especialidadInferida) {
     avisos.push(`"${campos.especialidad}" es una inferencia nuestra a partir del mensaje — confirmala.`)
   }
@@ -292,8 +372,11 @@ function resumenTurno(campos: CamposTurno): string {
   return etiqueta.length > 0 ? `${etiqueta} — ${fechaHora} — ${quien}` : `${fechaHora} — ${quien}`
 }
 
-function normalizarTurnoCrudo(crudo: TurnoExtraidoCrudo, ahora: Date): PropuestaTurno {
-  const campos = camposDesdeTurnoCrudo(crudo, ahora)
+function normalizarTurnoCrudo(
+  crudo: TurnoExtraidoCrudo,
+  fechaResuelta: FechaArgentinaParseada | null,
+): PropuestaTurno {
+  const campos = camposDesdeTurnoCrudo(crudo, fechaResuelta)
   return {
     ...campos,
     avisos: generarAvisos(campos),
@@ -309,7 +392,10 @@ const CAMPOS_VACIOS: CamposTurno = {
   esEstudioNoProfesional: false,
   dudaOrdenNombre: false,
   fecha: "",
+  fechaTexto: "",
   anioInferido: false,
+  anioConfirmadoPorDiaSemana: false,
+  diaSemanaIncongruente: false,
   hora: "",
   discrepanciaDiaSemana: false,
   diaSemanaTexto: "",
@@ -330,12 +416,28 @@ const CAMPOS_VACIOS: CamposTurno = {
  * estaba vacío. Las notas de los dos mensajes se suman.
  */
 function construirFusion(crudo: AnalisisMensajeTurnoExtraido, ahora: Date): ResultadoAnalisisMensaje {
-  const base = camposDesdeTurnoCrudo(crudo.turnos[0], ahora)
-  const confirmacion = camposDesdeTurnoCrudo(crudo.turnos[1], ahora)
+  // Las dos lecturas se resuelven POR SEPARADO, no como una serie: son dos
+  // mensajes distintos pegados uno atrás del otro, sin ninguna garantía de
+  // compartir contexto de calendario. El anclaje entre fechas es una regla de
+  // series enumeradas dentro de un mismo mensaje —ver
+  // `construirResultadoAnalisis`.
+  const base = camposDesdeTurnoCrudo(crudo.turnos[0], resolverFechaSuelta(crudo.turnos[0], ahora))
+  const confirmacion = camposDesdeTurnoCrudo(crudo.turnos[1], resolverFechaSuelta(crudo.turnos[1], ahora))
 
   const confirmacionTraeFecha = confirmacion.fecha.length > 0
   const fecha = confirmacionTraeFecha ? confirmacion.fecha : base.fecha
+  const fechaTexto = confirmacionTraeFecha ? confirmacion.fechaTexto : base.fechaTexto
   const anioInferido = confirmacionTraeFecha ? confirmacion.anioInferido : base.anioInferido
+  const anioConfirmadoPorDiaSemana = confirmacionTraeFecha
+    ? confirmacion.anioConfirmadoPorDiaSemana
+    : base.anioConfirmadoPorDiaSemana
+  // Solo tiene sentido cuando la fusión quedó SIN fecha: entonces la
+  // incongruencia de cualquiera de las dos lecturas es lo que la explica, y
+  // sin esto el aviso caería al genérico "no la pudimos interpretar",
+  // escondiendo que el mensaje decía un día de la semana que no cierra con
+  // ningún año.
+  const diaSemanaIncongruente =
+    fecha.length === 0 && (base.diaSemanaIncongruente || confirmacion.diaSemanaIncongruente)
   const diaSemanaTexto = confirmacionTraeFecha ? confirmacion.diaSemanaTexto : base.diaSemanaTexto
   const discrepanciaDiaSemana =
     fecha.length > 0 && diaSemanaTexto.length > 0 && cotejarDiaSemana(fecha, diaSemanaTexto) === false
@@ -359,7 +461,10 @@ function construirFusion(crudo: AnalisisMensajeTurnoExtraido, ahora: Date): Resu
     esEstudioNoProfesional,
     dudaOrdenNombre,
     fecha,
+    fechaTexto,
     anioInferido,
+    anioConfirmadoPorDiaSemana,
+    diaSemanaIncongruente,
     hora,
     discrepanciaDiaSemana,
     diaSemanaTexto,
@@ -432,6 +537,16 @@ function heredarDatosComunes(primero: TurnoExtraidoCrudo, turno: TurnoExtraidoCr
   }
 }
 
+/** Resuelve la fecha de UN turno que no forma parte de una serie enumerada. */
+function resolverFechaSuelta(crudo: TurnoExtraidoCrudo, ahora: Date): FechaArgentinaParseada | null {
+  return parsearFechaArgentina(
+    crudo.fechaTexto.trim(),
+    ahora,
+    crudo.diaSemanaTexto,
+    crudo.anioProbable ?? 0,
+  )
+}
+
 /**
  * Construye el resultado final a partir de lo que Gemini extrajo, ya validado
  * por Zod. Punto de entrada único de este módulo.
@@ -463,14 +578,31 @@ export function construirResultadoAnalisis(
   // solo en el primer elemento se rellenan en los demás ANTES de normalizar
   // -ver "Series de sesiones" en la cabecera del archivo-. Solo rellena
   // huecos, nunca pisa un dato propio.
-  const crudos =
-    crudo.relacion === "varios_turnos" && crudo.turnos.length > 1
-      ? crudo.turnos.map((turno, indice) =>
-          indice === 0 ? turno : heredarDatosComunes(crudo.turnos[0], turno),
-        )
-      : crudo.turnos
+  const esSerie = crudo.relacion === "varios_turnos" && crudo.turnos.length > 1
 
-  const normalizados = crudos.map((turno) => normalizarTurnoCrudo(turno, ahora))
+  const crudos = esSerie
+    ? crudo.turnos.map((turno, indice) =>
+        indice === 0 ? turno : heredarDatosComunes(crudo.turnos[0], turno),
+      )
+    : crudo.turnos
+
+  // Las fechas de una SERIE se resuelven juntas: el año de una fecha que no
+  // trae día de la semana se ancla al de sus hermanas ya confirmadas, en vez
+  // de irse sola a "la próxima ocurrencia futura" y despegarse un año del
+  // resto (ver `resolverFechasDeSerie`). Fuera de una serie cada fecha se
+  // resuelve por su cuenta: no hay hermanas que la respalden.
+  const fechas = esSerie
+    ? resolverFechasDeSerie(
+        crudos.map((turno) => ({
+          fechaTexto: turno.fechaTexto.trim(),
+          diaSemanaTexto: turno.diaSemanaTexto,
+          anioProbable: turno.anioProbable ?? 0,
+        })),
+        ahora,
+      )
+    : crudos.map((turno) => resolverFechaSuelta(turno, ahora))
+
+  const normalizados = crudos.map((turno, indice) => normalizarTurnoCrudo(turno, fechas[indice]))
 
   if (crudo.relacion === "varios_turnos" && normalizados.length > 1) {
     return {
